@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, HttpUrl
 DownloadMode = Literal["video_subtitles", "video_only", "subtitles_only"]
 SubtitleSource = Literal["human", "auto", "both"]
 SubtitleFormat = Literal["best", "srt", "vtt"]
+JobBatchAction = Literal["pause", "restart", "delete"]
 
 
 class AnalyzeRequest(BaseModel):
@@ -71,6 +72,11 @@ class CreateJobRequest(BaseModel):
     options: DownloadOptions = Field(default_factory=DownloadOptions)
 
 
+class JobBatchActionRequest(BaseModel):
+    action: JobBatchAction
+    job_ids: list[str] = Field(min_length=1)
+
+
 class JobItemRead(BaseModel):
     id: str
     job_id: str
@@ -99,6 +105,11 @@ class JobRead(BaseModel):
     current_item_title: str | None = None
     error: str | None = None
     items: list[JobItemRead] = Field(default_factory=list)
+
+
+class JobBatchActionResponse(BaseModel):
+    affected_job_ids: list[str]
+    jobs: list[JobRead] = Field(default_factory=list)
 
 
 class SettingsRead(BaseModel):

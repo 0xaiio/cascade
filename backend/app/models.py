@@ -12,6 +12,7 @@ def utc_now() -> datetime:
 class JobStatus(StrEnum):
     queued = "queued"
     running = "running"
+    paused = "paused"
     succeeded = "succeeded"
     failed = "failed"
     cancelled = "cancelled"

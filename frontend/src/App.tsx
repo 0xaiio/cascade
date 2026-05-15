@@ -10,19 +10,24 @@ import {
   Gauge,
   ListVideo,
   Loader2,
+  Pause,
   RotateCcw,
   Search,
   Settings as SettingsIcon,
+  Trash2,
   XCircle
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   analyzeUrl,
-  cancelJob,
+  batchJobAction,
   createJob,
+  deleteJob,
   deleteCookies,
   getSettings,
   listJobs,
+  pauseJob,
+  restartJob,
   updateSettings,
   uploadCookies
 } from "./api";
@@ -31,6 +36,7 @@ import type {
   DownloadMode,
   DownloadOptions,
   Job,
+  JobBatchAction,
   Settings,
   SubtitleFormat,
   SubtitleSource
@@ -61,6 +67,7 @@ export default function App() {
   const [selectedItems, setSelectedItems] = useState<Set<number>>(new Set());
   const [settings, setSettings] = useState<Settings | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [selectedJobIds, setSelectedJobIds] = useState<Set<string>>(new Set());
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,6 +85,10 @@ export default function App() {
     };
     return () => source.close();
   }, []);
+
+  useEffect(() => {
+    setSelectedJobIds((current) => new Set(Array.from(current).filter((jobId) => jobs.some((job) => job.id === jobId))));
+  }, [jobs]);
 
   const subtitleLanguages = useMemo(() => {
     const human = analysis?.subtitles.map((item) => item.language) ?? [];
@@ -132,6 +143,47 @@ export default function App() {
     setOptions((current) => ({ ...current, [key]: value }));
   }
 
+  function updateJobInList(job: Job) {
+    setJobs((current) => current.map((item) => (item.id === job.id ? job : item)));
+  }
+
+  function toggleJobSelection(jobId: string) {
+    setSelectedJobIds((current) => {
+      const next = new Set(current);
+      if (next.has(jobId)) next.delete(jobId);
+      else next.add(jobId);
+      return next;
+    });
+  }
+
+  async function handlePauseJob(jobId: string) {
+    updateJobInList(await pauseJob(jobId));
+  }
+
+  async function handleRestartJob(jobId: string) {
+    updateJobInList(await restartJob(jobId));
+  }
+
+  async function handleDeleteJob(jobId: string) {
+    await deleteJob(jobId);
+    setJobs((current) => current.filter((job) => job.id !== jobId));
+  }
+
+  async function handleBatchAction(action: JobBatchAction) {
+    const jobIds = Array.from(selectedJobIds);
+    if (!jobIds.length) return;
+    const response = await batchJobAction(action, jobIds);
+    if (action === "delete") {
+      const deleted = new Set(response.affected_job_ids);
+      setJobs((current) => current.filter((job) => !deleted.has(job.id)));
+      setSelectedJobIds(new Set());
+      return;
+    }
+    setJobs((current) =>
+      current.map((job) => response.jobs.find((updatedJob) => updatedJob.id === job.id) ?? job)
+    );
+  }
+
   return (
     <main className="app-shell">
       <section className="workspace">
@@ -170,9 +222,15 @@ export default function App() {
                 setSelectedItems={setSelectedItems}
               />
             )}
-            <JobQueue jobs={jobs} onCancel={(jobId) => void cancelJob(jobId).then((job) => {
-              setJobs((current) => current.map((item) => (item.id === job.id ? job : item)));
-            })} />
+            <JobQueue
+              jobs={jobs}
+              selectedJobIds={selectedJobIds}
+              onBatchAction={(action) => void handleBatchAction(action).catch((err) => setError(err.message))}
+              onDelete={(jobId) => void handleDeleteJob(jobId).catch((err) => setError(err.message))}
+              onPause={(jobId) => void handlePauseJob(jobId).catch((err) => setError(err.message))}
+              onRestart={(jobId) => void handleRestartJob(jobId).catch((err) => setError(err.message))}
+              onToggleJobSelection={toggleJobSelection}
+            />
           </div>
 
           <aside className="side-column">
@@ -628,7 +686,25 @@ function CookieManager({ settings, onSettingsChange }: { settings: Settings; onS
   );
 }
 
-function JobQueue({ jobs, onCancel }: { jobs: Job[]; onCancel: (jobId: string) => void }) {
+function JobQueue({
+  jobs,
+  selectedJobIds,
+  onBatchAction,
+  onDelete,
+  onPause,
+  onRestart,
+  onToggleJobSelection
+}: {
+  jobs: Job[];
+  selectedJobIds: Set<string>;
+  onBatchAction: (action: JobBatchAction) => void;
+  onDelete: (jobId: string) => void;
+  onPause: (jobId: string) => void;
+  onRestart: (jobId: string) => void;
+  onToggleJobSelection: (jobId: string) => void;
+}) {
+  const selectedCount = selectedJobIds.size;
+
   return (
     <section className="panel">
       <div className="panel-title">
@@ -638,19 +714,55 @@ function JobQueue({ jobs, onCancel }: { jobs: Job[]; onCancel: (jobId: string) =
           <p>{jobs.length ? `${jobs.length} 个任务` : "暂无任务"}</p>
         </div>
       </div>
+      {selectedCount > 0 && (
+        <div className="batch-toolbar" aria-label="批量任务操作">
+          <span>{selectedCount} 个已选择</span>
+          <button type="button" className="ghost-button" onClick={() => onBatchAction("pause")}>
+            <Pause size={16} />
+            批量暂停
+          </button>
+          <button type="button" className="ghost-button" onClick={() => onBatchAction("restart")}>
+            <RotateCcw size={16} />
+            批量重启
+          </button>
+          <button type="button" className="ghost-button danger" onClick={() => onBatchAction("delete")}>
+            <Trash2 size={16} />
+            批量删除
+          </button>
+        </div>
+      )}
       <div className="job-list">
-        {jobs.map((job) => (
+        {jobs.map((job) => {
+          const title = job.title || "未命名任务";
+          return (
           <article key={job.id} className="job-card">
             <div className="job-row">
-              <div>
-                <h3>{job.title}</h3>
+              <input
+                aria-label={`选择任务 ${title}`}
+                className="job-select"
+                type="checkbox"
+                checked={selectedJobIds.has(job.id)}
+                onChange={() => onToggleJobSelection(job.id)}
+              />
+              <div className="job-main">
+                <h3>{title}</h3>
                 <p>{job.status} · {job.completed_items}/{job.total_items} 完成{job.error ? ` · ${job.error}` : ""}</p>
               </div>
-              {["queued", "running"].includes(job.status) && (
-                <button className="icon-button" type="button" aria-label={`取消 ${job.title}`} onClick={() => onCancel(job.id)}>
-                  <XCircle size={18} />
+              <div className="job-actions">
+                {["queued", "running"].includes(job.status) && (
+                  <button className="icon-button" type="button" title="暂停" aria-label={`暂停 ${title}`} onClick={() => onPause(job.id)}>
+                    <Pause size={18} />
+                  </button>
+                )}
+                {job.status !== "running" && (
+                  <button className="icon-button" type="button" title="重启" aria-label={`重启 ${title}`} onClick={() => onRestart(job.id)}>
+                    <RotateCcw size={18} />
+                  </button>
+                )}
+                <button className="icon-button danger" type="button" title="删除" aria-label={`删除 ${title}`} onClick={() => onDelete(job.id)}>
+                  <Trash2 size={18} />
                 </button>
-              )}
+              </div>
             </div>
             <div className="progress-bar">
               <span style={{ width: `${Math.max(0, Math.min(100, job.progress))}%` }} />
@@ -663,7 +775,8 @@ function JobQueue({ jobs, onCancel }: { jobs: Job[]; onCancel: (jobId: string) =
               </div>
             )}
           </article>
-        ))}
+          );
+        })}
       </div>
     </section>
   );

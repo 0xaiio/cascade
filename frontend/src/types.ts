@@ -1,6 +1,7 @@
 export type DownloadMode = "video_subtitles" | "video_only" | "subtitles_only";
 export type SubtitleSource = "human" | "auto" | "both";
 export type SubtitleFormat = "best" | "srt" | "vtt";
+export type JobBatchAction = "pause" | "restart" | "delete";
 
 export interface FormatOption {
   format_id: string;
@@ -83,6 +84,11 @@ export interface Job {
   current_item_title: string | null;
   error: string | null;
   items: JobItem[];
+}
+
+export interface JobBatchActionResponse {
+  affected_job_ids: string[];
+  jobs: Job[];
 }
 
 export interface Settings {

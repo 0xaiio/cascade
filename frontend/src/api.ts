@@ -1,4 +1,4 @@
-import type { AnalyzeResponse, DownloadOptions, Job, Settings } from "./types";
+import type { AnalyzeResponse, DownloadOptions, Job, JobBatchAction, JobBatchActionResponse, Settings } from "./types";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -8,6 +8,9 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
     throw new Error(payload?.detail ?? `Request failed with ${response.status}`);
+  }
+  if (response.status === 204) {
+    return undefined as T;
   }
   return response.json() as Promise<T>;
 }
@@ -43,6 +46,25 @@ export function createJob(url: string, options: DownloadOptions): Promise<Job> {
 
 export function cancelJob(jobId: string): Promise<Job> {
   return request<Job>(`/api/jobs/${jobId}/cancel`, { method: "POST" });
+}
+
+export function pauseJob(jobId: string): Promise<Job> {
+  return request<Job>(`/api/jobs/${jobId}/pause`, { method: "POST" });
+}
+
+export function restartJob(jobId: string): Promise<Job> {
+  return request<Job>(`/api/jobs/${jobId}/restart`, { method: "POST" });
+}
+
+export function deleteJob(jobId: string): Promise<void> {
+  return request<void>(`/api/jobs/${jobId}`, { method: "DELETE" });
+}
+
+export function batchJobAction(action: JobBatchAction, jobIds: string[]): Promise<JobBatchActionResponse> {
+  return request<JobBatchActionResponse>("/api/jobs/batch", {
+    method: "POST",
+    body: JSON.stringify({ action, job_ids: jobIds })
+  });
 }
 
 export function uploadCookies(file: File): Promise<{ enabled: boolean; filename: string | null }> {

@@ -1,9 +1,12 @@
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from sqlmodel import Session
 
 from app.config import AppSettings
+from app.db import create_app_engine
 from app.main import create_app
+from app.models import Job, JobItem
 from app.schemas import AnalyzeResponse, FormatOption, SubtitleOption, VideoEntry
 
 
@@ -54,14 +57,44 @@ class FakeYtDlpService:
         progress_hook({"status": "finished", "filename": f"{url}.mp4"})
 
 
-def make_client(tmp_path: Path):
-    settings = AppSettings(
+def make_settings(tmp_path: Path) -> AppSettings:
+    return AppSettings(
         data_dir=tmp_path / "data",
         download_dir=tmp_path / "downloads",
         database_path=tmp_path / "data" / "app.sqlite3",
         default_concurrency=1,
     )
-    return TestClient(create_app(settings=settings, ytdlp_service=FakeYtDlpService()))
+
+
+def make_client(tmp_path: Path, service=None):
+    settings = make_settings(tmp_path)
+    return TestClient(create_app(settings=settings, ytdlp_service=service or FakeYtDlpService()))
+
+
+def seed_job(tmp_path: Path, job_id: str, status: str = "queued") -> None:
+    engine = create_app_engine(make_settings(tmp_path))
+    with Session(engine) as session:
+        session.add(
+            Job(
+                id=job_id,
+                url=f"https://youtu.be/{job_id}",
+                title=f"Job {job_id}",
+                status=status,
+                options_json="{}",
+                total_items=1,
+            )
+        )
+        session.add(
+            JobItem(
+                id=f"{job_id}-item",
+                job_id=job_id,
+                source_url=f"https://youtu.be/{job_id}",
+                title=f"Item {job_id}",
+                index=1,
+                status=status,
+            )
+        )
+        session.commit()
 
 
 def test_analyze_returns_video_metadata(tmp_path: Path) -> None:
@@ -129,3 +162,56 @@ def test_diagnostics_returns_runtime_and_cookie_status(tmp_path: Path) -> None:
     assert payload["cookies_enabled"] is False
     assert payload["dependencies"]["ffmpeg"] is True
     assert payload["dependencies"]["js_runtime_name"] == "node"
+
+
+def test_job_can_be_paused_restarted_and_deleted(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    job_id = "job-single"
+    seed_job(tmp_path, job_id)
+
+    pause_response = client.post(f"/api/jobs/{job_id}/pause")
+    assert pause_response.status_code == 200
+    paused = client.get(f"/api/jobs/{job_id}").json()
+    assert paused["status"] == "paused"
+    assert paused["items"][0]["status"] == "paused"
+
+    restart_response = client.post(f"/api/jobs/{job_id}/restart")
+    assert restart_response.status_code == 200
+    assert restart_response.json()["status"] == "queued"
+
+    delete_response = client.delete(f"/api/jobs/{job_id}")
+    assert delete_response.status_code == 204
+    assert client.get(f"/api/jobs/{job_id}").status_code == 404
+
+
+def test_batch_job_actions_pause_restart_and_delete_multiple_jobs(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    first_id = "job-first"
+    second_id = "job-second"
+    seed_job(tmp_path, first_id)
+    seed_job(tmp_path, second_id)
+
+    pause_response = client.post(
+        "/api/jobs/batch",
+        json={"action": "pause", "job_ids": [first_id, second_id]},
+    )
+    assert pause_response.status_code == 200
+    assert set(pause_response.json()["affected_job_ids"]) == {first_id, second_id}
+    assert client.get(f"/api/jobs/{first_id}").json()["status"] == "paused"
+    assert client.get(f"/api/jobs/{second_id}").json()["status"] == "paused"
+
+    restart_response = client.post(
+        "/api/jobs/batch",
+        json={"action": "restart", "job_ids": [first_id, second_id]},
+    )
+    assert restart_response.status_code == 200
+    assert set(restart_response.json()["affected_job_ids"]) == {first_id, second_id}
+
+    delete_response = client.post(
+        "/api/jobs/batch",
+        json={"action": "delete", "job_ids": [first_id, second_id]},
+    )
+    assert delete_response.status_code == 200
+    assert set(delete_response.json()["affected_job_ids"]) == {first_id, second_id}
+    assert client.get(f"/api/jobs/{first_id}").status_code == 404
+    assert client.get(f"/api/jobs/{second_id}").status_code == 404

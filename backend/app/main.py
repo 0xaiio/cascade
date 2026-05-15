@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -19,6 +19,8 @@ from .schemas import (
     CookieStatus,
     CreateJobRequest,
     DiagnosticsRead,
+    JobBatchActionRequest,
+    JobBatchActionResponse,
     JobItemRead,
     JobRead,
     SettingsRead,
@@ -120,6 +122,29 @@ def create_app(settings: AppSettings | None = None, ytdlp_service: YtDlpService 
         jobs = session.exec(select(Job).order_by(Job.created_at.desc())).all()
         return [_read_job(session, job.id) for job in jobs]
 
+    @app.post("/api/jobs/batch", response_model=JobBatchActionResponse)
+    async def batch_job_action(request: JobBatchActionRequest, session: SessionDep) -> JobBatchActionResponse:
+        affected: list[str] = []
+        for job_id in request.job_ids:
+            if not session.get(Job, job_id):
+                continue
+            if request.action == "pause":
+                await manager.pause(job_id)
+            elif request.action == "restart":
+                await manager.restart(job_id)
+            else:
+                await manager.delete(job_id)
+            affected.append(job_id)
+
+        if not affected:
+            raise HTTPException(status_code=404, detail="No matching jobs found.")
+
+        if request.action == "delete":
+            return JobBatchActionResponse(affected_job_ids=affected, jobs=[])
+
+        session.expire_all()
+        return JobBatchActionResponse(affected_job_ids=affected, jobs=[_read_job(session, job_id) for job_id in affected])
+
     @app.get("/api/jobs/{job_id}", response_model=JobRead)
     def get_job(job_id: str, session: SessionDep) -> JobRead:
         return _read_job(session, job_id)
@@ -130,6 +155,29 @@ def create_app(settings: AppSettings | None = None, ytdlp_service: YtDlpService 
             raise HTTPException(status_code=404, detail="Job not found.")
         await manager.cancel(job_id)
         return _read_job(session, job_id)
+
+    @app.post("/api/jobs/{job_id}/pause", response_model=JobRead)
+    async def pause_job(job_id: str, session: SessionDep) -> JobRead:
+        if not session.get(Job, job_id):
+            raise HTTPException(status_code=404, detail="Job not found.")
+        await manager.pause(job_id)
+        session.expire_all()
+        return _read_job(session, job_id)
+
+    @app.post("/api/jobs/{job_id}/restart", response_model=JobRead)
+    async def restart_job(job_id: str, session: SessionDep) -> JobRead:
+        if not session.get(Job, job_id):
+            raise HTTPException(status_code=404, detail="Job not found.")
+        await manager.restart(job_id)
+        session.expire_all()
+        return _read_job(session, job_id)
+
+    @app.delete("/api/jobs/{job_id}", status_code=204)
+    async def delete_job(job_id: str, session: SessionDep) -> Response:
+        if not session.get(Job, job_id):
+            raise HTTPException(status_code=404, detail="Job not found.")
+        await manager.delete(job_id)
+        return Response(status_code=204)
 
     @app.get("/api/events")
     async def events() -> StreamingResponse:

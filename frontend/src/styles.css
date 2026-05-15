@@ -429,10 +429,45 @@ th {
 
 .job-row {
   justify-content: space-between;
+  align-items: flex-start;
 }
 
 .job-card h3 {
   font-size: 15px;
+}
+
+.job-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.job-main h3,
+.job-main p {
+  overflow-wrap: anywhere;
+}
+
+.job-select {
+  width: auto;
+  margin: 8px 0 0;
+}
+
+.job-actions,
+.batch-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.batch-toolbar {
+  margin-top: 16px;
+  padding: 10px;
+  border: 1px solid #e1e7f1;
+  border-radius: 8px;
+  background: #f8fbff;
+  color: #48556a;
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .icon-button {
@@ -440,6 +475,11 @@ th {
   min-height: 36px;
   border-color: #d5ddeb;
   background: white;
+  color: #31506f;
+}
+
+.icon-button.danger,
+.ghost-button.danger {
   color: #b24c38;
 }
 

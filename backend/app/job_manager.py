@@ -23,6 +23,8 @@ class JobManager:
         self._queue: asyncio.Queue[str] | None = None
         self._workers: list[asyncio.Task[None]] = []
         self._cancelled: set[str] = set()
+        self._paused: set[str] = set()
+        self._deleted: set[str] = set()
         self._loop: asyncio.AbstractEventLoop | None = None
 
     async def start(self) -> None:
@@ -57,6 +59,76 @@ class JobManager:
                 session.commit()
         await self._publish({"type": "job_cancel_requested", "job_id": job_id})
 
+    async def pause(self, job_id: str) -> None:
+        self._paused.add(job_id)
+        self._cancelled.discard(job_id)
+        with Session(self.engine) as session:
+            job = session.get(Job, job_id)
+            if not job:
+                return
+            job.status = JobStatus.paused.value
+            job.current_item_title = None
+            job.updated_at = utc_now()
+            session.add(job)
+            items = session.exec(select(JobItem).where(JobItem.job_id == job_id)).all()
+            for item in items:
+                if item.status in {JobStatus.queued.value, JobStatus.running.value}:
+                    item.status = JobStatus.paused.value
+                    item.error = None
+                    item.updated_at = utc_now()
+                    session.add(item)
+            session.commit()
+        await self._publish({"type": "job_paused", "job_id": job_id})
+
+    async def restart(self, job_id: str) -> None:
+        self._paused.discard(job_id)
+        self._cancelled.discard(job_id)
+        self._deleted.discard(job_id)
+        with Session(self.engine) as session:
+            job = session.get(Job, job_id)
+            if not job:
+                return
+            job.status = JobStatus.queued.value
+            job.progress = 0.0
+            job.completed_items = 0
+            job.failed_items = 0
+            job.current_item_title = None
+            job.error = None
+            job.updated_at = utc_now()
+            session.add(job)
+            items = session.exec(select(JobItem).where(JobItem.job_id == job_id)).all()
+            for item in items:
+                item.status = JobStatus.queued.value
+                item.progress = 0.0
+                item.downloaded_bytes = None
+                item.total_bytes = None
+                item.speed = None
+                item.eta = None
+                item.output_path = None
+                item.error = None
+                item.updated_at = utc_now()
+                session.add(item)
+            session.commit()
+        await self.start()
+        await self._publish({"type": "job_restarted", "job_id": job_id})
+        assert self._queue is not None
+        self._queue.put_nowait(job_id)
+
+    async def delete(self, job_id: str) -> None:
+        self._deleted.add(job_id)
+        self._paused.discard(job_id)
+        self._cancelled.add(job_id)
+        with Session(self.engine) as session:
+            for event in session.exec(select(JobEvent).where(JobEvent.job_id == job_id)).all():
+                session.delete(event)
+            for item in session.exec(select(JobItem).where(JobItem.job_id == job_id)).all():
+                session.delete(item)
+            job = session.get(Job, job_id)
+            if job:
+                session.delete(job)
+            session.commit()
+        await self.broker.publish({"type": "job_deleted", "job_id": job_id})
+
     async def _worker(self, worker_index: int) -> None:
         assert self._queue is not None
         while True:
@@ -71,6 +143,11 @@ class JobManager:
             job = session.get(Job, job_id)
             if not job:
                 return
+            if job_id in self._deleted:
+                return
+            if job_id in self._paused:
+                self._mark_job_paused(session, job)
+                return
             if job_id in self._cancelled:
                 self._mark_job_cancelled(session, job)
                 return
@@ -83,6 +160,14 @@ class JobManager:
             items = session.exec(select(JobItem).where(JobItem.job_id == job_id).order_by(JobItem.index)).all()
             options = DownloadOptions.model_validate(json.loads(job.options_json))
             for item in items:
+                if job_id in self._deleted:
+                    return
+                if job_id in self._paused:
+                    item.status = JobStatus.paused.value
+                    item.updated_at = utc_now()
+                    session.add(item)
+                    session.commit()
+                    break
                 if job_id in self._cancelled:
                     item.status = JobStatus.cancelled.value
                     item.updated_at = utc_now()
@@ -105,6 +190,8 @@ class JobManager:
         self._publish_threadsafe({"type": "item_started", "job_id": job.id, "item_id": item.id, "title": item.title})
 
         def progress_hook(payload: dict[str, Any]) -> None:
+            if job.id in self._deleted:
+                return
             with Session(self.engine) as hook_session:
                 hook_item = hook_session.get(JobItem, item.id)
                 hook_job = hook_session.get(Job, job.id)
@@ -146,12 +233,18 @@ class JobManager:
                 item.source_url,
                 options,
                 progress_hook,
-                should_cancel=lambda: job.id in self._cancelled,
+                should_cancel=lambda: job.id in self._cancelled or job.id in self._paused or job.id in self._deleted,
                 cookies_path=self._cookies_path(),
             )
         except DownloadCancelled:
-            item.status = JobStatus.cancelled.value
-            item.error = "Cancelled"
+            if job.id in self._paused:
+                item.status = JobStatus.paused.value
+                item.error = None
+            elif job.id in self._deleted:
+                return
+            else:
+                item.status = JobStatus.cancelled.value
+                item.error = "Cancelled"
         except Exception as exc:
             item.status = JobStatus.failed.value
             item.error = str(exc)
@@ -159,6 +252,8 @@ class JobManager:
             item.status = JobStatus.succeeded.value
             item.progress = 100.0
         finally:
+            if job.id in self._deleted:
+                return
             item.updated_at = utc_now()
             session.add(item)
             session.commit()
@@ -174,8 +269,13 @@ class JobManager:
             )
 
     def _finish_job(self, session: Session, job: Job) -> None:
+        if job.id in self._deleted:
+            return
         self._refresh_job_counts(session, job)
-        if job.id in self._cancelled:
+        if job.id in self._paused:
+            job.status = JobStatus.paused.value
+            job.error = None
+        elif job.id in self._cancelled:
             job.status = JobStatus.cancelled.value
         elif job.failed_items:
             job.status = JobStatus.failed.value
@@ -195,6 +295,14 @@ class JobManager:
         session.add(job)
         session.commit()
         self._publish_threadsafe({"type": "job_finished", "job_id": job.id, "status": job.status})
+
+    def _mark_job_paused(self, session: Session, job: Job) -> None:
+        job.status = JobStatus.paused.value
+        job.current_item_title = None
+        job.updated_at = utc_now()
+        session.add(job)
+        session.commit()
+        self._publish_threadsafe({"type": "job_paused", "job_id": job.id, "status": job.status})
 
     def _refresh_job_counts(self, session: Session, job: Job) -> None:
         items = session.exec(select(JobItem).where(JobItem.job_id == job.id)).all()

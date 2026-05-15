@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import App from "./App";
@@ -17,6 +17,45 @@ const analyzePayload = {
   subtitles: [{ language: "en", name: null, formats: ["vtt"] }],
   automatic_subtitles: [{ language: "zh-Hans", name: null, formats: ["vtt"] }],
   ffmpeg: { ffmpeg: true, ffprobe: true }
+};
+
+const jobPayload = {
+  id: "job-running",
+  url: "https://youtu.be/running",
+  title: "Running video",
+  status: "running",
+  progress: 34,
+  total_items: 1,
+  completed_items: 0,
+  failed_items: 0,
+  current_item_title: "Running video",
+  error: null,
+  items: [
+    {
+      id: "item-running",
+      job_id: "job-running",
+      source_url: "https://youtu.be/running",
+      title: "Running video",
+      index: 1,
+      status: "running",
+      progress: 34,
+      downloaded_bytes: 34,
+      total_bytes: 100,
+      speed: 2048,
+      eta: 10,
+      output_path: null,
+      error: null
+    }
+  ]
+};
+
+const pausedJobPayload = {
+  ...jobPayload,
+  id: "job-paused",
+  title: "Paused video",
+  status: "paused",
+  progress: 34,
+  items: [{ ...jobPayload.items[0], id: "item-paused", job_id: "job-paused", title: "Paused video", status: "paused" }]
 };
 
 describe("App", () => {
@@ -45,7 +84,19 @@ describe("App", () => {
           if (init?.method === "POST") {
             return Response.json({ id: "job-1", status: "queued", total_items: 1, items: [] }, { status: 201 });
           }
-          return Response.json([]);
+          return Response.json([jobPayload, pausedJobPayload]);
+        }
+        if (url.endsWith("/api/jobs/batch")) {
+          return Response.json({ affected_job_ids: ["job-running", "job-paused"], jobs: [] });
+        }
+        if (url.endsWith("/api/jobs/job-running/pause")) {
+          return Response.json({ ...jobPayload, status: "paused" });
+        }
+        if (url.endsWith("/api/jobs/job-paused/restart")) {
+          return Response.json({ ...pausedJobPayload, status: "queued" });
+        }
+        if (url.endsWith("/api/jobs/job-running") && init?.method === "DELETE") {
+          return new Response(null, { status: 204 });
         }
         if (url.endsWith("/api/analyze")) {
           return Response.json(analyzePayload);
@@ -56,6 +107,8 @@ describe("App", () => {
   });
 
   afterEach(() => {
+    cleanup();
+    localStorage.clear();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -101,5 +154,32 @@ describe("App", () => {
       String((fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1]?.body)
     );
     expect(submittedBody.options.subtitle_languages).toEqual(expect.arrayContaining(["en", "zh-Hans"]));
+  });
+
+  test("controls single and batch jobs from task center", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    expect(await screen.findByText("Running video")).toBeInTheDocument();
+    expect(screen.getAllByText("Paused video").length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole("button", { name: "暂停 Running video" }));
+    await user.click(screen.getByRole("button", { name: "重启 Paused video" }));
+
+    await user.click(screen.getByLabelText("选择任务 Running video"));
+    await user.click(screen.getByLabelText("选择任务 Paused video"));
+    await user.click(screen.getByRole("button", { name: "批量暂停" }));
+    await user.click(screen.getByRole("button", { name: "删除 Running video" }));
+
+    expect(fetch).toHaveBeenCalledWith("/api/jobs/job-running/pause", expect.objectContaining({ method: "POST" }));
+    expect(fetch).toHaveBeenCalledWith("/api/jobs/job-paused/restart", expect.objectContaining({ method: "POST" }));
+    expect(fetch).toHaveBeenCalledWith("/api/jobs/job-running", expect.objectContaining({ method: "DELETE" }));
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/jobs/batch",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ action: "pause", job_ids: ["job-running", "job-paused"] })
+      })
+    );
   });
 });
