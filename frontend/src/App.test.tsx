@@ -74,6 +74,13 @@ describe("App", () => {
     await user.click(screen.getByLabelText("选择 One"));
     await user.selectOptions(screen.getByLabelText("下载模式"), "subtitles_only");
     await user.selectOptions(screen.getByLabelText("分辨率"), "720p");
+    await user.click(screen.getByRole("button", { name: /选择字幕语言/ }));
+    const search = screen.getByLabelText("搜索字幕语言");
+    await user.type(search, "zh");
+    expect(screen.queryByLabelText("字幕 en")).not.toBeInTheDocument();
+    await user.click(screen.getByLabelText("字幕 zh-Hans"));
+    await user.clear(search);
+    await user.type(search, "en");
     await user.click(screen.getByLabelText("字幕 en"));
     await user.click(screen.getByRole("button", { name: "加入下载队列" }));
 
@@ -90,5 +97,9 @@ describe("App", () => {
     expect(String((fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1]?.body)).toContain(
       '"mode":"subtitles_only"'
     );
+    const submittedBody = JSON.parse(
+      String((fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1]?.body)
+    );
+    expect(submittedBody.options.subtitle_languages).toEqual(expect.arrayContaining(["en", "zh-Hans"]));
   });
 });

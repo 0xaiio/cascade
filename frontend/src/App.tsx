@@ -2,6 +2,7 @@ import {
   Bell,
   Captions,
   CheckCircle2,
+  ChevronDown,
   Cookie,
   Download,
   FileText,
@@ -10,6 +11,7 @@ import {
   ListVideo,
   Loader2,
   RotateCcw,
+  Search,
   Settings as SettingsIcon,
   XCircle
 } from "lucide-react";
@@ -384,31 +386,11 @@ function DownloadOptionsPanel({
         </select>
       </label>
 
-      <div className="field">
-        <span>字幕语言</span>
-        <div className="language-grid">
-          {subtitleLanguages.length ? (
-            subtitleLanguages.map((language) => (
-              <label key={language} className="check-row">
-                <input
-                  aria-label={`字幕 ${language}`}
-                  type="checkbox"
-                  checked={options.subtitle_languages.includes(language)}
-                  onChange={() => {
-                    const next = new Set(options.subtitle_languages);
-                    if (next.has(language)) next.delete(language);
-                    else next.add(language);
-                    onOptionChange("subtitle_languages", Array.from(next));
-                  }}
-                />
-                {language}
-              </label>
-            ))
-          ) : (
-            <span className="hint">解析后显示可用字幕</span>
-          )}
-        </div>
-      </div>
+      <SearchableLanguageSelect
+        languages={subtitleLanguages}
+        selectedLanguages={options.subtitle_languages}
+        onChange={(languages) => onOptionChange("subtitle_languages", languages)}
+      />
 
       <div className="two-col">
         <label className="field">
@@ -469,6 +451,75 @@ function DownloadOptionsPanel({
         加入下载队列
       </button>
     </section>
+  );
+}
+
+function SearchableLanguageSelect({
+  languages,
+  selectedLanguages,
+  onChange
+}: {
+  languages: string[];
+  selectedLanguages: string[];
+  onChange: (languages: string[]) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const filteredLanguages = languages.filter((language) => language.toLowerCase().includes(query.trim().toLowerCase()));
+  const selectedSet = new Set(selectedLanguages);
+  const summary = selectedLanguages.length ? `已选 ${selectedLanguages.length} 项：${selectedLanguages.join(", ")}` : "选择字幕语言";
+
+  function toggleLanguage(language: string) {
+    const next = new Set(selectedLanguages);
+    if (next.has(language)) next.delete(language);
+    else next.add(language);
+    onChange(Array.from(next));
+  }
+
+  return (
+    <div className="field language-select">
+      <span>字幕语言</span>
+      <button
+        type="button"
+        className="select-trigger"
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen((current) => !current)}
+      >
+        <span>{summary}</span>
+        <ChevronDown size={17} />
+      </button>
+      {isOpen && (
+        <div className="language-dropdown">
+          <label className="search-field">
+            <Search size={16} />
+            <input
+              aria-label="搜索字幕语言"
+              placeholder="搜索字幕语言"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </label>
+          <div className="language-options" role="listbox" aria-label="字幕语言列表" aria-multiselectable="true">
+            {filteredLanguages.length ? (
+              filteredLanguages.map((language) => (
+                <label key={language} className="language-option">
+                  <input
+                    aria-label={`字幕 ${language}`}
+                    type="checkbox"
+                    checked={selectedSet.has(language)}
+                    onChange={() => toggleLanguage(language)}
+                  />
+                  <span>{language}</span>
+                </label>
+              ))
+            ) : (
+              <p className="empty-option">没有匹配的字幕语言</p>
+            )}
+          </div>
+        </div>
+      )}
+      {!languages.length && <span className="hint">解析后显示可用字幕</span>}
+    </div>
   );
 }
 
