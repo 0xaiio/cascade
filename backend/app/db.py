@@ -1,6 +1,7 @@
 from collections.abc import Generator
 
 from sqlalchemy.engine import Engine
+from sqlalchemy import text
 from sqlmodel import Session, SQLModel, create_engine
 
 from .config import AppSettings
@@ -14,6 +15,28 @@ def create_app_engine(settings: AppSettings) -> Engine:
 
 def init_db(engine: Engine) -> None:
     SQLModel.metadata.create_all(engine)
+    _ensure_columns(engine)
+
+
+def _ensure_columns(engine: Engine) -> None:
+    additions = {
+        "job": {
+            "speed": "FLOAT",
+            "eta": "INTEGER",
+            "started_at": "DATETIME",
+            "finished_at": "DATETIME",
+        },
+        "jobitem": {
+            "started_at": "DATETIME",
+            "finished_at": "DATETIME",
+        },
+    }
+    with engine.begin() as connection:
+        for table_name, columns in additions.items():
+            existing = {row[1] for row in connection.execute(text(f"PRAGMA table_info({table_name})"))}
+            for column_name, column_type in columns.items():
+                if column_name not in existing:
+                    connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"))
 
 
 def session_dependency(engine: Engine):

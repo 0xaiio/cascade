@@ -70,6 +70,11 @@ export interface JobItem {
   eta: number | null;
   output_path: string | null;
   error: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  elapsed_seconds: number;
 }
 
 export interface Job {
@@ -78,11 +83,18 @@ export interface Job {
   title: string;
   status: string;
   progress: number;
+  speed: number | null;
+  eta: number | null;
   total_items: number;
   completed_items: number;
   failed_items: number;
   current_item_title: string | null;
   error: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  elapsed_seconds: number;
   items: JobItem[];
 }
 

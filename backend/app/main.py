@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -264,11 +265,18 @@ def _read_job(session: Session, job_id: str) -> JobRead:
         title=job.title,
         status=job.status,
         progress=job.progress,
+        speed=job.speed,
+        eta=job.eta,
         total_items=job.total_items,
         completed_items=job.completed_items,
         failed_items=job.failed_items,
         current_item_title=job.current_item_title,
         error=job.error,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+        started_at=job.started_at,
+        finished_at=job.finished_at,
+        elapsed_seconds=_elapsed_seconds(job.started_at, job.finished_at),
         items=[
             JobItemRead(
                 id=item.id,
@@ -284,10 +292,29 @@ def _read_job(session: Session, job_id: str) -> JobRead:
                 eta=item.eta,
                 output_path=item.output_path,
                 error=item.error,
+                created_at=item.created_at,
+                updated_at=item.updated_at,
+                started_at=item.started_at,
+                finished_at=item.finished_at,
+                elapsed_seconds=_elapsed_seconds(item.started_at, item.finished_at),
             )
             for item in items
         ],
     )
+
+
+def _elapsed_seconds(started_at: datetime | None, finished_at: datetime | None) -> int:
+    if not started_at:
+        return 0
+    start = _as_aware_utc(started_at)
+    finish = _as_aware_utc(finished_at) if finished_at else utc_now()
+    return max(0, int((finish - start).total_seconds()))
+
+
+def _as_aware_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def _set_setting(session: Session, key: str, value: str) -> None:

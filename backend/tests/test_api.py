@@ -164,6 +164,20 @@ def test_diagnostics_returns_runtime_and_cookie_status(tmp_path: Path) -> None:
     assert payload["dependencies"]["js_runtime_name"] == "node"
 
 
+def test_job_read_includes_realtime_progress_fields(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    seed_job(tmp_path, "job-progress", status="running")
+
+    response = client.get("/api/jobs/job-progress")
+
+    assert response.status_code == 200
+    payload = response.json()
+    for field in ["created_at", "updated_at", "started_at", "finished_at", "elapsed_seconds", "eta", "speed"]:
+        assert field in payload
+    for field in ["created_at", "updated_at", "started_at", "finished_at", "elapsed_seconds"]:
+        assert field in payload["items"][0]
+
+
 def test_job_can_be_paused_restarted_and_deleted(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     job_id = "job-single"

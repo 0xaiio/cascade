@@ -25,6 +25,13 @@ const jobPayload = {
   title: "Running video",
   status: "running",
   progress: 34,
+  created_at: "2026-05-15T10:00:00Z",
+  updated_at: "2026-05-15T10:00:42Z",
+  started_at: "2026-05-15T10:00:00Z",
+  finished_at: null,
+  elapsed_seconds: 42,
+  speed: 2048,
+  eta: 10,
   total_items: 1,
   completed_items: 0,
   failed_items: 0,
@@ -39,6 +46,11 @@ const jobPayload = {
       index: 1,
       status: "running",
       progress: 34,
+      created_at: "2026-05-15T10:00:00Z",
+      updated_at: "2026-05-15T10:00:42Z",
+      started_at: "2026-05-15T10:00:00Z",
+      finished_at: null,
+      elapsed_seconds: 42,
       downloaded_bytes: 34,
       total_bytes: 100,
       speed: 2048,
@@ -181,5 +193,14 @@ describe("App", () => {
         body: JSON.stringify({ action: "pause", job_ids: ["job-running", "job-paused"] })
       })
     );
+  });
+
+  test("shows live progress percentage elapsed time and eta in task center", async () => {
+    render(<App />);
+
+    expect((await screen.findAllByText("34.0%")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("已用 00:42").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("剩余 00:10").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("2.0 KB/s").length).toBeGreaterThan(0);
   });
 });

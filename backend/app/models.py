@@ -36,6 +36,8 @@ class Job(SQLModel, table=True):
     status: str = Field(default=JobStatus.queued.value, index=True)
     options_json: str
     progress: float = 0.0
+    speed: Optional[float] = None
+    eta: Optional[int] = None
     total_items: int = 0
     completed_items: int = 0
     failed_items: int = 0
@@ -43,6 +45,8 @@ class Job(SQLModel, table=True):
     error: Optional[str] = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
 
 
 class JobItem(SQLModel, table=True):
@@ -61,6 +65,8 @@ class JobItem(SQLModel, table=True):
     error: Optional[str] = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
 
 
 class JobEvent(SQLModel, table=True):

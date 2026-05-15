@@ -764,6 +764,12 @@ function JobQueue({
                 </button>
               </div>
             </div>
+            <div className="job-metrics">
+              <span>{formatPercent(job.progress)}</span>
+              <span>已用 {formatClock(job.elapsed_seconds)}</span>
+              <span>剩余 {formatClock(job.eta)}</span>
+              {job.speed ? <span>{formatBytesPerSecond(job.speed)}</span> : <span>-- KB/s</span>}
+            </div>
             <div className="progress-bar">
               <span style={{ width: `${Math.max(0, Math.min(100, job.progress))}%` }} />
             </div>
@@ -787,4 +793,23 @@ function formatDuration(seconds: number | null): string {
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60).toString().padStart(2, "0");
   return `${mins}:${secs}`;
+}
+
+function formatPercent(value: number | null | undefined): string {
+  return `${Math.max(0, Math.min(100, value ?? 0)).toFixed(1)}%`;
+}
+
+function formatClock(seconds: number | null | undefined): string {
+  const safeSeconds = Math.max(0, Math.floor(seconds ?? 0));
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60).toString().padStart(2, "0");
+  const secs = Math.floor(safeSeconds % 60).toString().padStart(2, "0");
+  return hours ? `${hours}:${minutes}:${secs}` : `${minutes}:${secs}`;
+}
+
+function formatBytesPerSecond(bytes: number): string {
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB/s`;
+  }
+  return `${(bytes / 1024).toFixed(1)} KB/s`;
 }

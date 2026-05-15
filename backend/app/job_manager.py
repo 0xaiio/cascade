@@ -68,6 +68,9 @@ class JobManager:
                 return
             job.status = JobStatus.paused.value
             job.current_item_title = None
+            job.speed = None
+            job.eta = None
+            job.finished_at = None
             job.updated_at = utc_now()
             session.add(job)
             items = session.exec(select(JobItem).where(JobItem.job_id == job_id)).all()
@@ -90,10 +93,14 @@ class JobManager:
                 return
             job.status = JobStatus.queued.value
             job.progress = 0.0
+            job.speed = None
+            job.eta = None
             job.completed_items = 0
             job.failed_items = 0
             job.current_item_title = None
             job.error = None
+            job.started_at = None
+            job.finished_at = None
             job.updated_at = utc_now()
             session.add(job)
             items = session.exec(select(JobItem).where(JobItem.job_id == job_id)).all()
@@ -106,6 +113,8 @@ class JobManager:
                 item.eta = None
                 item.output_path = None
                 item.error = None
+                item.started_at = None
+                item.finished_at = None
                 item.updated_at = utc_now()
                 session.add(item)
             session.commit()
@@ -151,8 +160,11 @@ class JobManager:
             if job_id in self._cancelled:
                 self._mark_job_cancelled(session, job)
                 return
+            now = utc_now()
             job.status = JobStatus.running.value
-            job.updated_at = utc_now()
+            job.started_at = job.started_at or now
+            job.finished_at = None
+            job.updated_at = now
             session.add(job)
             session.commit()
             self._publish_threadsafe({"type": "job_started", "job_id": job_id})
@@ -179,11 +191,16 @@ class JobManager:
             self._finish_job(session, job)
 
     def _run_item(self, session: Session, job: Job, item: JobItem, options: DownloadOptions) -> None:
+        now = utc_now()
         item.status = JobStatus.running.value
         item.progress = 0.0
-        item.updated_at = utc_now()
+        item.started_at = item.started_at or now
+        item.finished_at = None
+        item.speed = None
+        item.eta = None
+        item.updated_at = now
         job.current_item_title = item.title
-        job.updated_at = utc_now()
+        job.updated_at = now
         session.add(item)
         session.add(job)
         session.commit()
@@ -212,6 +229,8 @@ class JobManager:
                 hook_item.eta = payload.get("eta")
                 hook_item.updated_at = utc_now()
                 hook_job.progress = self._calculate_job_progress(hook_session, hook_job.id)
+                hook_job.speed = hook_item.speed
+                hook_job.eta = hook_item.eta
                 hook_job.updated_at = utc_now()
                 hook_session.add(hook_item)
                 hook_session.add(hook_job)
@@ -254,6 +273,10 @@ class JobManager:
         finally:
             if job.id in self._deleted:
                 return
+            item.finished_at = utc_now() if item.status != JobStatus.paused.value else None
+            if item.status in {JobStatus.succeeded.value, JobStatus.failed.value, JobStatus.cancelled.value}:
+                item.speed = None
+                item.eta = None
             item.updated_at = utc_now()
             session.add(item)
             session.commit()
@@ -275,15 +298,21 @@ class JobManager:
         if job.id in self._paused:
             job.status = JobStatus.paused.value
             job.error = None
+            job.finished_at = None
         elif job.id in self._cancelled:
             job.status = JobStatus.cancelled.value
+            job.finished_at = utc_now()
         elif job.failed_items:
             job.status = JobStatus.failed.value
             job.error = f"{job.failed_items} item(s) failed."
+            job.finished_at = utc_now()
         else:
             job.status = JobStatus.succeeded.value
             job.progress = 100.0
+            job.finished_at = utc_now()
         job.current_item_title = None
+        job.speed = None
+        job.eta = None
         job.updated_at = utc_now()
         session.add(job)
         session.commit()
@@ -291,6 +320,9 @@ class JobManager:
 
     def _mark_job_cancelled(self, session: Session, job: Job) -> None:
         job.status = JobStatus.cancelled.value
+        job.speed = None
+        job.eta = None
+        job.finished_at = utc_now()
         job.updated_at = utc_now()
         session.add(job)
         session.commit()
@@ -299,6 +331,9 @@ class JobManager:
     def _mark_job_paused(self, session: Session, job: Job) -> None:
         job.status = JobStatus.paused.value
         job.current_item_title = None
+        job.speed = None
+        job.eta = None
+        job.finished_at = None
         job.updated_at = utc_now()
         session.add(job)
         session.commit()

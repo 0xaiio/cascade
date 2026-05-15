@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field, HttpUrl
@@ -91,6 +92,11 @@ class JobItemRead(BaseModel):
     eta: int | None = None
     output_path: str | None = None
     error: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    elapsed_seconds: int = 0
 
 
 class JobRead(BaseModel):
@@ -99,11 +105,18 @@ class JobRead(BaseModel):
     title: str
     status: str
     progress: float
+    speed: float | None = None
+    eta: int | None = None
     total_items: int
     completed_items: int
     failed_items: int
     current_item_title: str | None = None
     error: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    elapsed_seconds: int = 0
     items: list[JobItemRead] = Field(default_factory=list)
 
 
