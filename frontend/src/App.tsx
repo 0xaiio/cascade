@@ -816,7 +816,7 @@ function JobQueue({
             <div className="progress-bar">
               <span style={{ width: `${Math.max(0, Math.min(100, job.progress))}%` }} />
             </div>
-            {job.items.length > 0 && (!isPlaylist || isExpanded) && (
+            {job.items.length > 0 && isPlaylist && isExpanded && (
               <div className="item-list">
                 {job.items.map((item) => (
                   <div key={item.id} className="job-item-detail">

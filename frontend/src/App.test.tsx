@@ -301,6 +301,14 @@ describe("App", () => {
     expect(screen.getAllByText("2.0 KB/s").length).toBeGreaterThan(0);
   });
 
+  test("does not repeat single video item details in task center", async () => {
+    render(<App />);
+
+    expect(await screen.findByText("Running video")).toBeInTheDocument();
+    expect(screen.queryByText("1. Running video · running")).not.toBeInTheDocument();
+    expect(screen.getByText("1. Part one · running")).toBeInTheDocument();
+  });
+
   test("expands and collapses playlist jobs in task center", async () => {
     const user = userEvent.setup();
     render(<App />);
