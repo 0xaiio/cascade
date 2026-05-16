@@ -289,7 +289,6 @@ function UrlAnalyzer({
         <ListVideo size={20} />
         <div>
           <h2>解析链接</h2>
-          <p>支持单视频和 playlist</p>
         </div>
       </div>
       <label className="field">
@@ -410,7 +409,6 @@ function DownloadOptionsPanel({
         <Download size={20} />
         <div>
           <h2>下载选项</h2>
-          <p>视频、字幕和批量策略</p>
         </div>
       </div>
 
@@ -639,7 +637,6 @@ function SettingsPanel({ settings, onSettingsChange }: { settings: Settings; onS
         <SettingsIcon size={19} />
         <div>
           <h2>设置</h2>
-          <p>本机下载默认值</p>
         </div>
       </div>
       <label className="field">

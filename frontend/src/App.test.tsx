@@ -214,6 +214,17 @@ describe("App", () => {
     expect(submittedBody.options.subtitle_languages).toEqual(expect.arrayContaining(["en", "zh-Hans"]));
   });
 
+  test("omits redundant panel subtitle text", async () => {
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "解析链接" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "下载选项" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "设置" })).toBeInTheDocument();
+    expect(screen.queryByText("支持单视频和 playlist")).not.toBeInTheDocument();
+    expect(screen.queryByText("视频、字幕和批量策略")).not.toBeInTheDocument();
+    expect(screen.queryByText("本机下载默认值")).not.toBeInTheDocument();
+  });
+
   test("shows selected format resolution and filesize details", async () => {
     const user = userEvent.setup();
     render(<App />);
