@@ -69,6 +69,7 @@ export default function App() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [selectedJobIds, setSelectedJobIds] = useState<Set<string>>(new Set());
+  const [deleteFilesWithJobs, setDeleteFilesWithJobs] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -171,14 +172,14 @@ export default function App() {
   }
 
   async function handleDeleteJob(jobId: string) {
-    await deleteJob(jobId);
+    await deleteJob(jobId, deleteFilesWithJobs);
     setJobs((current) => current.filter((job) => job.id !== jobId));
   }
 
   async function handleBatchAction(action: JobBatchAction) {
     const jobIds = Array.from(selectedJobIds);
     if (!jobIds.length) return;
-    const response = await batchJobAction(action, jobIds);
+    const response = await batchJobAction(action, jobIds, action === "delete" ? deleteFilesWithJobs : false);
     if (action === "delete") {
       const deleted = new Set(response.affected_job_ids);
       setJobs((current) => current.filter((job) => !deleted.has(job.id)));
@@ -230,8 +231,10 @@ export default function App() {
             )}
             <JobQueue
               jobs={jobs}
+              deleteFilesWithJobs={deleteFilesWithJobs}
               selectedJobIds={selectedJobIds}
               onBatchAction={(action) => void handleBatchAction(action).catch((err) => setError(err.message))}
+              onDeleteFilesWithJobsChange={setDeleteFilesWithJobs}
               onDelete={(jobId) => void handleDeleteJob(jobId).catch((err) => setError(err.message))}
               onPause={(jobId) => void handlePauseJob(jobId).catch((err) => setError(err.message))}
               onRestart={(jobId) => void handleRestartJob(jobId).catch((err) => setError(err.message))}
@@ -703,16 +706,20 @@ function CookieManager({ settings, onSettingsChange }: { settings: Settings; onS
 
 function JobQueue({
   jobs,
+  deleteFilesWithJobs,
   selectedJobIds,
   onBatchAction,
+  onDeleteFilesWithJobsChange,
   onDelete,
   onPause,
   onRestart,
   onToggleJobSelection
 }: {
   jobs: Job[];
+  deleteFilesWithJobs: boolean;
   selectedJobIds: Set<string>;
   onBatchAction: (action: JobBatchAction) => void;
+  onDeleteFilesWithJobsChange: (checked: boolean) => void;
   onDelete: (jobId: string) => void;
   onPause: (jobId: string) => void;
   onRestart: (jobId: string) => void;
@@ -742,6 +749,14 @@ function JobQueue({
           <p>{jobs.length ? `${jobs.length} 个任务` : "暂无任务"}</p>
         </div>
       </div>
+      <label className="delete-files-toggle">
+        <input
+          type="checkbox"
+          checked={deleteFilesWithJobs}
+          onChange={(event) => onDeleteFilesWithJobsChange(event.target.checked)}
+        />
+        <span>删除任务时同时删除已下载视频</span>
+      </label>
       {selectedCount > 0 && (
         <div className="batch-toolbar" aria-label="批量任务操作">
           <span>{selectedCount} 个已选择</span>

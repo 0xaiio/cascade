@@ -151,7 +151,7 @@ describe("App", () => {
         if (url.endsWith("/api/jobs/job-paused/restart")) {
           return Response.json({ ...pausedJobPayload, status: "queued" });
         }
-        if (url.endsWith("/api/jobs/job-running") && init?.method === "DELETE") {
+        if ((url.endsWith("/api/jobs/job-running") || url.endsWith("/api/jobs/job-running?delete_files=true")) && init?.method === "DELETE") {
           return new Response(null, { status: 204 });
         }
         if (url.endsWith("/api/analyze")) {
@@ -277,17 +277,37 @@ describe("App", () => {
 
     await user.click(screen.getByLabelText("选择任务 Running video"));
     await user.click(screen.getByLabelText("选择任务 Paused video"));
+    await user.click(screen.getByLabelText("删除任务时同时删除已下载视频"));
     await user.click(screen.getByRole("button", { name: "批量暂停" }));
     await user.click(screen.getByRole("button", { name: "删除 Running video" }));
 
     expect(fetch).toHaveBeenCalledWith("/api/jobs/job-running/pause", expect.objectContaining({ method: "POST" }));
     expect(fetch).toHaveBeenCalledWith("/api/jobs/job-paused/restart", expect.objectContaining({ method: "POST" }));
-    expect(fetch).toHaveBeenCalledWith("/api/jobs/job-running", expect.objectContaining({ method: "DELETE" }));
+    expect(fetch).toHaveBeenCalledWith("/api/jobs/job-running?delete_files=true", expect.objectContaining({ method: "DELETE" }));
     expect(fetch).toHaveBeenCalledWith(
       "/api/jobs/batch",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ action: "pause", job_ids: ["job-running", "job-paused"] })
+        body: JSON.stringify({ action: "pause", job_ids: ["job-running", "job-paused"], delete_files: false })
+      })
+    );
+  });
+
+  test("passes delete files option to batch delete", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    expect(await screen.findByText("Running video")).toBeInTheDocument();
+    await user.click(screen.getByLabelText("选择任务 Running video"));
+    await user.click(screen.getByLabelText("选择任务 Paused video"));
+    await user.click(screen.getByLabelText("删除任务时同时删除已下载视频"));
+    await user.click(screen.getByRole("button", { name: "批量删除" }));
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/jobs/batch",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ action: "delete", job_ids: ["job-running", "job-paused"], delete_files: true })
       })
     );
   });

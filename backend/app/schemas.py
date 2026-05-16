@@ -76,6 +76,7 @@ class CreateJobRequest(BaseModel):
 class JobBatchActionRequest(BaseModel):
     action: JobBatchAction
     job_ids: list[str] = Field(min_length=1)
+    delete_files: bool = False
 
 
 class JobItemRead(BaseModel):

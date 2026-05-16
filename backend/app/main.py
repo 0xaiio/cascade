@@ -138,7 +138,7 @@ def create_app(settings: AppSettings | None = None, ytdlp_service: YtDlpService 
             elif request.action == "restart":
                 await manager.restart(job_id)
             else:
-                await manager.delete(job_id)
+                await manager.delete(job_id, delete_files=request.delete_files)
             affected.append(job_id)
 
         if not affected:
@@ -178,10 +178,10 @@ def create_app(settings: AppSettings | None = None, ytdlp_service: YtDlpService 
         return _read_job(session, job_id)
 
     @app.delete("/api/jobs/{job_id}", status_code=204)
-    async def delete_job(job_id: str, session: SessionDep) -> Response:
+    async def delete_job(job_id: str, session: SessionDep, delete_files: bool = False) -> Response:
         if not session.get(Job, job_id):
             raise HTTPException(status_code=404, detail="Job not found.")
-        await manager.delete(job_id)
+        await manager.delete(job_id, delete_files=delete_files)
         return Response(status_code=204)
 
     @app.get("/api/events")

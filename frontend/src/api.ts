@@ -56,14 +56,15 @@ export function restartJob(jobId: string): Promise<Job> {
   return request<Job>(`/api/jobs/${jobId}/restart`, { method: "POST" });
 }
 
-export function deleteJob(jobId: string): Promise<void> {
-  return request<void>(`/api/jobs/${jobId}`, { method: "DELETE" });
+export function deleteJob(jobId: string, deleteFiles = false): Promise<void> {
+  const query = deleteFiles ? "?delete_files=true" : "";
+  return request<void>(`/api/jobs/${jobId}${query}`, { method: "DELETE" });
 }
 
-export function batchJobAction(action: JobBatchAction, jobIds: string[]): Promise<JobBatchActionResponse> {
+export function batchJobAction(action: JobBatchAction, jobIds: string[], deleteFiles = false): Promise<JobBatchActionResponse> {
   return request<JobBatchActionResponse>("/api/jobs/batch", {
     method: "POST",
-    body: JSON.stringify({ action, job_ids: jobIds })
+    body: JSON.stringify({ action, job_ids: jobIds, delete_files: action === "delete" ? deleteFiles : false })
   });
 }
 

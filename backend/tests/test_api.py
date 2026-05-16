@@ -72,7 +72,13 @@ def make_client(tmp_path: Path, service=None):
     return TestClient(create_app(settings=settings, ytdlp_service=service or FakeYtDlpService()))
 
 
-def seed_job(tmp_path: Path, job_id: str, status: str = "queued") -> None:
+def seed_job(
+    tmp_path: Path,
+    job_id: str,
+    status: str = "queued",
+    output_path: Path | None = None,
+    download_dir: Path | None = None,
+) -> None:
     engine = create_app_engine(make_settings(tmp_path))
     with Session(engine) as session:
         session.add(
@@ -83,6 +89,7 @@ def seed_job(tmp_path: Path, job_id: str, status: str = "queued") -> None:
                 status=status,
                 options_json="{}",
                 total_items=1,
+                download_dir=str(download_dir or tmp_path / "downloads"),
             )
         )
         session.add(
@@ -93,6 +100,7 @@ def seed_job(tmp_path: Path, job_id: str, status: str = "queued") -> None:
                 title=f"Item {job_id}",
                 index=1,
                 status=status,
+                output_path=str(output_path) if output_path else None,
             )
         )
         session.commit()
@@ -246,6 +254,40 @@ def test_job_can_be_paused_restarted_and_deleted(tmp_path: Path) -> None:
     assert client.get(f"/api/jobs/{job_id}").status_code == 404
 
 
+def test_delete_job_keeps_downloaded_file_by_default(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    output_file = tmp_path / "downloads" / "video.mp4"
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    output_file.write_text("video", encoding="utf-8")
+    seed_job(tmp_path, "job-file-keep", status="succeeded", output_path=output_file)
+
+    response = client.delete("/api/jobs/job-file-keep")
+
+    assert response.status_code == 204
+    assert output_file.exists()
+
+
+def test_delete_job_can_delete_downloaded_file_and_empty_playlist_folder(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    playlist_dir = tmp_path / "downloads" / "Course"
+    output_file = playlist_dir / "video.mp4"
+    playlist_dir.mkdir(parents=True)
+    output_file.write_text("video", encoding="utf-8")
+    seed_job(
+        tmp_path,
+        "job-file-delete",
+        status="succeeded",
+        output_path=output_file,
+        download_dir=playlist_dir,
+    )
+
+    response = client.delete("/api/jobs/job-file-delete?delete_files=true")
+
+    assert response.status_code == 204
+    assert not output_file.exists()
+    assert not playlist_dir.exists()
+
+
 def test_batch_job_actions_pause_restart_and_delete_multiple_jobs(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     first_id = "job-first"
@@ -271,7 +313,7 @@ def test_batch_job_actions_pause_restart_and_delete_multiple_jobs(tmp_path: Path
 
     delete_response = client.post(
         "/api/jobs/batch",
-        json={"action": "delete", "job_ids": [first_id, second_id]},
+        json={"action": "delete", "job_ids": [first_id, second_id], "delete_files": True},
     )
     assert delete_response.status_code == 200
     assert set(delete_response.json()["affected_job_ids"]) == {first_id, second_id}

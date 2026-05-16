@@ -1,5 +1,6 @@
 import asyncio
 import json
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -123,20 +124,57 @@ class JobManager:
         assert self._queue is not None
         self._queue.put_nowait(job_id)
 
-    async def delete(self, job_id: str) -> None:
+    async def delete(self, job_id: str, delete_files: bool = False) -> None:
         self._deleted.add(job_id)
         self._paused.discard(job_id)
         self._cancelled.add(job_id)
+        output_paths: list[Path] = []
+        job_download_dir: Path | None = None
         with Session(self.engine) as session:
+            job = session.get(Job, job_id)
+            if job and job.download_dir:
+                job_download_dir = Path(job.download_dir)
             for event in session.exec(select(JobEvent).where(JobEvent.job_id == job_id)).all():
                 session.delete(event)
             for item in session.exec(select(JobItem).where(JobItem.job_id == job_id)).all():
+                if delete_files and item.output_path:
+                    output_paths.append(Path(item.output_path))
                 session.delete(item)
-            job = session.get(Job, job_id)
             if job:
                 session.delete(job)
             session.commit()
+        if delete_files:
+            self._delete_output_files(output_paths, job_download_dir)
         await self.broker.publish({"type": "job_deleted", "job_id": job_id})
+
+    def _delete_output_files(self, output_paths: list[Path], job_download_dir: Path | None) -> None:
+        download_root = self.settings.download_dir.expanduser().resolve()
+        allowed_roots = [download_root]
+        if job_download_dir:
+            with suppress(OSError):
+                allowed_roots.append(job_download_dir.expanduser().resolve())
+
+        for output_path in output_paths:
+            for candidate in self._output_file_candidates(output_path):
+                with suppress(OSError):
+                    resolved = candidate.expanduser().resolve()
+                    if not self._is_under_allowed_root(resolved, allowed_roots):
+                        continue
+                    if resolved.is_file():
+                        resolved.unlink()
+
+        if job_download_dir:
+            with suppress(OSError):
+                resolved_dir = job_download_dir.expanduser().resolve()
+                if resolved_dir != download_root and download_root in resolved_dir.parents and resolved_dir.exists():
+                    resolved_dir.rmdir()
+
+    def _output_file_candidates(self, output_path: Path) -> list[Path]:
+        sidecar_suffixes = [".description", ".info.json", ".jpg", ".jpeg", ".png", ".webp", ".srt", ".vtt"]
+        return [output_path, *(output_path.with_suffix(suffix) for suffix in sidecar_suffixes)]
+
+    def _is_under_allowed_root(self, path: Path, allowed_roots: list[Path]) -> bool:
+        return any(path == root or root in path.parents for root in allowed_roots)
 
     async def _worker(self, worker_index: int) -> None:
         assert self._queue is not None
