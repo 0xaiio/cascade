@@ -43,6 +43,24 @@ def test_bundled_ffmpeg_is_used_when_system_ffmpeg_is_missing(monkeypatch, tmp_p
     assert service.get_ffmpeg_status() == {"ffmpeg": True, "ffprobe": False}
 
 
+def test_resolution_can_be_extracted_from_progress_payload_requested_formats(tmp_path: Path) -> None:
+    service = YtDlpService(download_dir=tmp_path)
+
+    resolution = service.resolution_from_progress_payload(
+        {
+            "status": "finished",
+            "info_dict": {
+                "requested_formats": [
+                    {"format_id": "137", "vcodec": "avc1", "acodec": "none", "width": 1920, "height": 1080},
+                    {"format_id": "140", "vcodec": "none", "acodec": "mp4a", "width": None, "height": None},
+                ]
+            },
+        }
+    )
+
+    assert resolution == (1920, 1080)
+
+
 def test_download_options_accept_task_specific_download_dir(monkeypatch, tmp_path: Path) -> None:
     service = YtDlpService(download_dir=tmp_path / "root")
     target_dir = tmp_path / "root" / "Course"

@@ -288,3 +288,40 @@ Thumbs.db
 - 浏览器无法可靠读取任意本机文件夹绝对路径，因此目录选择由本机后端弹出系统对话框完成。
 - 若运行环境没有 GUI 或用户取消选择，后端返回当前设置或明确错误，不改变下载目录。
 - 本次不改变 cookies、任务中心、playlist 子目录生成规则或真实下载策略。
+
+---
+
+# 2026-05-17 +08:00 - 任务时间/实际分辨率展示与 ffprobe 警告移除计划
+
+## Summary
+- 实现前先将本计划按标题追加到 `ai/plan.md`，所有功能变更同步更新 `README.md`。
+- “任务中心”每个任务显示开始时间、结束时间、实际下载分辨率；playlist 在合集行显示统一结果：相同则显示 `1920x1080`，不同则显示 `混合分辨率`。
+- `ffprobe` 不是当前下载/合并的必需依赖；顶栏移除 `ffprobe` 红色警告，只保留 `ffmpeg` 与 cookies 状态。
+
+## Key Changes
+- 后端新增实际分辨率记录：给 `job_items` 增加 nullable `actual_width`、`actual_height`，通过现有轻量迁移补列，并在 `JobItemRead` 暴露。
+- 后端新增 `JobRead.actual_resolution` 聚合字段：单视频使用唯一子项分辨率；playlist 若已知分辨率一致显示具体尺寸，若不一致显示 `混合分辨率`，未知时返回 `null`。
+- 下载完成时从 yt-dlp progress payload 的 `info_dict/requested_formats` 提取实际宽高；若缺失，则用当前可用的 `ffmpeg` 执行文件探测兜底。重启任务或重启 playlist 子视频时清空旧分辨率。
+- 前端 `JobQueue` 在任务指标区显示：开始时间、结束时间、实际分辨率；时间使用稳定格式 `YYYY-MM-DD HH:mm:ss`，空值显示 `--`，未知分辨率显示 `检测中`。
+- 前端顶栏移除 `ffprobe` 状态 pill；README 说明 `ffmpeg` 是高分辨率合并所需，`ffprobe` 仅为可选诊断能力，不再作为警告项。
+
+## Test Plan
+- 先写失败测试再实现：
+  - 后端 API 测试：任务响应包含 `started_at`、`finished_at`、`actual_resolution`，子项包含 `actual_width/actual_height`。
+  - 后端 playlist 测试：多个子视频分辨率相同返回具体尺寸，不同返回 `混合分辨率`。
+  - 后端 helper 测试：能从 yt-dlp `requested_formats` 提取 video-only 的实际宽高。
+  - 前端测试：任务中心展示开始时间、结束时间、实际分辨率；playlist 展示 `混合分辨率`。
+  - 前端测试：当 `settings.ffmpeg.ffprobe=false` 时不再渲染 `ffprobe` 红色状态。
+- 每个编号任务完成后运行对应测试并提交推送：
+  - `git commit -m "feat: show job timing and actual resolution"`，`git push origin main`
+  - `git commit -m "chore: remove optional ffprobe warning"`，`git push origin main`
+- 最终全量验证：
+  - `python -m pytest backend\tests -q`
+  - `npm test`
+  - `npm run build`
+  - `git diff --check`
+
+## Assumptions
+- `ffprobe` 不作为必需依赖；当前应用用 `ffmpeg` 已能满足下载合并与必要探测。
+- playlist 合集行只需要一个统一分辨率显示；子视频展开区保留现有进度/大小信息，不额外强制显示每个子视频分辨率。
+- 已有历史任务若没有分辨率记录，界面显示 `检测中` 或 `--`，不做批量回填。

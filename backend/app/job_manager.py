@@ -113,6 +113,8 @@ class JobManager:
                 item.speed = None
                 item.eta = None
                 item.output_path = None
+                item.actual_width = None
+                item.actual_height = None
                 item.error = None
                 item.started_at = None
                 item.finished_at = None
@@ -140,6 +142,8 @@ class JobManager:
             item.speed = None
             item.eta = None
             item.output_path = None
+            item.actual_width = None
+            item.actual_height = None
             item.error = None
             item.started_at = None
             item.finished_at = None
@@ -284,6 +288,8 @@ class JobManager:
         item.finished_at = None
         item.speed = None
         item.eta = None
+        item.actual_width = None
+        item.actual_height = None
         item.updated_at = now
         job.current_item_title = item.title
         job.updated_at = now
@@ -311,6 +317,11 @@ class JobManager:
                 if status == "finished":
                     hook_item.progress = 100.0
                     hook_item.output_path = payload.get("filename")
+                    resolution = self.service.resolution_from_progress_payload(payload)
+                    if resolution is None and hook_item.output_path:
+                        resolution = self.service.detect_file_resolution(Path(hook_item.output_path))
+                    if resolution is not None:
+                        hook_item.actual_width, hook_item.actual_height = resolution
                 hook_item.speed = payload.get("speed")
                 hook_item.eta = payload.get("eta")
                 hook_item.updated_at = utc_now()
@@ -355,6 +366,11 @@ class JobManager:
             item.status = JobStatus.failed.value
             item.error = str(exc)
         else:
+            session.refresh(item)
+            if item.actual_width is None and item.actual_height is None and item.output_path:
+                resolution = self.service.detect_file_resolution(Path(item.output_path))
+                if resolution is not None:
+                    item.actual_width, item.actual_height = resolution
             item.status = JobStatus.succeeded.value
             item.progress = 100.0
         finally:

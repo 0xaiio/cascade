@@ -30,6 +30,8 @@ def _ensure_columns(engine: Engine) -> None:
         "jobitem": {
             "started_at": "DATETIME",
             "finished_at": "DATETIME",
+            "actual_width": "INTEGER",
+            "actual_height": "INTEGER",
         },
     }
     with engine.begin() as connection:

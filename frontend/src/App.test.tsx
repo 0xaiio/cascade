@@ -35,6 +35,7 @@ const jobPayload = {
   started_at: "2026-05-15T10:00:00Z",
   finished_at: null,
   elapsed_seconds: 42,
+  actual_resolution: "1920x1080",
   speed: 2048,
   eta: 10,
   total_items: 1,
@@ -56,6 +57,8 @@ const jobPayload = {
       started_at: "2026-05-15T10:00:00Z",
       finished_at: null,
       elapsed_seconds: 42,
+      actual_width: 1920,
+      actual_height: 1080,
       downloaded_bytes: 34,
       total_bytes: 100,
       speed: 2048,
@@ -72,6 +75,8 @@ const pausedJobPayload = {
   title: "Paused video",
   status: "paused",
   progress: 34,
+  finished_at: "2026-05-15T10:05:00Z",
+  actual_resolution: "1280x720",
   items: [{ ...jobPayload.items[0], id: "item-paused", job_id: "job-paused", title: "Paused video", status: "paused" }]
 };
 
@@ -79,6 +84,7 @@ const playlistJobPayload = {
   ...jobPayload,
   id: "job-playlist",
   title: "Playlist batch",
+  actual_resolution: "混合分辨率",
   total_items: 2,
   completed_items: 0,
   failed_items: 0,
@@ -94,7 +100,9 @@ const playlistJobPayload = {
       total_bytes: 10_485_760,
       speed: 2048,
       eta: 20,
-      elapsed_seconds: 42
+      elapsed_seconds: 42,
+      actual_width: 1920,
+      actual_height: 1080
     },
     {
       ...jobPayload.items[0],
@@ -108,7 +116,9 @@ const playlistJobPayload = {
       total_bytes: null,
       speed: null,
       eta: null,
-      elapsed_seconds: 0
+      elapsed_seconds: 0,
+      actual_width: null,
+      actual_height: null
     }
   ]
 };
@@ -407,6 +417,17 @@ describe("App", () => {
     expect(screen.getAllByText("已用 00:42").length).toBeGreaterThan(0);
     expect(screen.getAllByText("剩余 00:10").length).toBeGreaterThan(0);
     expect(screen.getAllByText("2.0 KB/s").length).toBeGreaterThan(0);
+  });
+
+  test("shows task start time end time and actual resolution in task center", async () => {
+    render(<App />);
+
+    expect(await screen.findByText("Running video")).toBeInTheDocument();
+    expect(screen.getAllByText(/2026-05-15 10:00:00/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/2026-05-15 10:05:00/)).toBeInTheDocument();
+    expect(screen.getByText(/1920x1080/)).toBeInTheDocument();
+    expect(screen.getByText(/1280x720/)).toBeInTheDocument();
+    expect(screen.getByText(/混合分辨率/)).toBeInTheDocument();
   });
 
   test("places task count on the task center title row", async () => {

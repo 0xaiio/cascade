@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from pathlib import Path
+import re
 import shutil
 import subprocess
 from typing import Any
@@ -137,6 +138,50 @@ class YtDlpService:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
 
+    def resolution_from_progress_payload(self, payload: dict[str, Any]) -> tuple[int, int] | None:
+        info = payload.get("info_dict")
+        if not isinstance(info, dict):
+            return None
+
+        direct = self._resolution_from_mapping(info)
+        if direct:
+            return direct
+
+        requested_formats = info.get("requested_formats")
+        if not isinstance(requested_formats, list):
+            return None
+
+        candidates = [
+            resolution
+            for fmt in requested_formats
+            if isinstance(fmt, dict)
+            and fmt.get("vcodec") not in {None, "none"}
+            and (resolution := self._resolution_from_mapping(fmt))
+        ]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda resolution: resolution[0] * resolution[1])
+
+    def detect_file_resolution(self, file_path: Path) -> tuple[int, int] | None:
+        ffmpeg_path = self._ffmpeg_executable()
+        if not ffmpeg_path or not file_path.exists():
+            return None
+        try:
+            completed = subprocess.run(
+                [ffmpeg_path, "-hide_banner", "-i", str(file_path)],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        output = f"{completed.stdout}\n{completed.stderr}"
+        match = re.search(r"Video:.*?\b(\d{2,5})x(\d{2,5})\b", output)
+        if not match:
+            return None
+        return int(match.group(1)), int(match.group(2))
+
     def _format_selector(self, options: DownloadOptions, allow_merge: bool = True) -> str:
         if not allow_merge:
             return self._single_file_format_selector(options)
@@ -210,6 +255,22 @@ class YtDlpService:
             return None
         output = (completed.stdout or completed.stderr).strip().splitlines()
         return output[0] if output else None
+
+    def _resolution_from_mapping(self, value: dict[str, Any]) -> tuple[int, int] | None:
+        width = self._positive_int(value.get("width"))
+        height = self._positive_int(value.get("height"))
+        if width is None or height is None:
+            return None
+        return width, height
+
+    def _positive_int(self, value: Any) -> int | None:
+        if value is None:
+            return None
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed > 0 else None
 
     def _node_version_supported(self, version: str | None) -> bool:
         if not version:

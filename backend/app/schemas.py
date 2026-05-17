@@ -92,6 +92,8 @@ class JobItemRead(BaseModel):
     speed: float | None = None
     eta: int | None = None
     output_path: str | None = None
+    actual_width: int | None = None
+    actual_height: int | None = None
     error: str | None = None
     created_at: datetime
     updated_at: datetime
@@ -114,6 +116,7 @@ class JobRead(BaseModel):
     current_item_title: str | None = None
     error: str | None = None
     download_dir: str | None = None
+    actual_resolution: str | None = None
     created_at: datetime
     updated_at: datetime
     started_at: datetime | None = None

@@ -859,6 +859,9 @@ function JobQueue({
             </div>
             <div className="job-metrics">
               <span>{formatPercent(job.progress)}</span>
+              <span>开始 {formatDateTime(job.started_at)}</span>
+              <span>结束 {formatDateTime(job.finished_at)}</span>
+              <span>分辨率 {job.actual_resolution ?? "检测中"}</span>
               <span>已用 {formatClock(job.elapsed_seconds)}</span>
               <span>剩余 {formatClock(job.eta)}</span>
               {job.speed ? <span>{formatBytesPerSecond(job.speed)}</span> : <span>-- KB/s</span>}
@@ -964,6 +967,11 @@ function formatClock(seconds: number | null | undefined): string {
   const minutes = Math.floor((safeSeconds % 3600) / 60).toString().padStart(2, "0");
   const secs = Math.floor(safeSeconds % 60).toString().padStart(2, "0");
   return hours ? `${hours}:${minutes}:${secs}` : `${minutes}:${secs}`;
+}
+
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return "--";
+  return value.replace("T", " ").replace(/\.\d+Z?$/, "").replace(/Z$/, "").slice(0, 19);
 }
 
 function formatFileSize(bytes: number | null | undefined): string {

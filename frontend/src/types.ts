@@ -69,6 +69,8 @@ export interface JobItem {
   speed: number | null;
   eta: number | null;
   output_path: string | null;
+  actual_width: number | null;
+  actual_height: number | null;
   error: string | null;
   created_at: string;
   updated_at: string;
@@ -91,6 +93,7 @@ export interface Job {
   current_item_title: string | null;
   error: string | null;
   download_dir: string | null;
+  actual_resolution: string | null;
   created_at: string;
   updated_at: string;
   started_at: string | null;

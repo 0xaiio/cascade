@@ -308,6 +308,7 @@ def _read_job(session: Session, job_id: str) -> JobRead:
         current_item_title=job.current_item_title,
         error=job.error,
         download_dir=job.download_dir,
+        actual_resolution=_actual_resolution(items),
         created_at=job.created_at,
         updated_at=job.updated_at,
         started_at=job.started_at,
@@ -327,6 +328,8 @@ def _read_job(session: Session, job_id: str) -> JobRead:
                 speed=item.speed,
                 eta=item.eta,
                 output_path=item.output_path,
+                actual_width=item.actual_width,
+                actual_height=item.actual_height,
                 error=item.error,
                 created_at=item.created_at,
                 updated_at=item.updated_at,
@@ -337,6 +340,20 @@ def _read_job(session: Session, job_id: str) -> JobRead:
             for item in items
         ],
     )
+
+
+def _actual_resolution(items: list[JobItem]) -> str | None:
+    resolutions = {
+        (item.actual_width, item.actual_height)
+        for item in items
+        if item.actual_width is not None and item.actual_height is not None
+    }
+    if not resolutions:
+        return None
+    if len(resolutions) > 1:
+        return "混合分辨率"
+    width, height = next(iter(resolutions))
+    return f"{width}x{height}"
 
 
 def _elapsed_seconds(started_at: datetime | None, finished_at: datetime | None) -> int:

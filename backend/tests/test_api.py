@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -237,6 +238,11 @@ def test_job_read_includes_realtime_progress_fields(tmp_path: Path) -> None:
     seed_job(tmp_path, "job-progress", status="running")
     engine = create_app_engine(make_settings(tmp_path))
     with Session(engine) as session:
+        job = session.get(Job, "job-progress")
+        assert job is not None
+        job.started_at = datetime(2026, 5, 15, 10, 0, tzinfo=UTC)
+        job.finished_at = datetime(2026, 5, 15, 10, 1, tzinfo=UTC)
+        session.add(job)
         item = session.get(JobItem, "job-progress-item")
         assert item is not None
         item.progress = 50.0
@@ -244,6 +250,10 @@ def test_job_read_includes_realtime_progress_fields(tmp_path: Path) -> None:
         item.total_bytes = 10_485_760
         item.speed = 2048
         item.eta = 20
+        item.started_at = datetime(2026, 5, 15, 10, 0, tzinfo=UTC)
+        item.finished_at = datetime(2026, 5, 15, 10, 1, tzinfo=UTC)
+        item.actual_width = 1920
+        item.actual_height = 1080
         session.add(item)
         session.commit()
 
@@ -251,15 +261,87 @@ def test_job_read_includes_realtime_progress_fields(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    for field in ["created_at", "updated_at", "started_at", "finished_at", "elapsed_seconds", "eta", "speed"]:
+    for field in [
+        "created_at",
+        "updated_at",
+        "started_at",
+        "finished_at",
+        "elapsed_seconds",
+        "eta",
+        "speed",
+        "actual_resolution",
+    ]:
         assert field in payload
-    for field in ["created_at", "updated_at", "started_at", "finished_at", "elapsed_seconds"]:
+    for field in [
+        "created_at",
+        "updated_at",
+        "started_at",
+        "finished_at",
+        "elapsed_seconds",
+        "actual_width",
+        "actual_height",
+    ]:
         assert field in payload["items"][0]
+    assert payload["actual_resolution"] == "1920x1080"
     assert payload["items"][0]["progress"] == 50.0
     assert payload["items"][0]["downloaded_bytes"] == 5_242_880
     assert payload["items"][0]["total_bytes"] == 10_485_760
     assert payload["items"][0]["speed"] == 2048
     assert payload["items"][0]["eta"] == 20
+    assert payload["items"][0]["actual_width"] == 1920
+    assert payload["items"][0]["actual_height"] == 1080
+
+
+def test_playlist_job_read_reports_mixed_actual_resolution(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    engine = create_app_engine(make_settings(tmp_path))
+    with Session(engine) as session:
+        session.add(
+            Job(
+                id="job-mixed",
+                url="https://youtube.com/playlist?list=mixed",
+                title="Mixed playlist",
+                status="succeeded",
+                options_json="{}",
+                total_items=2,
+                completed_items=2,
+                progress=100.0,
+                download_dir=str(tmp_path / "downloads" / "Mixed playlist"),
+            )
+        )
+        session.add(
+            JobItem(
+                id="mixed-1080",
+                job_id="job-mixed",
+                source_url="https://youtu.be/1080",
+                title="1080p item",
+                index=1,
+                status="succeeded",
+                progress=100.0,
+                actual_width=1920,
+                actual_height=1080,
+            )
+        )
+        session.add(
+            JobItem(
+                id="mixed-720",
+                job_id="job-mixed",
+                source_url="https://youtu.be/720",
+                title="720p item",
+                index=2,
+                status="succeeded",
+                progress=100.0,
+                actual_width=1280,
+                actual_height=720,
+            )
+        )
+        session.commit()
+
+    response = client.get("/api/jobs/job-mixed")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["actual_resolution"] == "混合分辨率"
 
 
 def test_job_can_be_paused_restarted_and_deleted(tmp_path: Path) -> None:

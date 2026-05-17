@@ -63,6 +63,8 @@ class JobItem(SQLModel, table=True):
     speed: Optional[float] = None
     eta: Optional[int] = None
     output_path: Optional[str] = None
+    actual_width: Optional[int] = None
+    actual_height: Optional[int] = None
     error: Optional[str] = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
