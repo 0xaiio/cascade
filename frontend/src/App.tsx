@@ -627,8 +627,8 @@ function SettingsPanel({ settings, onSettingsChange }: { settings: Settings; onS
 
   useEffect(() => setDraft(settings), [settings]);
 
-  async function saveConcurrency() {
-    const nextConcurrency = Math.max(1, Number(draft.default_concurrency) || settings.default_concurrency);
+  async function saveConcurrency(value: number) {
+    const nextConcurrency = Math.max(1, Number(value) || settings.default_concurrency);
     if (nextConcurrency === settings.default_concurrency) return;
     setSaveMessage("保存中...");
     try {
@@ -658,15 +658,14 @@ function SettingsPanel({ settings, onSettingsChange }: { settings: Settings; onS
         <input value={draft.download_dir ?? ""} onChange={(event) => setDraft({ ...draft, download_dir: event.target.value })} />
       </label>
       <label className="field settings-number-field">
-        <span>并发</span>
+        <span>并发 (默认跟随 CPU Core 数量，可按需调整。)</span>
         <input
           type="number"
           min={1}
           value={draft.default_concurrency ?? 1}
           onChange={(event) => setDraft({ ...draft, default_concurrency: Number(event.target.value) })}
-          onBlur={() => void saveConcurrency()}
+          onBlur={(event) => void saveConcurrency(Number(event.currentTarget.value))}
         />
-        <span className="hint">默认跟随 CPU core 数量，可按需覆盖。</span>
       </label>
       {saveMessage && <span className="settings-save-status">{saveMessage}</span>}
     </section>

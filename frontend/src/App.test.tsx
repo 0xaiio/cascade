@@ -135,7 +135,7 @@ describe("App", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
-        if (url.endsWith("/api/settings") && (!init || init.method === "GET")) {
+        if (url.endsWith("/api/settings") && (!init?.method || init.method === "GET")) {
           return Response.json(settingsPayload);
         }
         if (url.endsWith("/api/settings") && init?.method === "PUT") {
@@ -200,14 +200,13 @@ describe("App", () => {
     await user.selectOptions(screen.getByLabelText("下载模式"), "subtitles_only");
     expect(screen.getByRole("option", { name: "22 · 720p · mp4 · 10.0 MB" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "137 · 1080p · 30fps · mp4 · 大小未知" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /选择字幕语言/ }));
+    await user.click(screen.getByRole("button", { name: /已选 1 项：en/ }));
     const search = screen.getByLabelText("搜索字幕语言");
     await user.type(search, "zh");
     expect(screen.queryByLabelText("字幕 en")).not.toBeInTheDocument();
     await user.click(screen.getByLabelText("字幕 zh-Hans"));
     await user.clear(search);
     await user.type(search, "en");
-    await user.click(screen.getByLabelText("字幕 en"));
     await user.click(screen.getByRole("button", { name: "加入下载队列" }));
 
     await waitFor(() => {
@@ -246,8 +245,10 @@ describe("App", () => {
 
     expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
     expect(screen.getByLabelText("下载目录")).toBeInTheDocument();
-    const concurrency = screen.getByLabelText(/并发/);
+    const concurrency = screen.getByLabelText("并发 (默认跟随 CPU Core 数量，可按需调整。)");
     expect(concurrency).toBeInTheDocument();
+    await waitFor(() => expect(concurrency).toHaveValue(2));
+    expect(screen.queryByText("默认跟随 CPU core 数量，可按需覆盖。")).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/默认清晰度/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "保存设置" })).not.toBeInTheDocument();
 
