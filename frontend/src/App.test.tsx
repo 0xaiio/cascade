@@ -430,6 +430,15 @@ describe("App", () => {
     expect(screen.getByText(/混合分辨率/)).toBeInTheDocument();
   });
 
+  test("does not show optional ffprobe status in the topbar", async () => {
+    currentSettingsPayload = { ...settingsPayload, ffmpeg: { ffmpeg: true, ffprobe: false } };
+
+    render(<App />);
+
+    expect(await screen.findByText("ffmpeg")).toBeInTheDocument();
+    expect(screen.queryByText("ffprobe")).not.toBeInTheDocument();
+  });
+
   test("places task count on the task center title row", async () => {
     render(<App />);
 

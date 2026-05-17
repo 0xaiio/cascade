@@ -207,7 +207,6 @@ export default function App() {
           </div>
           <div className="status-strip">
             <StatusPill ok={settings?.ffmpeg?.ffmpeg} label="ffmpeg" />
-            <StatusPill ok={settings?.ffmpeg?.ffprobe} label="ffprobe" />
             <StatusPill ok={settings?.cookies_enabled} label="cookies" />
           </div>
         </header>
