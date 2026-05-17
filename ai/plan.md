@@ -1,5 +1,32 @@
 # YouTube 下载器实现计划
 
+## 2026-05-17 +08:00 - 修复清晰度选择静默降级为 360p 计划
+
+### Summary
+- 已定位根因：当前环境找不到系统 `ffmpeg/ffprobe`，后端因此走“单文件格式”选择器；YouTube 目标视频的 1440p/1080p 都是 video-only，只有 `format_id=18` 是带音频的 360p mp4，所以 1080p 请求被静默降级为 360p。
+- 修复目标：用户选择 1440p/1080p/360p 时，实际输出视频高度必须匹配所选清晰度；如果无法做到，任务必须失败并给出明确原因，绝不静默下载低清。
+- 执行时先按本标题追加到 `ai/plan.md`，修复后同步更新 `README.md`，完成验证后 `git commit` + `git push origin main`。
+
+### Key Changes
+- 新增 `imageio-ffmpeg` 作为后备 ffmpeg provider；系统 PATH 找不到 ffmpeg 时，自动使用包内 ffmpeg，并把路径传给 yt-dlp 的 `ffmpeg_location`。
+- `get_ffmpeg_status()` 以“系统 ffmpeg 或内置 ffmpeg 任一可用”为 `ffmpeg=True`；`ffprobe` 仍按系统可用性报告。
+- 高分辨率格式选择改为精确高度优先：例如 1080p 使用 `height=1080` 的 video-only + audio 组合，不再通过 `/best` 静默降级到 360p。
+- 对 `best` 保留最佳可用策略；对用户明确选择的 `1440p/1080p/360p`，要求输出高度匹配。若 ffmpeg 完全不可用且无法合并，抛出清晰错误。
+- 具体 `format_id` 选择继续保留，但优先与最佳音频合并；有 ffmpeg 时不降级到 `best`。
+- 前端下载选项附近在 ffmpeg 不可用时显示明确警告；README 说明内置 ffmpeg fallback 和不再静默降级。
+
+### Test Plan
+- 后端新增测试：无系统 ffmpeg 但 `imageio-ffmpeg` 可用时，`build_download_options()` 设置 `ffmpeg_location`，并对 `1080p` 生成精确高度合并选择器。
+- 后端新增测试：`1080p` 选择器不得包含会降级到任意低清的裸 `/best` fallback。
+- 后端新增测试：ffmpeg 完全不可用且请求高分辨率时抛出明确错误。
+- 自动回归：`python -m pytest backend\tests -q`、`npm test`、`npm run build`、`git diff --check`。
+- 真实下载验收：使用 `https://youtu.be/NReDubvNjRg?si=glPVWHBZaB91s36W` 分别下载 `1440p`、`1080p`、`360p` 到 `downloads/resolution-verification/`，并确认输出高度为 1440、1080、360。
+
+### Assumptions
+- 采用“内置后备 ffmpeg”方案，允许新增 `imageio-ffmpeg` 依赖。
+- 目标行为是“匹配所选清晰度或失败”，不再接受静默降级到低清。
+- 真实下载测试文件位于已忽略的 `downloads/` 下，不进入 Git。
+
 ## Summary
 实现一个本机单用户 Web UI：FastAPI 后端 + React/Vite 前端，使用 yt-dlp Python API 执行 YouTube 单视频、playlist、字幕和多分辨率下载。首版不做公网部署，不做账号系统；支持用户上传 cookies 文件以处理需要登录态的视频。参考 yt-dlp 官方能力：格式选择、字幕选项、Python 嵌入和 progress hooks（https://github.com/yt-dlp/yt-dlp）。
 

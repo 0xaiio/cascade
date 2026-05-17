@@ -122,9 +122,12 @@ const settingsPayload = {
   ffmpeg: { ffmpeg: true, ffprobe: true }
 };
 
+let currentSettingsPayload = settingsPayload;
+
 describe("App", () => {
   beforeEach(() => {
     currentAnalyzePayload = analyzePayload;
+    currentSettingsPayload = settingsPayload;
     vi.stubGlobal("EventSource", class {
       onmessage: ((event: MessageEvent) => void) | null = null;
       close = vi.fn();
@@ -136,13 +139,13 @@ describe("App", () => {
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         if (url.endsWith("/api/settings") && (!init?.method || init.method === "GET")) {
-          return Response.json(settingsPayload);
+          return Response.json(currentSettingsPayload);
         }
         if (url.endsWith("/api/settings") && init?.method === "PUT") {
-          return Response.json({ ...settingsPayload, ...JSON.parse(String(init.body)) });
+          return Response.json({ ...currentSettingsPayload, ...JSON.parse(String(init.body)) });
         }
         if (url.endsWith("/api/settings/download-dir/select")) {
-          return Response.json({ ...settingsPayload, download_dir: "D:\\Videos" });
+          return Response.json({ ...currentSettingsPayload, download_dir: "D:\\Videos" });
         }
         if (url.endsWith("/api/jobs")) {
           if (init?.method === "POST") {
@@ -284,6 +287,19 @@ describe("App", () => {
       );
     });
     expect(screen.getByDisplayValue("D:\\Videos")).toBeInTheDocument();
+  });
+
+  test("warns when high resolution downloads cannot be merged without ffmpeg", async () => {
+    currentSettingsPayload = { ...settingsPayload, ffmpeg: { ffmpeg: false, ffprobe: false } };
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.type(screen.getByLabelText("视频或 playlist 链接"), "https://youtube.com/playlist?list=abc");
+    await user.click(screen.getByRole("button", { name: "解析链接" }));
+
+    expect(
+      await screen.findByText("高分辨率 YouTube 视频需要 ffmpeg 合并音视频；当前环境不可用时任务会失败。")
+    ).toBeInTheDocument();
   });
 
   test("shows selected format resolution and filesize details", async () => {

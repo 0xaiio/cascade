@@ -252,6 +252,7 @@ export default function App() {
           <aside className="side-column">
             <DownloadOptionsPanel
               analysis={analysis}
+              ffmpegAvailable={Boolean(settings?.ffmpeg?.ffmpeg)}
               options={options}
               subtitleLanguages={subtitleLanguages}
               isSubmitting={isSubmitting}
@@ -391,6 +392,7 @@ function AnalysisPanel({
 
 function DownloadOptionsPanel({
   analysis,
+  ffmpegAvailable,
   options,
   subtitleLanguages,
   isSubmitting,
@@ -399,6 +401,7 @@ function DownloadOptionsPanel({
   onQualityChange
 }: {
   analysis: AnalyzeResponse | null;
+  ffmpegAvailable: boolean;
   options: DownloadOptions;
   subtitleLanguages: string[];
   isSubmitting: boolean;
@@ -409,6 +412,11 @@ function DownloadOptionsPanel({
   const selectedFormat = analysis?.formats.find((format) => format.format_id === options.format_id) ?? null;
   const resolutionOptions = buildResolutionOptions(analysis);
   const qualityValue = selectedFormat ? `format:${selectedFormat.format_id}` : `resolution:${options.resolution}`;
+  const showMergeWarning =
+    Boolean(analysis) &&
+    !ffmpegAvailable &&
+    options.mode !== "subtitles_only" &&
+    (Boolean(options.format_id) || Boolean(resolutionHeight(options.resolution)));
 
   return (
     <section className="panel options-panel">
@@ -465,6 +473,9 @@ function DownloadOptionsPanel({
           )}
         </select>
         {selectedFormat && <p className="hint">已选格式：{formatFormatOption(selectedFormat)}</p>}
+        {showMergeWarning && (
+          <p className="warning-note">高分辨率 YouTube 视频需要 ffmpeg 合并音视频；当前环境不可用时任务会失败。</p>
+        )}
       </label>
 
       <SearchableLanguageSelect

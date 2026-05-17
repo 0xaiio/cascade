@@ -19,7 +19,7 @@ class YtDlpService:
         self.download_dir = download_dir
 
     def get_ffmpeg_status(self) -> dict[str, bool]:
-        return {"ffmpeg": shutil.which("ffmpeg") is not None, "ffprobe": shutil.which("ffprobe") is not None}
+        return {"ffmpeg": self._ffmpeg_executable() is not None, "ffprobe": shutil.which("ffprobe") is not None}
 
     def get_dependency_status(self) -> dict[str, bool | str | None]:
         ffmpeg = self.get_ffmpeg_status()
@@ -100,9 +100,16 @@ class YtDlpService:
 
         ydl_opts["skip_download"] = options.mode == "subtitles_only"
         if options.mode != "subtitles_only":
-            ffmpeg_available = self.get_ffmpeg_status()["ffmpeg"]
+            ffmpeg_path = self._ffmpeg_executable()
+            ffmpeg_available = ffmpeg_path is not None
+            if not ffmpeg_available and self._requires_ffmpeg(options):
+                requested = options.format_id or options.resolution
+                raise RuntimeError(
+                    f"ffmpeg is required to download {requested} without silently falling back to a lower resolution."
+                )
             ydl_opts["format"] = self._format_selector(options, allow_merge=ffmpeg_available)
             if ffmpeg_available:
+                ydl_opts["ffmpeg_location"] = ffmpeg_path
                 ydl_opts["merge_output_format"] = "mp4"
 
         if options.mode in {"video_subtitles", "subtitles_only"}:
@@ -134,21 +141,42 @@ class YtDlpService:
         if not allow_merge:
             return self._single_file_format_selector(options)
         if options.format_id:
-            return f"{options.format_id}+ba/best"
+            return f"{options.format_id}+ba/{options.format_id}"
         if options.resolution == "best":
             return "bv*+ba/b"
         if options.resolution.endswith("p") and options.resolution[:-1].isdigit():
             height = int(options.resolution[:-1])
-            return f"bv*[height<={height}]+ba/b[height<={height}]/best[height<={height}]/best"
+            return f"bv*[height={height}][ext=mp4]+ba[ext=m4a]/bv*[height={height}]+ba/b[height={height}]"
         return "bv*+ba/b"
 
     def _single_file_format_selector(self, options: DownloadOptions) -> str:
         if options.format_id:
-            return f"{options.format_id}/best[ext=mp4]/best"
+            return options.format_id
         if options.resolution.endswith("p") and options.resolution[:-1].isdigit():
             height = int(options.resolution[:-1])
-            return f"best[height<={height}][ext=mp4]/best[height<={height}]/best"
+            return f"best[height={height}][ext=mp4]/best[height={height}]"
         return "best[ext=mp4]/best"
+
+    def _requires_ffmpeg(self, options: DownloadOptions) -> bool:
+        return bool(options.format_id) or (
+            options.resolution.endswith("p") and options.resolution[:-1].isdigit()
+        )
+
+    def _ffmpeg_executable(self) -> str | None:
+        system_ffmpeg = shutil.which("ffmpeg")
+        if system_ffmpeg:
+            return system_ffmpeg
+        return self._bundled_ffmpeg_executable()
+
+    def _bundled_ffmpeg_executable(self) -> str | None:
+        try:
+            import imageio_ffmpeg
+        except Exception:
+            return None
+        try:
+            return imageio_ffmpeg.get_ffmpeg_exe()
+        except Exception:
+            return None
 
     def _javascript_runtime_options(self) -> dict[str, Any]:
         runtime = self._detect_js_runtime()

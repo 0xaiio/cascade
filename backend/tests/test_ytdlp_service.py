@@ -1,4 +1,8 @@
 from pathlib import Path
+import sys
+from types import SimpleNamespace
+
+import pytest
 
 from app.schemas import DownloadOptions
 from app.ytdlp_service import YtDlpService
@@ -6,21 +10,43 @@ from app.ytdlp_service import YtDlpService
 
 def test_resolution_option_limits_best_video_height(monkeypatch, tmp_path: Path) -> None:
     service = YtDlpService(download_dir=tmp_path)
-    monkeypatch.setattr(service, "get_ffmpeg_status", lambda: {"ffmpeg": True, "ffprobe": True})
+    monkeypatch.setattr(service, "_ffmpeg_executable", lambda: str(tmp_path / "ffmpeg.exe"))
     opts = service.build_download_options(
-        DownloadOptions(mode="video_subtitles", resolution="720p"),
+        DownloadOptions(mode="video_subtitles", resolution="1080p"),
         cookies_path=None,
     )
 
-    assert opts["format"] == "bv*[height<=720]+ba/b[height<=720]/best[height<=720]/best"
+    assert opts["format"] == "bv*[height=1080][ext=mp4]+ba[ext=m4a]/bv*[height=1080]+ba/b[height=1080]"
+    assert "/best" not in opts["format"]
+    assert "height<=1080" not in opts["format"]
     assert opts["merge_output_format"] == "mp4"
+    assert opts["ffmpeg_location"] == str(tmp_path / "ffmpeg.exe")
     assert opts["skip_download"] is False
+
+
+def test_bundled_ffmpeg_is_used_when_system_ffmpeg_is_missing(monkeypatch, tmp_path: Path) -> None:
+    bundled_ffmpeg = tmp_path / "bundled-ffmpeg.exe"
+    monkeypatch.setattr("app.ytdlp_service.shutil.which", lambda name: None)
+    monkeypatch.setitem(
+        sys.modules,
+        "imageio_ffmpeg",
+        SimpleNamespace(get_ffmpeg_exe=lambda: str(bundled_ffmpeg)),
+    )
+    service = YtDlpService(download_dir=tmp_path)
+
+    opts = service.build_download_options(
+        DownloadOptions(mode="video_subtitles", resolution="1080p"),
+        cookies_path=None,
+    )
+
+    assert opts["ffmpeg_location"] == str(bundled_ffmpeg)
+    assert service.get_ffmpeg_status() == {"ffmpeg": True, "ffprobe": False}
 
 
 def test_download_options_accept_task_specific_download_dir(monkeypatch, tmp_path: Path) -> None:
     service = YtDlpService(download_dir=tmp_path / "root")
     target_dir = tmp_path / "root" / "Course"
-    monkeypatch.setattr(service, "get_ffmpeg_status", lambda: {"ffmpeg": True, "ffprobe": True})
+    monkeypatch.setattr(service, "_ffmpeg_executable", lambda: str(tmp_path / "ffmpeg.exe"))
 
     opts = service.build_download_options(
         DownloadOptions(mode="video_subtitles", resolution="720p"),
@@ -51,18 +77,16 @@ def test_subtitle_only_options_skip_video_and_include_languages(tmp_path: Path) 
     assert opts["cookiefile"] == str(tmp_path / "cookies.txt")
 
 
-def test_video_options_do_not_request_format_merging_without_ffmpeg(monkeypatch, tmp_path: Path) -> None:
+def test_explicit_resolution_fails_without_any_ffmpeg(monkeypatch, tmp_path: Path) -> None:
     service = YtDlpService(download_dir=tmp_path)
-    monkeypatch.setattr(service, "get_ffmpeg_status", lambda: {"ffmpeg": False, "ffprobe": False})
+    monkeypatch.setattr("app.ytdlp_service.shutil.which", lambda name: None)
+    monkeypatch.setitem(sys.modules, "imageio_ffmpeg", None)
 
-    opts = service.build_download_options(
-        DownloadOptions(mode="video_subtitles", resolution="720p"),
-        cookies_path=None,
-    )
-
-    assert "+" not in opts["format"]
-    assert opts["format"] == "best[height<=720][ext=mp4]/best[height<=720]/best"
-    assert "merge_output_format" not in opts
+    with pytest.raises(RuntimeError, match="ffmpeg is required"):
+        service.build_download_options(
+            DownloadOptions(mode="video_subtitles", resolution="1080p"),
+            cookies_path=None,
+        )
 
 
 def test_download_options_enable_supported_js_runtime(monkeypatch, tmp_path: Path) -> None:
