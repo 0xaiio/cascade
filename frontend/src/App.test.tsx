@@ -360,6 +360,23 @@ describe("App", () => {
     expect(screen.getByText("已选格式：22 · 720p · mp4 · 10.0 MB")).toBeInTheDocument();
   });
 
+  test("shows selected quality filesize beside the analyzed video title", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.type(screen.getByLabelText("视频或 playlist 链接"), "https://youtube.com/playlist?list=abc");
+    await user.click(screen.getByRole("button", { name: "解析链接" }));
+
+    await screen.findByText("Batch");
+    expect(screen.getByText("当前选择：1080p · 大小未知")).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("清晰度 / 格式"), "resolution:720p");
+    expect(screen.getByText("当前选择：720p · 10.0 MB")).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("清晰度 / 格式"), "format:22");
+    expect(screen.getByText("当前选择：22 · 720p · 10.0 MB")).toBeInTheDocument();
+  });
+
   test("falls back to highest available resolution when 1080p is unsupported", async () => {
     currentAnalyzePayload = {
       ...analyzePayload,

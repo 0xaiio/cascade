@@ -251,6 +251,11 @@ select:focus {
   background: linear-gradient(135deg, #dde5f3, #c7d5ea);
 }
 
+.quality-size-line {
+  color: #334155;
+  font-weight: 850;
+}
+
 .table-wrap {
   margin-top: 18px;
   overflow-x: auto;

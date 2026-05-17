@@ -244,6 +244,7 @@ export default function App() {
             {analysis && (
               <AnalysisPanel
                 analysis={analysis}
+                options={options}
                 selectedItems={selectedItems}
                 setSelectedItems={setSelectedItems}
               />
@@ -352,10 +353,12 @@ function UrlAnalyzer({
 
 function AnalysisPanel({
   analysis,
+  options,
   selectedItems,
   setSelectedItems
 }: {
   analysis: AnalyzeResponse;
+  options: DownloadOptions;
   selectedItems: Set<number>;
   setSelectedItems: (items: Set<number>) => void;
 }) {
@@ -379,6 +382,7 @@ function AnalysisPanel({
         <div>
           <h2>{analysis.title}</h2>
           <p>{analysis.is_playlist ? `${analysis.entries.length} 个视频` : "单视频"}</p>
+          <p className="quality-size-line">当前选择：{formatSelectedQualitySize(analysis, options)}</p>
         </div>
       </div>
 
@@ -1002,6 +1006,29 @@ function formatFormatOption(format: FormatOption): string {
     formatFileSize(format.filesize)
   ];
   return parts.filter(Boolean).join(" · ");
+}
+
+function formatSelectedQualitySize(analysis: AnalyzeResponse, options: DownloadOptions): string {
+  if (options.format_id) {
+    const format = analysis.formats.find((item) => item.format_id === options.format_id);
+    if (!format) return `${options.format_id} · 大小未知`;
+    return [
+      format.format_id,
+      format.height ? `${format.height}p` : null,
+      formatFileSize(format.filesize)
+    ].filter(Boolean).join(" · ");
+  }
+
+  if (options.resolution === "best") {
+    return "最佳可用 · 大小未知";
+  }
+
+  const height = resolutionHeight(options.resolution);
+  const matchingSizes = analysis.formats
+    .filter((format) => format.height === height && format.filesize != null)
+    .map((format) => format.filesize as number);
+  const size = matchingSizes.length ? Math.max(...matchingSizes) : null;
+  return `${options.resolution} · ${formatFileSize(size)}`;
 }
 
 function formatBytesPerSecond(bytes: number): string {
