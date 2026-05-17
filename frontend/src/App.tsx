@@ -6,7 +6,6 @@ import {
   Cookie,
   Download,
   FileText,
-  Folder,
   Gauge,
   ListVideo,
   Loader2,
@@ -624,21 +623,25 @@ function Toggle({
 
 function SettingsPanel({ settings, onSettingsChange }: { settings: Settings; onSettingsChange: (settings: Settings) => void }) {
   const [draft, setDraft] = useState(settings);
-  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
 
   useEffect(() => setDraft(settings), [settings]);
 
-  async function save() {
-    setSaving(true);
+  async function saveConcurrency() {
+    const nextConcurrency = Math.max(1, Number(draft.default_concurrency) || settings.default_concurrency);
+    if (nextConcurrency === settings.default_concurrency) return;
+    setSaveMessage("保存中...");
     try {
       onSettingsChange(
         await updateSettings({
-          download_dir: draft.download_dir,
-          default_concurrency: draft.default_concurrency
+          default_concurrency: nextConcurrency
         })
       );
+      setSaveMessage("已保存");
+    } catch {
+      setSaveMessage("保存失败");
     } finally {
-      setSaving(false);
+      window.setTimeout(() => setSaveMessage(""), 1800);
     }
   }
 
@@ -661,13 +664,11 @@ function SettingsPanel({ settings, onSettingsChange }: { settings: Settings; onS
           min={1}
           value={draft.default_concurrency ?? 1}
           onChange={(event) => setDraft({ ...draft, default_concurrency: Number(event.target.value) })}
+          onBlur={() => void saveConcurrency()}
         />
         <span className="hint">默认跟随 CPU core 数量，可按需覆盖。</span>
       </label>
-      <button className="ghost-button full" type="button" onClick={save} disabled={saving}>
-        <Folder size={17} />
-        保存设置
-      </button>
+      {saveMessage && <span className="settings-save-status">{saveMessage}</span>}
     </section>
   );
 }

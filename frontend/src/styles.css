@@ -306,6 +306,14 @@ th {
   max-width: 160px;
 }
 
+.settings-save-status {
+  display: block;
+  margin-top: 12px;
+  color: #0e7a56;
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .toggle-row {
   display: inline-flex;
   gap: 8px;

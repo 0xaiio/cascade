@@ -240,23 +240,27 @@ describe("App", () => {
     expect(screen.queryByText("本机下载默认值")).not.toBeInTheDocument();
   });
 
-  test("keeps settings focused on directory and concurrency", async () => {
+  test("autosaves concurrency without a save settings button", async () => {
     const user = userEvent.setup();
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
     expect(screen.getByLabelText("下载目录")).toBeInTheDocument();
-    expect(screen.getByLabelText(/并发/)).toBeInTheDocument();
+    const concurrency = screen.getByLabelText(/并发/);
+    expect(concurrency).toBeInTheDocument();
     expect(screen.queryByLabelText(/默认清晰度/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "保存设置" })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "保存设置" }));
+    await user.clear(concurrency);
+    await user.type(concurrency, "4");
+    await user.tab();
 
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
         "/api/settings",
         expect.objectContaining({
           method: "PUT",
-          body: expect.not.stringContaining("default_resolution")
+          body: JSON.stringify({ default_concurrency: 4 })
         })
       );
     });
