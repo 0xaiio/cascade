@@ -58,7 +58,7 @@ const INITIAL_OPTIONS: DownloadOptions = {
   write_metadata: false,
   write_thumbnail: false,
   skip_existing: true,
-  speed_limit_kbps: null,
+  speed_limit_kbps: 2048,
   retries: 3,
   notify_on_complete: false
 };
@@ -559,15 +559,19 @@ function DownloadOptionsPanel({
       </div>
 
       <div className="two-col">
-        <label className="field">
-          <span>限速 KB/s</span>
+        <div className="field">
+          <label className="field-label" htmlFor="speed-limit-kbps">
+            限速 KB/s
+          </label>
           <input
+            id="speed-limit-kbps"
             type="number"
             min={1}
             value={options.speed_limit_kbps ?? ""}
             onChange={(event) => onOptionChange("speed_limit_kbps", event.target.value ? Number(event.target.value) : null)}
           />
-        </label>
+          <p className="hint">清空表示不限速</p>
+        </div>
         <label className="field">
           <span>重试次数</span>
           <input

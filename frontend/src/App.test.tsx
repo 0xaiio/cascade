@@ -377,6 +377,28 @@ describe("App", () => {
     expect(screen.getByText("当前选择：22 · 720p · 10.0 MB")).toBeInTheDocument();
   });
 
+  test("defaults speed limit to 2048 and submits null when cleared", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const speedLimit = screen.getByLabelText("限速 KB/s");
+    expect(speedLimit).toHaveValue(2048);
+    expect(screen.getByText("清空表示不限速")).toBeInTheDocument();
+
+    await user.clear(speedLimit);
+    await user.type(screen.getByLabelText("视频或 playlist 链接"), "https://youtube.com/playlist?list=abc");
+    await user.click(screen.getByRole("button", { name: "解析链接" }));
+    await screen.findByText("Batch");
+    await user.click(screen.getByRole("button", { name: "加入下载队列" }));
+
+    await waitFor(() => {
+      const submittedBody = JSON.parse(
+        String((fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1]?.body)
+      );
+      expect(submittedBody.options.speed_limit_kbps).toBeNull();
+    });
+  });
+
   test("falls back to highest available resolution when 1080p is unsupported", async () => {
     currentAnalyzePayload = {
       ...analyzePayload,

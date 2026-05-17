@@ -164,7 +164,8 @@ button {
   margin-top: 16px;
 }
 
-.field > span {
+.field > span,
+.field-label {
   color: #334155;
   font-size: 13px;
   font-weight: 800;
