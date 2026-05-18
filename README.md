@@ -95,6 +95,8 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 如果视频需要登录态、地区/年龄确认或出现 `Sign in to confirm you’re not a bot`，可以在“解析链接”面板内点击“从浏览器导入”。应用会调用 yt-dlp 从本机 Edge、Chrome、Firefox、Brave、Chromium 等浏览器读取 cookies，过滤后只保存 YouTube/Google 相关 cookies 到本地 `data/cookies.txt`。单视频和 playlist 解析都使用同一套 cookies；当解析阶段遇到 bot 校验且当前 cookies 不可用时，后端会自动尝试导入并重试一次。
 
+Windows 上 Edge 正在运行时可能会锁定 `Default\Network\Cookies` 数据库，导致 yt-dlp 报 `Could not copy Chrome cookie database`。应用会把这种情况识别为 Edge 锁库，并在解析区显示“关闭 Edge 并导入”按钮；只有用户确认后，应用才会关闭所有 Edge 窗口、重新导入 cookies，并在 playlist 解析失败场景中自动重试刚才的解析。若 Edge 关闭后 yt-dlp 仍遇到 DPAPI 解密限制，应用会启动临时 headless Edge DevTools 会话，让 Edge 自己读取 YouTube/Google cookies 后再保存为 `cookies.txt`。
+
 也可以手动从浏览器导出 Netscape 格式的 `cookies.txt` 后上传。文件会保存到本地 `data/cookies.txt`，该目录已在 `.gitignore` 中排除。
 
 清除 cookies 后，后续分析和下载会回到无登录态模式。
@@ -132,12 +134,12 @@ $env:YTDL_DEFAULT_RESOLUTION="1080p"
 - `GET /api/settings`、`PUT /api/settings`：读取/更新设置。
 - `POST /api/settings/download-dir/select`：打开本机文件夹选择对话框并保存下载根目录。
 - `POST /api/cookies`、`DELETE /api/cookies`：上传/清除 cookies。
-- `POST /api/cookies/from-browser`：通过 yt-dlp 从本机浏览器导入 YouTube/Google cookies；请求体可传 `{ "browser": "auto" }` 或指定 `edge`、`chrome`、`firefox` 等浏览器。
+- `POST /api/cookies/from-browser`：通过 yt-dlp 从本机浏览器导入 YouTube/Google cookies；请求体可传 `{ "browser": "auto" }` 或指定 `edge`、`chrome`、`firefox` 等浏览器；当 Edge 锁库时，可在用户确认后传 `{ "browser": "edge", "close_browser_if_locked": true }` 关闭 Edge 并重试导入。
 - `GET /api/diagnostics`：依赖和运行状态诊断。
 
 ## 测试
 
-默认自动测试采用分层策略：后端使用单元测试和 mock 覆盖 yt-dlp 映射、任务状态与 API 行为，前端使用组件测试覆盖解析、字幕选择、任务中心和格式元信息展示；真实 YouTube 下载作为可选手动验收，不纳入默认测试命令。
+默认自动测试采用分层策略：后端使用单元测试和 mock 覆盖 yt-dlp 映射、任务状态、API 行为、Edge 锁库和 DPAPI fallback，前端使用组件测试覆盖解析、字幕选择、任务中心、cookies 锁库提示和格式元信息展示；真实 YouTube 下载作为可选手动验收，不纳入默认测试命令。
 
 后端：
 
@@ -159,7 +161,7 @@ npm run build
 
 - 分析成功但下载失败：先检查 `GET /api/diagnostics` 或顶部状态，确认 `yt-dlp`、JS runtime、`ffmpeg` 和 cookies 是否可用；`ffprobe` 为可选诊断项，不影响常规下载。
 - 高分辨率不可用：YouTube 常把视频和音频分离，缺少可用 `ffmpeg` 时无法合并。系统会优先使用内置 `imageio-ffmpeg`；如果仍不可用或所选高度不存在，任务会失败并显示原因，不会降级成 360p。若视频没有所选高度，任务中心会显示低于所选高度的最高可用分辨率，并提供“以 xx 重启”按钮。
-- 需要登录或遇到 bot 校验的视频失败：先在“解析链接”面板点击“从浏览器导入”；如果浏览器未登录 YouTube、浏览器 cookie 数据库被锁定或系统密钥链不可用，再改用手动上传有效的 `cookies.txt`。
+- 需要登录或遇到 bot 校验的视频失败：先在“解析链接”面板点击“从浏览器导入”。如果 Edge 正在运行导致 cookie 数据库被锁定，界面会提示确认关闭 Edge 后再导入；如果 yt-dlp 直接解密 Edge cookies 失败，应用会尝试临时 headless Edge DevTools fallback；如果浏览器未登录 YouTube、系统密钥链不可用或自动导入仍失败，再改用手动上传有效的 `cookies.txt`。
 - 新任务立刻失败：查看任务中心失败原因；常见原因包括网络不可达、cookies 失效、视频不可用、格式被删除或 yt-dlp 需要更新。
 - 下载目录无文件：确认设置中的下载目录存在且有写入权限。
 

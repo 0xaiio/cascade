@@ -7,7 +7,7 @@ import pytest
 from yt_dlp.cookies import YoutubeDLCookieJar
 
 from app.schemas import DownloadOptions, FormatOption
-from app.ytdlp_service import YtDlpService
+from app.ytdlp_service import BrowserCookieImportError, YtDlpService
 
 
 def test_resolution_option_limits_best_video_height(monkeypatch, tmp_path: Path) -> None:
@@ -187,6 +187,108 @@ def test_import_browser_cookies_saves_only_youtube_related_cookies(monkeypatch, 
     assert "UNRELATED_SECRET" not in content
 
 
+def test_import_browser_cookies_reports_locked_edge_database(monkeypatch, tmp_path: Path) -> None:
+    def fake_extract(browser_name, profile=None, logger=None, *, keyring=None, container=None):
+        raise RuntimeError("Could not copy Chrome cookie database. See https://github.com/yt-dlp/yt-dlp/issues/7271")
+
+    monkeypatch.setattr("app.ytdlp_service.extract_cookies_from_browser", fake_extract, raising=False)
+
+    with pytest.raises(BrowserCookieImportError) as exc_info:
+        YtDlpService(download_dir=tmp_path).import_browser_cookies("edge", tmp_path / "cookies.txt")
+
+    error = exc_info.value
+    assert error.code == "browser_locked"
+    assert error.browser == "edge"
+    assert "Edge" in error.message
+    assert not (tmp_path / "cookies.txt").exists()
+
+
+def test_import_browser_cookies_closes_edge_and_retries_when_allowed(monkeypatch, tmp_path: Path) -> None:
+    jar = YoutubeDLCookieJar()
+    jar.set_cookie(_cookie(".youtube.com", "VISITOR_INFO1_LIVE", "YOUTUBE_SECRET"))
+    attempts: list[str] = []
+    closed: list[str] = []
+
+    def fake_extract(browser_name, profile=None, logger=None, *, keyring=None, container=None):
+        attempts.append(browser_name)
+        if len(attempts) == 1:
+            raise RuntimeError("Could not copy Chrome cookie database. See https://github.com/yt-dlp/yt-dlp/issues/7271")
+        return jar
+
+    service = YtDlpService(download_dir=tmp_path)
+    monkeypatch.setattr("app.ytdlp_service.extract_cookies_from_browser", fake_extract, raising=False)
+    monkeypatch.setattr(service, "_close_browser_for_cookie_import", lambda browser: closed.append(browser), raising=False)
+
+    result = service.import_browser_cookies("edge", tmp_path / "cookies.txt", close_browser_if_locked=True)
+
+    assert result.browser == "edge"
+    assert result.imported_count == 1
+    assert attempts == ["edge", "edge"]
+    assert closed == ["edge"]
+    assert "YOUTUBE_SECRET" in (tmp_path / "cookies.txt").read_text(encoding="utf-8")
+
+
+def test_import_browser_cookies_uses_edge_cdp_fallback_after_dpapi_failure(monkeypatch, tmp_path: Path) -> None:
+    jar = YoutubeDLCookieJar()
+    jar.set_cookie(_cookie(".youtube.com", "VISITOR_INFO1_LIVE", "YOUTUBE_SECRET"))
+    cdp_calls: list[bool] = []
+
+    def fake_extract(browser_name, profile=None, logger=None, *, keyring=None, container=None):
+        raise RuntimeError("Failed to decrypt with DPAPI. See https://github.com/yt-dlp/yt-dlp/issues/10927")
+
+    service = YtDlpService(download_dir=tmp_path)
+    monkeypatch.setattr("app.ytdlp_service.extract_cookies_from_browser", fake_extract, raising=False)
+    monkeypatch.setattr(service, "_extract_edge_cookies_via_cdp", lambda: cdp_calls.append(True) or jar, raising=False)
+
+    result = service.import_browser_cookies("edge", tmp_path / "cookies.txt")
+
+    assert result.browser == "edge"
+    assert result.imported_count == 1
+    assert cdp_calls == [True]
+    assert "YOUTUBE_SECRET" in (tmp_path / "cookies.txt").read_text(encoding="utf-8")
+
+
+def test_edge_cdp_fallback_terminates_process_tree(monkeypatch, tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+
+    class FakeProcess:
+        pid = 1234
+
+        def terminate(self):
+            raise AssertionError("Windows cleanup should use taskkill for the process tree.")
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+
+    monkeypatch.setattr("app.ytdlp_service.os.name", "nt")
+    monkeypatch.setattr("app.ytdlp_service.subprocess.run", fake_run)
+
+    YtDlpService(download_dir=tmp_path)._terminate_edge_process(FakeProcess())
+
+    assert calls == [["taskkill", "/PID", "1234", "/F", "/T"]]
+
+
+def test_auto_browser_cookie_import_prioritizes_locked_edge_error(monkeypatch, tmp_path: Path) -> None:
+    empty_jar = YoutubeDLCookieJar()
+    attempts: list[str] = []
+
+    def fake_extract(browser_name, profile=None, logger=None, *, keyring=None, container=None):
+        attempts.append(browser_name)
+        if browser_name == "edge":
+            raise RuntimeError("Could not copy Chrome cookie database. See https://github.com/yt-dlp/yt-dlp/issues/7271")
+        return empty_jar
+
+    monkeypatch.setattr("app.ytdlp_service.AUTO_BROWSER_COOKIE_CANDIDATES", ["edge", "chrome"])
+    monkeypatch.setattr("app.ytdlp_service.extract_cookies_from_browser", fake_extract, raising=False)
+
+    with pytest.raises(BrowserCookieImportError) as exc_info:
+        YtDlpService(download_dir=tmp_path).import_browser_cookies("auto", tmp_path / "cookies.txt")
+
+    assert exc_info.value.code == "browser_locked"
+    assert exc_info.value.browser == "edge"
+    assert attempts == ["edge", "chrome"]
+
+
 def test_extract_metadata_maps_playlist_entries_formats_and_subtitles(monkeypatch, tmp_path: Path) -> None:
     captured_opts = {}
 
@@ -233,6 +335,8 @@ def test_extract_metadata_maps_playlist_entries_formats_and_subtitles(monkeypatc
     )
 
     assert captured_opts["cookiefile"] == str(tmp_path / "cookies.txt")
+    assert captured_opts["ignoreconfig"] is True
+    assert captured_opts["extract_flat"] == "in_playlist"
     assert result.is_playlist is True
     assert result.title == "Course"
     assert result.entries[0].title == "Intro"
@@ -240,6 +344,17 @@ def test_extract_metadata_maps_playlist_entries_formats_and_subtitles(monkeypatc
     assert [fmt.filesize for fmt in result.formats] == [10_000, 20_000]
     assert result.subtitles[0].language == "en"
     assert result.automatic_subtitles[0].language == "zh-Hans"
+
+
+def test_download_options_ignore_user_ytdlp_config(tmp_path: Path) -> None:
+    service = YtDlpService(download_dir=tmp_path)
+
+    opts = service.build_download_options(
+        DownloadOptions(mode="video_subtitles", resolution="best"),
+        cookies_path=None,
+    )
+
+    assert opts["ignoreconfig"] is True
 
 
 def _cookie(domain: str, name: str, value: str) -> Cookie:

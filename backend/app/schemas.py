@@ -171,6 +171,7 @@ class CookieStatus(BaseModel):
 
 class BrowserCookieImportRequest(BaseModel):
     browser: str = "auto"
+    close_browser_if_locked: bool = False
 
 
 class DiagnosticsRead(BaseModel):

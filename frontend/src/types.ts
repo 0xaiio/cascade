@@ -128,6 +128,13 @@ export interface CookieStatus {
   imported_count?: number | null;
 }
 
+export interface ApiErrorDetail {
+  code?: string;
+  browser?: string | null;
+  message?: string;
+  raw_detail?: string | null;
+}
+
 export interface ResolutionFallback {
   requested_resolution: string;
   fallback_resolution: string;

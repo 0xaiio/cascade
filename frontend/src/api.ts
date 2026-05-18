@@ -1,4 +1,24 @@
-import type { AnalyzeResponse, CookieStatus, DownloadOptions, Job, JobBatchAction, JobBatchActionResponse, Settings } from "./types";
+import type {
+  AnalyzeResponse,
+  ApiErrorDetail,
+  CookieStatus,
+  DownloadOptions,
+  Job,
+  JobBatchAction,
+  JobBatchActionResponse,
+  Settings
+} from "./types";
+
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+    public detail: ApiErrorDetail | string | null
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -7,7 +27,11 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   });
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
-    throw new Error(payload?.detail ?? `Request failed with ${response.status}`);
+    const detail = payload?.detail ?? null;
+    if (detail && typeof detail === "object") {
+      throw new ApiError(detail.message ?? `Request failed with ${response.status}`, response.status, detail);
+    }
+    throw new ApiError(detail ?? `Request failed with ${response.status}`, response.status, detail);
   }
   if (response.status === 204) {
     return undefined as T;
@@ -85,10 +109,10 @@ export function uploadCookies(file: File): Promise<CookieStatus> {
   });
 }
 
-export function importBrowserCookies(browser: string): Promise<CookieStatus> {
+export function importBrowserCookies(browser: string, closeBrowserIfLocked = false): Promise<CookieStatus> {
   return request<CookieStatus>("/api/cookies/from-browser", {
     method: "POST",
-    body: JSON.stringify({ browser })
+    body: JSON.stringify({ browser, close_browser_if_locked: closeBrowserIfLocked })
   });
 }
 

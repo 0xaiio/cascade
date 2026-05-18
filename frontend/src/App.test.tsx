@@ -185,14 +185,26 @@ const settingsPayload = {
   ffmpeg: { ffmpeg: true, ffprobe: true }
 };
 
+const lockedEdgeCookieDetail = {
+  code: "browser_locked",
+  browser: "edge",
+  message: "Edge 正在运行，cookies 数据库被锁定。请关闭 Edge 后重试，或确认由应用关闭 Edge 并重新导入。",
+  raw_detail: "Could not copy Chrome cookie database."
+};
+
 let currentJobsPayload: Job[] = [jobPayload, pausedJobPayload, playlistJobPayload];
 let currentSettingsPayload = settingsPayload;
+let browserCookieImportLocked = false;
+let analyzeLockedByEdgeCookies = false;
 
 describe("App", () => {
   beforeEach(() => {
     currentAnalyzePayload = analyzePayload;
     currentJobsPayload = [jobPayload, pausedJobPayload, playlistJobPayload];
     currentSettingsPayload = settingsPayload;
+    browserCookieImportLocked = false;
+    analyzeLockedByEdgeCookies = false;
+    vi.stubGlobal("confirm", vi.fn(() => true));
     vi.stubGlobal("EventSource", class {
       onmessage: ((event: MessageEvent) => void) | null = null;
       close = vi.fn();
@@ -217,6 +229,10 @@ describe("App", () => {
           return Response.json({ enabled: true, filename: "cookies.txt" });
         }
         if (url.endsWith("/api/cookies/from-browser") && init?.method === "POST") {
+          const body = JSON.parse(String(init.body));
+          if (browserCookieImportLocked && !body.close_browser_if_locked) {
+            return Response.json({ detail: lockedEdgeCookieDetail }, { status: 409 });
+          }
           currentSettingsPayload = { ...currentSettingsPayload, cookies_enabled: true };
           return Response.json({
             enabled: true,
@@ -262,6 +278,10 @@ describe("App", () => {
           return new Response(null, { status: 204 });
         }
         if (url.endsWith("/api/analyze")) {
+          if (analyzeLockedByEdgeCookies && !currentSettingsPayload.cookies_enabled) {
+            return Response.json({ detail: lockedEdgeCookieDetail }, { status: 409 });
+          }
+          analyzeLockedByEdgeCookies = false;
           return Response.json(currentAnalyzePayload);
         }
         return Response.json({});
@@ -371,11 +391,55 @@ describe("App", () => {
         "/api/cookies/from-browser",
         expect.objectContaining({
           method: "POST",
-          body: JSON.stringify({ browser: "edge" })
+          body: JSON.stringify({ browser: "edge", close_browser_if_locked: false })
         })
       );
     });
     expect(await within(analyzer).findByText("已启用 cookies")).toBeInTheDocument();
+  });
+
+  test("shows locked Edge cookies prompt and imports after confirmation", async () => {
+    browserCookieImportLocked = true;
+    const user = userEvent.setup();
+    render(<App />);
+
+    const analyzer = (await screen.findByRole("heading", { name: "解析链接" })).closest("form") as HTMLElement;
+    await user.selectOptions(within(analyzer).getByLabelText("浏览器 cookies 来源"), "edge");
+    await user.click(within(analyzer).getByRole("button", { name: "从浏览器导入" }));
+
+    expect(await within(analyzer).findByText(lockedEdgeCookieDetail.message)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(lockedEdgeCookieDetail.message);
+    await user.click(within(analyzer).getByRole("button", { name: "关闭 Edge 并导入" }));
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/cookies/from-browser",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ browser: "edge", close_browser_if_locked: true })
+        })
+      );
+    });
+    expect(await within(analyzer).findByText("已启用 cookies")).toBeInTheDocument();
+  });
+
+  test("retries playlist analyze after confirmed locked Edge cookies import", async () => {
+    analyzeLockedByEdgeCookies = true;
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.type(screen.getByLabelText("视频或 playlist 链接"), "https://youtube.com/playlist?list=abc");
+    await user.click(screen.getByRole("button", { name: "解析链接" }));
+
+    expect((await screen.findAllByText(lockedEdgeCookieDetail.message)).length).toBeGreaterThan(0);
+    expect(screen.queryByText("Batch")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭 Edge 并导入" }));
+
+    expect(await screen.findByText("Batch")).toBeInTheDocument();
+    const analyzeCalls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(([input]) =>
+      String(input).endsWith("/api/analyze")
+    );
+    expect(analyzeCalls).toHaveLength(2);
   });
 
   test("autosaves concurrency without a save settings button", async () => {

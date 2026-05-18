@@ -367,6 +367,24 @@ th {
   font-weight: 850;
 }
 
+.cookie-lock-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  margin-top: 4px;
+  padding: 10px 12px;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
 .compact-file-button {
   width: auto;
   margin-top: 0;

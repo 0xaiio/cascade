@@ -33,7 +33,7 @@ from .schemas import (
     SettingsUpdate,
     VideoEntry,
 )
-from .ytdlp_service import YtDlpService
+from .ytdlp_service import BrowserCookieImportError, YtDlpService
 
 
 def create_app(
@@ -81,6 +81,8 @@ def create_app(
                 raise
             try:
                 service.import_browser_cookies("auto", app_settings.cookies_path)
+            except BrowserCookieImportError:
+                raise
             except Exception as import_exc:
                 raise RuntimeError(f"{exc} Browser cookies import failed: {import_exc}") from import_exc
             return service.extract_metadata(url, cookies_path=app_settings.cookies_path)
@@ -102,6 +104,8 @@ def create_app(
     def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
         try:
             return _extract_metadata_with_cookies(request.url, request.cookies_enabled)
+        except BrowserCookieImportError as exc:
+            raise HTTPException(status_code=_cookie_import_status_code(exc), detail=exc.to_detail()) from exc
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -109,6 +113,8 @@ def create_app(
     async def create_job(request: CreateJobRequest, session: SessionDep) -> JobRead:
         try:
             analysis = _extract_metadata_with_cookies(request.url, True)
+        except BrowserCookieImportError as exc:
+            raise HTTPException(status_code=_cookie_import_status_code(exc), detail=exc.to_detail()) from exc
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -280,7 +286,14 @@ def create_app(
     @app.post("/api/cookies/from-browser", response_model=CookieStatus)
     async def import_cookies_from_browser(request: BrowserCookieImportRequest) -> CookieStatus:
         try:
-            result = await asyncio.to_thread(service.import_browser_cookies, request.browser, app_settings.cookies_path)
+            result = await asyncio.to_thread(
+                service.import_browser_cookies,
+                request.browser,
+                app_settings.cookies_path,
+                request.close_browser_if_locked,
+            )
+        except BrowserCookieImportError as exc:
+            raise HTTPException(status_code=_cookie_import_status_code(exc), detail=exc.to_detail()) from exc
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _cookie_status_from_import(result)
@@ -317,6 +330,10 @@ def _cookie_status_from_import(result: Any) -> CookieStatus:
 def _is_cookie_required_error(exc: Exception) -> bool:
     message = str(exc).lower()
     return "sign in to confirm" in message and ("cookies-from-browser" in message or "cookies" in message)
+
+
+def _cookie_import_status_code(exc: BrowserCookieImportError) -> int:
+    return 409 if exc.code == "browser_locked" else 400
 
 
 def _selected_entries(url: str, analysis: AnalyzeResponse, playlist_items: list[int] | None) -> list[VideoEntry]:

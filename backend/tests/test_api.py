@@ -13,6 +13,7 @@ from app.db import create_app_engine, init_db
 from app.main import create_app
 from app.models import Job, JobItem, Setting
 from app.schemas import AnalyzeResponse, DownloadOptions, FormatOption, SubtitleOption, VideoEntry
+from app.ytdlp_service import BrowserCookieImportError
 
 
 class FakeYtDlpService:
@@ -103,7 +104,7 @@ class BrowserImportYtDlpService(FakeYtDlpService):
         super().__init__()
         self.imports: list[str] = []
 
-    def import_browser_cookies(self, browser, target_path):
+    def import_browser_cookies(self, browser, target_path, close_browser_if_locked=False):
         self.imports.append(browser)
         target_path.parent.mkdir(parents=True, exist_ok=True)
         target_path.write_text("SECRET_COOKIE_VALUE", encoding="utf-8")
@@ -126,6 +127,22 @@ class BotChallengeYtDlpService(BrowserImportYtDlpService):
         if cookies_path is None or not Path(cookies_path).exists():
             raise RuntimeError("Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies")
         return super().extract_metadata(url, cookies_path=cookies_path)
+
+
+class LockedEdgeBrowserImportService(BotChallengeYtDlpService):
+    def import_browser_cookies(self, browser, target_path, close_browser_if_locked=False):
+        self.imports.append((browser, close_browser_if_locked))
+        if not close_browser_if_locked:
+            raise BrowserCookieImportError.browser_locked("edge", "Could not copy Chrome cookie database.")
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_text("SECRET_COOKIE_VALUE", encoding="utf-8")
+        return {
+            "enabled": True,
+            "filename": target_path.name,
+            "source": "browser",
+            "browser": "edge",
+            "imported_count": 4,
+        }
 
 
 def make_settings(tmp_path: Path) -> AppSettings:
@@ -368,6 +385,41 @@ def test_import_browser_cookies_endpoint_does_not_expose_cookie_body(tmp_path: P
     assert (tmp_path / "data" / "cookies.txt").exists()
 
 
+def test_import_browser_cookies_endpoint_reports_locked_edge_database(tmp_path: Path) -> None:
+    service = LockedEdgeBrowserImportService()
+    client = make_client(tmp_path, service=service)
+
+    response = client.post("/api/cookies/from-browser", json={"browser": "edge"})
+
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["code"] == "browser_locked"
+    assert detail["browser"] == "edge"
+    assert "Edge" in detail["message"]
+    assert "SECRET_COOKIE_VALUE" not in str(detail)
+    assert service.imports == [("edge", False)]
+
+
+def test_import_browser_cookies_endpoint_closes_edge_when_confirmed(tmp_path: Path) -> None:
+    service = LockedEdgeBrowserImportService()
+    client = make_client(tmp_path, service=service)
+
+    response = client.post(
+        "/api/cookies/from-browser",
+        json={"browser": "edge", "close_browser_if_locked": True},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["enabled"] is True
+    assert payload["source"] == "browser"
+    assert payload["browser"] == "edge"
+    assert payload["imported_count"] == 4
+    assert "SECRET_COOKIE_VALUE" not in str(payload)
+    assert service.imports == [("edge", True)]
+    assert (tmp_path / "data" / "cookies.txt").exists()
+
+
 def test_analyze_auto_imports_browser_cookies_for_playlist_bot_challenge(tmp_path: Path) -> None:
     service = BotChallengeYtDlpService()
     client = make_client(tmp_path, service=service)
@@ -379,6 +431,20 @@ def test_analyze_auto_imports_browser_cookies_for_playlist_bot_challenge(tmp_pat
     assert service.imports == ["auto"]
     assert service.extract_calls[0] is None
     assert service.extract_calls[1] == tmp_path / "data" / "cookies.txt"
+
+
+def test_analyze_returns_structured_locked_edge_cookie_error(tmp_path: Path) -> None:
+    service = LockedEdgeBrowserImportService()
+    client = make_client(tmp_path, service=service)
+
+    response = client.post("/api/analyze", json={"url": "https://youtube.com/playlist?list=abc"})
+
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["code"] == "browser_locked"
+    assert detail["browser"] == "edge"
+    assert "Edge" in detail["message"]
+    assert service.imports == [("auto", False)]
 
 
 def test_diagnostics_returns_runtime_and_cookie_status(tmp_path: Path) -> None:

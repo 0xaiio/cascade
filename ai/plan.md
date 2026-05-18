@@ -454,3 +454,60 @@ Thumbs.db
 - 保持“不静默降级”的既有原则：只有用户点击 fallback 重启按钮后才会用较低分辨率重新下载。
 - fallback 只针对选择了数字清晰度策略的任务；如果用户选择的是具体 `format_id`，不自动推断替代格式。
 - 如果 metadata 查询也失败，或没有任何低于请求高度的格式，则任务中心显示原始失败原因，不提供 fallback 重启按钮。
+
+# 2026-05-18 +08:00 - Edge Cookies 锁库导入修复计划
+
+## Summary
+根因已定位：当前后端直接调用 `yt_dlp.cookies.extract_cookies_from_browser("edge")`，但 Windows 上 Edge 正在运行时会锁定 `Default\Network\Cookies` 数据库，yt-dlp 会抛出 `Could not copy Chrome cookie database`，对应官方问题 yt-dlp/yt-dlp#7271：https://github.com/yt-dlp/yt-dlp/issues/7271。
+修复目标：保留自动导入 cookies，但当 Edge 锁库时给出明确、可操作的 UI；用户确认后应用关闭 Edge、重新导入 cookies，并自动重试 playlist 解析。完成后追加本计划到 `ai/plan.md`、更新 `README.md`、验证 Edge 成功、提交并 `git push origin main`。
+
+## Key Changes
+- 后端 cookies 导入改为可诊断流程：
+  - `POST /api/cookies/from-browser` 请求体新增 `close_browser_if_locked: boolean = false`。
+  - 当 Edge 抛出 `Could not copy Chrome cookie database` 时，返回结构化错误：`code=browser_locked`、`browser=edge`、友好中文提示。
+  - 当 `close_browser_if_locked=true` 且 browser 为 `edge` 或 `auto` 时，后端先关闭 `msedge.exe` 进程，等待 Cookies 数据库解锁，再重试 yt-dlp Edge cookies 导入。
+  - `auto` 模式下如果 Edge 锁库且其他浏览器没有 YouTube/Google cookies，优先返回 Edge 锁库错误，不再展示一长串无关浏览器失败信息。
+  - 不关闭 Chrome/Firefox/Brave 等其他浏览器；本次只实现并验证 Edge。
+- 前端解析区交互：
+  - “从浏览器导入”首次仍先安全尝试导入，不主动关闭浏览器。
+  - 若收到 `browser_locked`，在“解析链接”面板显示紧凑提示：Edge 正在运行，cookies 数据库被锁定。
+  - 提供按钮“关闭 Edge 并导入”，点击前用确认弹窗说明会关闭所有 Edge 窗口；确认后调用 `{ browser: "edge", close_browser_if_locked: true }`。
+  - 如果该错误来自解析 playlist 过程，导入成功后自动重试刚才的 playlist 解析。
+- 错误与状态表达：
+  - API 客户端支持读取结构化错误，不再把对象错误显示成 `[object Object]`。
+  - Cookie 导入成功后继续只返回 `enabled/source/browser/imported_count/filename`，不回显任何 cookie 内容。
+  - 下载任务若因 cookies 缺失或失效失败，错误提示改为引导用户到“解析链接”区导入 Edge cookies 后重启任务。
+- 文档与计划：
+  - 追加本计划到 `ai/plan.md`。
+  - `README.md` 更新 Edge 导入说明：Edge 正在运行会锁库；应用会在用户确认后关闭 Edge 再导入；手动上传 `cookies.txt` 仍是备用方案。
+
+## Test Plan
+- 后端单元/API 测试：
+  - mock `extract_cookies_from_browser("edge")` 抛出 `Could not copy Chrome cookie database`，断言 `/api/cookies/from-browser` 返回 `400/409` 结构化 `browser_locked` 错误。
+  - 请求 `{ browser: "edge", close_browser_if_locked: true }` 时，断言调用 Edge 关闭 helper，并在第二次导入成功后写入 `data/cookies.txt`。
+  - `browser=auto` 时，Edge 锁库且其他浏览器无 cookies，断言最终错误仍是 `browser_locked`，而不是混杂浏览器错误串。
+  - `/api/analyze` 遇到 bot challenge 且 Edge 锁库时返回结构化 cookies 错误；导入成功后再次 analyze 可成功。
+  - 确认响应与日志不包含 cookie value。
+- 前端测试：
+  - 点击“从浏览器导入”收到 `browser_locked` 后，解析区显示 Edge 锁库提示和“关闭 Edge 并导入”按钮。
+  - 点击确认按钮后，请求体包含 `{ browser: "edge", close_browser_if_locked: true }`，成功后 cookies 状态变为已启用。
+  - playlist 解析因锁库失败后，确认关闭 Edge 并导入成功，会自动重试原 playlist URL。
+  - 结构化 API 错误在全局 alert 中显示可读中文消息。
+- 全量验证：
+  - `python -m pytest backend\tests -q`
+  - `npm test`
+  - `npm run build`
+  - `git diff --check`
+- Edge 真实验收：
+  - 确认 Edge 已登录 YouTube。
+  - 保持 Edge 打开，点击“从浏览器导入”，应出现锁库提示。
+  - 点击“关闭 Edge 并导入”，应用关闭 Edge，导入成功，`cookies_enabled=true` 且 `imported_count > 0`。
+  - 使用 playlist URL `https://youtube.com/playlist?list=PLHTh1InhhwT47Xpx7Cn-bPw9Qygjr98rs&si=jZPDPZwnzrtZarXj` 解析成功并显示 playlist 条目。
+  - 若真实验收失败，不提交、不推送。
+
+## Assumptions
+- 已选择“确认后关闭 Edge”方案；应用不得在用户确认前主动关闭浏览器。
+- Edge cookie profile 使用 yt-dlp 默认发现逻辑；本次不新增 profile 选择 UI。
+- 关闭 Edge 仅在 Windows 上实现；其他系统遇到锁库时显示手动关闭后重试提示。
+- 手动上传 cookies 功能保持不变。
+- 修复完成后提交信息使用 `fix: handle locked edge cookies import` 并推送 `origin main`。

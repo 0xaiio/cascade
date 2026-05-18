@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
+  ApiError,
   analyzeUrl,
   batchJobAction,
   createJob,
@@ -75,6 +76,12 @@ const INITIAL_OPTIONS: DownloadOptions = {
   notify_on_complete: false
 };
 
+type BrowserCookieLock = {
+  browser: string;
+  message: string;
+  pendingAnalyzeUrl: string | null;
+};
+
 export default function App() {
   const [url, setUrl] = useState("");
   const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null);
@@ -87,6 +94,7 @@ export default function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [browserCookieLock, setBrowserCookieLock] = useState<BrowserCookieLock | null>(null);
   const [history, setHistory] = useState<string[]>(() => JSON.parse(localStorage.getItem("download-history") ?? "[]"));
 
   useEffect(() => {
@@ -114,22 +122,41 @@ export default function App() {
 
   const duplicateWarning = url.trim().length > 0 && history.includes(url.trim());
 
+  function applyAnalysisResult(result: AnalyzeResponse) {
+    setAnalysis(result);
+    setSelectedItems(new Set(result.entries.map((entry) => entry.index)));
+    setOptions((current) => ({
+      ...current,
+      resolution: chooseAvailableResolution(result, settings?.default_resolution ?? current.resolution),
+      format_id: null,
+      subtitle_languages: settings?.default_subtitle_languages ?? current.subtitle_languages
+    }));
+    setBrowserCookieLock(null);
+  }
+
+  async function runAnalyze(targetUrl: string) {
+    applyAnalysisResult(await analyzeUrl(targetUrl));
+  }
+
+  function handleAppError(err: unknown, fallback: string, pendingAnalyzeUrl: string | null = null) {
+    const lock = browserCookieLockFromError(err, pendingAnalyzeUrl);
+    if (lock) {
+      setBrowserCookieLock(lock);
+      setError(lock.message);
+      return;
+    }
+    setError(err instanceof Error ? err.message : fallback);
+  }
+
   async function handleAnalyze(event: FormEvent) {
     event.preventDefault();
     setError(null);
     setIsAnalyzing(true);
+    const targetUrl = url.trim();
     try {
-      const result = await analyzeUrl(url.trim());
-      setAnalysis(result);
-      setSelectedItems(new Set(result.entries.map((entry) => entry.index)));
-      setOptions((current) => ({
-        ...current,
-        resolution: chooseAvailableResolution(result, settings?.default_resolution ?? current.resolution),
-        format_id: null,
-        subtitle_languages: settings?.default_subtitle_languages ?? current.subtitle_languages
-      }));
+      await runAnalyze(targetUrl);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "解析失败");
+      handleAppError(err, "解析失败", targetUrl);
     } finally {
       setIsAnalyzing(false);
     }
@@ -150,7 +177,7 @@ export default function App() {
       setHistory(nextHistory);
       localStorage.setItem("download-history", JSON.stringify(nextHistory));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "创建任务失败");
+      handleAppError(err, "创建任务失败");
     } finally {
       setIsSubmitting(false);
     }
@@ -168,16 +195,37 @@ export default function App() {
     if (!file) return;
     await uploadCookies(file);
     setSettings(await getSettings());
+    setBrowserCookieLock(null);
   }
 
   async function handleCookieDelete() {
     await deleteCookies();
     setSettings(await getSettings());
+    setBrowserCookieLock(null);
   }
 
-  async function handleBrowserCookieImport(browser: string) {
-    await importBrowserCookies(browser);
+  async function handleBrowserCookieImport(browser: string, closeBrowserIfLocked = false) {
+    await importBrowserCookies(browser, closeBrowserIfLocked);
     setSettings(await getSettings());
+    setBrowserCookieLock(null);
+  }
+
+  async function handleLockedBrowserCookieImport() {
+    if (!browserCookieLock) return;
+    const confirmed = window.confirm("将关闭所有 Edge 窗口以释放 cookies 数据库，然后重新导入。是否继续？");
+    if (!confirmed) return;
+    const pendingAnalyzeUrl = browserCookieLock.pendingAnalyzeUrl;
+    setError(null);
+    await handleBrowserCookieImport("edge", true);
+    if (!pendingAnalyzeUrl) return;
+    setIsAnalyzing(true);
+    try {
+      await runAnalyze(pendingAnalyzeUrl);
+    } catch (err) {
+      handleAppError(err, "解析失败", pendingAnalyzeUrl);
+    } finally {
+      setIsAnalyzing(false);
+    }
   }
 
   function updateJobInList(job: Job) {
@@ -252,11 +300,17 @@ export default function App() {
               settings={settings}
               url={url}
               duplicateWarning={duplicateWarning}
+              browserCookieLock={browserCookieLock}
               isAnalyzing={isAnalyzing}
               onAnalyze={handleAnalyze}
-              onBrowserCookieImport={(browser) => handleBrowserCookieImport(browser).catch((err) => setError(err.message))}
-              onCookieDelete={() => void handleCookieDelete().catch((err) => setError(err.message))}
-              onCookieUpload={(file) => void handleCookieUpload(file).catch((err) => setError(err.message))}
+              onBrowserCookieImport={(browser) => handleBrowserCookieImport(browser).catch((err) => handleAppError(err, "导入 cookies 失败"))}
+              onCookieDelete={() => void handleCookieDelete().catch((err) => handleAppError(err, "清除 cookies 失败"))}
+              onCookieUpload={(file) => void handleCookieUpload(file).catch((err) => handleAppError(err, "上传 cookies 失败"))}
+              onLockedBrowserCookieImport={() =>
+                void handleLockedBrowserCookieImport().catch((err) =>
+                  handleAppError(err, "导入 cookies 失败", browserCookieLock?.pendingAnalyzeUrl ?? null)
+                )
+              }
               onUrlChange={setUrl}
             />
             {analysis && (
@@ -309,25 +363,43 @@ function StatusPill({ ok, label }: { ok?: boolean; label: string }) {
   );
 }
 
+function browserCookieLockFromError(err: unknown, pendingAnalyzeUrl: string | null): BrowserCookieLock | null {
+  if (!(err instanceof ApiError) || !err.detail || typeof err.detail !== "object") {
+    return null;
+  }
+  if (err.detail.code !== "browser_locked") {
+    return null;
+  }
+  return {
+    browser: err.detail.browser ?? "edge",
+    message: err.detail.message ?? err.message,
+    pendingAnalyzeUrl
+  };
+}
+
 function UrlAnalyzer({
   settings,
   url,
   duplicateWarning,
+  browserCookieLock,
   isAnalyzing,
   onAnalyze,
   onBrowserCookieImport,
   onCookieDelete,
   onCookieUpload,
+  onLockedBrowserCookieImport,
   onUrlChange
 }: {
   settings: Settings | null;
   url: string;
   duplicateWarning: boolean;
+  browserCookieLock: BrowserCookieLock | null;
   isAnalyzing: boolean;
   onAnalyze: (event: FormEvent) => void;
   onBrowserCookieImport: (browser: string) => Promise<void>;
   onCookieDelete: () => void;
   onCookieUpload: (file: File | null) => void;
+  onLockedBrowserCookieImport: () => void;
   onUrlChange: (value: string) => void;
 }) {
   const [browserCookieSource, setBrowserCookieSource] = useState("auto");
@@ -399,6 +471,14 @@ function UrlAnalyzer({
           </button>
         </div>
       </div>
+      {browserCookieLock && (
+        <div className="cookie-lock-note" role="status">
+          <span>{browserCookieLock.message}</span>
+          <button className="ghost-button" type="button" onClick={onLockedBrowserCookieImport} disabled={isImportingCookies}>
+            关闭 Edge 并导入
+          </button>
+        </div>
+      )}
       {duplicateWarning && <p className="hint">这个链接已经在下载历史中出现过。</p>}
       <button className="primary-button" type="submit" disabled={isAnalyzing || !url.trim()}>
         {isAnalyzing ? <Loader2 className="spin" size={18} /> : <Gauge size={18} />}

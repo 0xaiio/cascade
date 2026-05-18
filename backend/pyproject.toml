@@ -10,7 +10,8 @@ dependencies = [
   "imageio-ffmpeg>=0.5.1",
   "pydantic-settings>=2.6.0",
   "sqlmodel>=0.0.22",
-  "python-multipart>=0.0.12"
+  "python-multipart>=0.0.12",
+  "websockets>=15.0"
 ]
 
 [project.optional-dependencies]
