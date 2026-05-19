@@ -71,6 +71,7 @@ export interface JobItem {
   output_path: string | null;
   actual_width: number | null;
   actual_height: number | null;
+  actual_format: string | null;
   requested_resolution: string | null;
   fallback_resolution: string | null;
   resolution_fallback: ResolutionFallback | null;
@@ -97,6 +98,7 @@ export interface Job {
   error: string | null;
   download_dir: string | null;
   actual_resolution: string | null;
+  actual_format: string | null;
   resolution_fallback: ResolutionFallback | null;
   created_at: string;
   updated_at: string;

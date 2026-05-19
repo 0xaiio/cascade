@@ -18,7 +18,12 @@ def test_resolution_option_limits_best_video_height(monkeypatch, tmp_path: Path)
         cookies_path=None,
     )
 
-    assert opts["format"] == "bv*[height=1080][ext=mp4]+ba[ext=m4a]/bv*[height=1080]+ba/b[height=1080]"
+    assert opts["format"] == (
+        "bv*[height=1080][ext=mp4][vcodec^=avc1]+ba[ext=m4a][acodec^=mp4a]/"
+        "bv*[height=1080][ext=mp4]+ba[ext=m4a]/"
+        "bv*[height=1080]+ba/"
+        "b[height=1080]"
+    )
     assert "/best" not in opts["format"]
     assert "height<=1080" not in opts["format"]
     assert opts["merge_output_format"] == "mp4"
@@ -61,6 +66,24 @@ def test_resolution_can_be_extracted_from_progress_payload_requested_formats(tmp
     )
 
     assert resolution == (1920, 1080)
+
+
+def test_actual_format_can_be_extracted_from_progress_payload_requested_formats(tmp_path: Path) -> None:
+    service = YtDlpService(download_dir=tmp_path)
+
+    actual_format = service.actual_format_from_progress_payload(
+        {
+            "status": "finished",
+            "info_dict": {
+                "requested_formats": [
+                    {"format_id": "137", "ext": "mp4", "vcodec": "avc1.640028", "acodec": "none"},
+                    {"format_id": "140", "ext": "m4a", "vcodec": "none", "acodec": "mp4a.40.2"},
+                ]
+            },
+        }
+    )
+
+    assert actual_format == "mp4 · avc1 + mp4a"
 
 
 def test_suggests_highest_available_resolution_below_requested(tmp_path: Path) -> None:
@@ -114,16 +137,18 @@ def test_subtitle_only_options_skip_video_and_include_languages(tmp_path: Path) 
     assert opts["cookiefile"] == str(tmp_path / "cookies.txt")
 
 
-def test_explicit_resolution_fails_without_any_ffmpeg(monkeypatch, tmp_path: Path) -> None:
+def test_explicit_resolution_uses_single_file_selector_without_any_ffmpeg(monkeypatch, tmp_path: Path) -> None:
     service = YtDlpService(download_dir=tmp_path)
     monkeypatch.setattr("app.ytdlp_service.shutil.which", lambda name: None)
     monkeypatch.setitem(sys.modules, "imageio_ffmpeg", None)
 
-    with pytest.raises(RuntimeError, match="ffmpeg is required"):
-        service.build_download_options(
-            DownloadOptions(mode="video_subtitles", resolution="1080p"),
-            cookies_path=None,
-        )
+    opts = service.build_download_options(
+        DownloadOptions(mode="video_subtitles", resolution="1080p"),
+        cookies_path=None,
+    )
+
+    assert opts["format"] == "b[height=1080][ext=mp4]/b[height=1080]"
+    assert "ffmpeg_location" not in opts
 
 
 def test_download_options_enable_supported_js_runtime(monkeypatch, tmp_path: Path) -> None:

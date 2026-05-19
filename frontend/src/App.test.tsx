@@ -37,6 +37,7 @@ const jobPayload: Job = {
   finished_at: null,
   elapsed_seconds: 42,
   actual_resolution: "1920x1080",
+  actual_format: "mp4 · avc1 + mp4a",
   resolution_fallback: null,
   speed: 2048,
   eta: 10,
@@ -62,6 +63,7 @@ const jobPayload: Job = {
       elapsed_seconds: 42,
       actual_width: 1920,
       actual_height: 1080,
+      actual_format: "mp4 · avc1 + mp4a",
       requested_resolution: null,
       fallback_resolution: null,
       resolution_fallback: null,
@@ -83,6 +85,7 @@ const pausedJobPayload: Job = {
   progress: 34,
   finished_at: "2026-05-15T10:05:00Z",
   actual_resolution: "1280x720",
+  actual_format: "mp4 · avc1 + mp4a",
   items: [{ ...jobPayload.items[0], id: "item-paused", job_id: "job-paused", title: "Paused video", status: "paused" }]
 };
 
@@ -91,6 +94,7 @@ const playlistJobPayload: Job = {
   id: "job-playlist",
   title: "Playlist batch",
   actual_resolution: "混合分辨率",
+  actual_format: "混合格式",
   total_items: 2,
   completed_items: 0,
   failed_items: 0,
@@ -108,7 +112,8 @@ const playlistJobPayload: Job = {
       eta: 20,
       elapsed_seconds: 42,
       actual_width: 1920,
-      actual_height: 1080
+      actual_height: 1080,
+      actual_format: "mp4 · avc1 + mp4a"
     },
     {
       ...jobPayload.items[0],
@@ -124,7 +129,8 @@ const playlistJobPayload: Job = {
       eta: null,
       elapsed_seconds: 0,
       actual_width: null,
-      actual_height: null
+      actual_height: null,
+      actual_format: null
     }
   ]
 };
@@ -133,6 +139,12 @@ const resolutionFallback = {
   requested_resolution: "1080p",
   fallback_resolution: "720p",
   message: "当前没有 1080p 的视频，低于选定分辨率的最高可用分辨率是 720p。"
+};
+
+const automaticResolutionFallback = {
+  requested_resolution: "1080p",
+  fallback_resolution: "720p",
+  message: "已从 1080p 自动降级到 720p。"
 };
 
 const singleFallbackJobPayload: Job = {
@@ -306,12 +318,12 @@ describe("App", () => {
     expect(await screen.findByText("Batch")).toBeInTheDocument();
     expect(screen.getByText("One")).toBeInTheDocument();
     expect(screen.getByText("Two")).toBeInTheDocument();
-    expect(screen.getByLabelText("清晰度 / 格式")).toHaveValue("resolution:1080p");
+    expect(screen.getByLabelText("清晰度")).toHaveValue("resolution:1080p");
 
     await user.click(screen.getByLabelText("选择 One"));
     await user.selectOptions(screen.getByLabelText("下载模式"), "subtitles_only");
-    expect(screen.getByRole("option", { name: "22 · 720p · mp4 · 10.0 MB" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "137 · 1080p · 30fps · mp4 · 大小未知" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "22 · 720p · mp4 · 10.0 MB" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "137 · 1080p · 30fps · mp4 · 大小未知" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /已选 1 项：en/ }));
     const search = screen.getByLabelText("搜索字幕语言");
     await user.type(search, "zh");
@@ -499,7 +511,7 @@ describe("App", () => {
     ).toBeInTheDocument();
   });
 
-  test("shows selected format resolution and filesize details", async () => {
+  test("shows only resolution choices in the quality selector", async () => {
     const user = userEvent.setup();
     render(<App />);
 
@@ -507,9 +519,10 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "解析链接" }));
 
     await screen.findByText("Batch");
-    await user.selectOptions(screen.getByLabelText("清晰度 / 格式"), "format:22");
+    const quality = screen.getByLabelText("清晰度") as HTMLSelectElement;
 
-    expect(screen.getByText("已选格式：22 · 720p · mp4 · 10.0 MB")).toBeInTheDocument();
+    expect(Array.from(quality.options).map((option) => option.value)).not.toContain("format:22");
+    expect(screen.queryByText(/已选格式/)).not.toBeInTheDocument();
   });
 
   test("shows selected quality filesize beside the analyzed video title", async () => {
@@ -522,11 +535,8 @@ describe("App", () => {
     await screen.findByText("Batch");
     expect(screen.getByText("当前选择：1080p · 大小未知")).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText("清晰度 / 格式"), "resolution:720p");
+    await user.selectOptions(screen.getByLabelText("清晰度"), "resolution:720p");
     expect(screen.getByText("当前选择：720p · 10.0 MB")).toBeInTheDocument();
-
-    await user.selectOptions(screen.getByLabelText("清晰度 / 格式"), "format:22");
-    expect(screen.getByText("当前选择：22 · 720p · 10.0 MB")).toBeInTheDocument();
   });
 
   test("defaults speed limit to 2048 and submits null when cleared", async () => {
@@ -566,10 +576,10 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "解析链接" }));
 
     await screen.findByText("Batch");
-    expect(screen.getByLabelText("清晰度 / 格式")).toHaveValue("resolution:720p");
+    expect(screen.getByLabelText("清晰度")).toHaveValue("resolution:720p");
   });
 
-  test("submits a concrete format selected from the unified quality selector", async () => {
+  test("submits selected resolution with null concrete format", async () => {
     const user = userEvent.setup();
     render(<App />);
 
@@ -577,15 +587,15 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "解析链接" }));
 
     await screen.findByText("Batch");
-    await user.selectOptions(screen.getByLabelText("清晰度 / 格式"), "format:22");
+    await user.selectOptions(screen.getByLabelText("清晰度"), "resolution:720p");
     await user.click(screen.getByRole("button", { name: "加入下载队列" }));
 
     await waitFor(() => {
       const submittedBody = JSON.parse(
         String((fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1]?.body)
       );
-      expect(submittedBody.options.format_id).toBe("22");
-      expect(submittedBody.options.resolution).toBe("1080p");
+      expect(submittedBody.options.format_id).toBeNull();
+      expect(submittedBody.options.resolution).toBe("720p");
     });
   });
 
@@ -651,9 +661,11 @@ describe("App", () => {
     expect(await screen.findByText("Running video")).toBeInTheDocument();
     expect(screen.getAllByText(/2026-05-15 10:00:00/).length).toBeGreaterThan(0);
     expect(screen.getByText(/2026-05-15 10:05:00/)).toBeInTheDocument();
-    expect(screen.getByText(/1920x1080/)).toBeInTheDocument();
-    expect(screen.getByText(/1280x720/)).toBeInTheDocument();
+    expect(screen.getAllByText(/1920x1080/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/1280x720/).length).toBeGreaterThan(0);
     expect(screen.getByText(/混合分辨率/)).toBeInTheDocument();
+    expect(screen.getAllByText(/格式 mp4 · avc1 \+ mp4a/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/格式 混合格式/)).toBeInTheDocument();
   });
 
   test("does not show optional ffprobe status in the topbar", async () => {
@@ -711,6 +723,8 @@ describe("App", () => {
     expect(screen.getByText("剩余 00:20")).toBeInTheDocument();
     expect(screen.getAllByText("2.0 KB/s").length).toBeGreaterThan(0);
     expect(screen.getByText("大小未知 / 大小未知")).toBeInTheDocument();
+    expect(screen.getAllByText("分辨率 1920x1080").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("格式 mp4 · avc1 + mp4a").length).toBeGreaterThan(0);
   });
 
   test("restarts a single playlist item from task center", async () => {
@@ -760,5 +774,27 @@ describe("App", () => {
         body: JSON.stringify({ resolution: "720p" })
       })
     );
+  });
+
+  test("shows automatic fallback without restart action for succeeded playlist item", async () => {
+    currentJobsPayload = [
+      {
+        ...playlistJobPayload,
+        items: [
+          {
+            ...playlistJobPayload.items[0],
+            requested_resolution: "1080p",
+            fallback_resolution: "720p",
+            resolution_fallback: automaticResolutionFallback
+          },
+          playlistJobPayload.items[1]
+        ]
+      }
+    ];
+    render(<App />);
+
+    expect(await screen.findByText("Playlist batch")).toBeInTheDocument();
+    expect(screen.getByText(automaticResolutionFallback.message)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "以 720p 重启 Part one" })).not.toBeInTheDocument();
   });
 });

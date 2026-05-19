@@ -105,6 +105,7 @@ class JobItemRead(BaseModel):
     output_path: str | None = None
     actual_width: int | None = None
     actual_height: int | None = None
+    actual_format: str | None = None
     requested_resolution: str | None = None
     fallback_resolution: str | None = None
     resolution_fallback: ResolutionFallback | None = None
@@ -131,6 +132,7 @@ class JobRead(BaseModel):
     error: str | None = None
     download_dir: str | None = None
     actual_resolution: str | None = None
+    actual_format: str | None = None
     resolution_fallback: ResolutionFallback | None = None
     created_at: datetime
     updated_at: datetime

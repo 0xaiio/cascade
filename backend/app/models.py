@@ -65,6 +65,7 @@ class JobItem(SQLModel, table=True):
     output_path: Optional[str] = None
     actual_width: Optional[int] = None
     actual_height: Optional[int] = None
+    actual_format: Optional[str] = None
     options_json: Optional[str] = None
     requested_resolution: Optional[str] = None
     fallback_resolution: Optional[str] = None

@@ -39,7 +39,6 @@ import type {
   AnalyzeResponse,
   DownloadMode,
   DownloadOptions,
-  FormatOption,
   Job,
   JobBatchAction,
   ResolutionFallback,
@@ -170,6 +169,7 @@ export default function App() {
     try {
       const job = await createJob(analysis.url, {
         ...options,
+        format_id: null,
         playlist_items: playlistItems
       });
       setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
@@ -187,8 +187,8 @@ export default function App() {
     setOptions((current) => ({ ...current, [key]: value }));
   }
 
-  function updateQuality(resolution: string, formatId: string | null) {
-    setOptions((current) => ({ ...current, resolution, format_id: formatId }));
+  function updateQuality(resolution: string) {
+    setOptions((current) => ({ ...current, resolution, format_id: null }));
   }
 
   async function handleCookieUpload(file: File | null) {
@@ -586,16 +586,15 @@ function DownloadOptionsPanel({
   isSubmitting: boolean;
   onCreateJob: () => void;
   onOptionChange: <K extends keyof DownloadOptions>(key: K, value: DownloadOptions[K]) => void;
-  onQualityChange: (resolution: string, formatId: string | null) => void;
+  onQualityChange: (resolution: string) => void;
 }) {
-  const selectedFormat = analysis?.formats.find((format) => format.format_id === options.format_id) ?? null;
   const resolutionOptions = buildResolutionOptions(analysis);
-  const qualityValue = selectedFormat ? `format:${selectedFormat.format_id}` : `resolution:${options.resolution}`;
+  const qualityValue = `resolution:${options.resolution}`;
   const showMergeWarning =
     Boolean(analysis) &&
     !ffmpegAvailable &&
     options.mode !== "subtitles_only" &&
-    (Boolean(options.format_id) || Boolean(resolutionHeight(options.resolution)));
+    Boolean(resolutionHeight(options.resolution));
 
   return (
     <section className="panel options-panel">
@@ -620,38 +619,22 @@ function DownloadOptionsPanel({
       </label>
 
       <label className="field">
-        <span>清晰度 / 格式</span>
+        <span>清晰度</span>
         <select
-          aria-label="清晰度 / 格式"
+          aria-label="清晰度"
           value={qualityValue}
           onChange={(event) => {
             const value = event.target.value;
-            if (value.startsWith("format:")) {
-              onQualityChange(options.resolution, value.replace("format:", ""));
-              return;
-            }
-            onQualityChange(value.replace("resolution:", ""), null);
+            onQualityChange(value.replace("resolution:", ""));
           }}
           disabled={options.mode === "subtitles_only"}
         >
-          <optgroup label="清晰度策略">
-            {resolutionOptions.map((resolution) => (
-              <option key={resolution} value={`resolution:${resolution}`}>
-                {formatResolutionLabel(resolution)}
-              </option>
-            ))}
-          </optgroup>
-          {analysis && (
-            <optgroup label="具体格式">
-              {analysis.formats.map((format) => (
-                <option key={format.format_id} value={`format:${format.format_id}`}>
-                  {formatFormatOption(format)}
-                </option>
-              ))}
-            </optgroup>
-          )}
+          {resolutionOptions.map((resolution) => (
+            <option key={resolution} value={`resolution:${resolution}`}>
+              {formatResolutionLabel(resolution)}
+            </option>
+          ))}
         </select>
-        {selectedFormat && <p className="hint">已选格式：{formatFormatOption(selectedFormat)}</p>}
         {showMergeWarning && (
           <p className="warning-note">高分辨率 YouTube 视频需要 ffmpeg 合并音视频；当前环境不可用时任务会失败。</p>
         )}
@@ -1013,6 +996,7 @@ function JobQueue({
               <span>开始 {formatDateTime(job.started_at)}</span>
               <span>结束 {formatDateTime(job.finished_at)}</span>
               <span>分辨率 {job.actual_resolution ?? "检测中"}</span>
+              <span>格式 {job.actual_format ?? "检测中"}</span>
               <span>已用 {formatClock(job.elapsed_seconds)}</span>
               <span>剩余 {formatClock(job.eta)}</span>
               {job.speed ? <span>{formatBytesPerSecond(job.speed)}</span> : <span>-- KB/s</span>}
@@ -1023,9 +1007,15 @@ function JobQueue({
             {!isPlaylist && job.resolution_fallback && (
               <ResolutionFallbackNotice
                 fallback={job.resolution_fallback}
-                restartLabel={`以 ${job.resolution_fallback.fallback_resolution} 重启任务`}
-                restartAriaLabel={`以 ${job.resolution_fallback.fallback_resolution} 重启任务 ${title}`}
-                onRestart={() => onRestart(job.id, job.resolution_fallback?.fallback_resolution)}
+                restartLabel={job.status === "failed" ? `以 ${job.resolution_fallback.fallback_resolution} 重启任务` : undefined}
+                restartAriaLabel={
+                  job.status === "failed" ? `以 ${job.resolution_fallback.fallback_resolution} 重启任务 ${title}` : undefined
+                }
+                onRestart={
+                  job.status === "failed"
+                    ? () => onRestart(job.id, job.resolution_fallback?.fallback_resolution)
+                    : undefined
+                }
               />
             )}
             {job.items.length > 0 && isPlaylist && isExpanded && (
@@ -1052,6 +1042,8 @@ function JobQueue({
                     <div className="item-metrics">
                       <span>{formatPercent(item.progress)}</span>
                       <span>{formatFileSize(item.downloaded_bytes)} / {formatFileSize(item.total_bytes)}</span>
+                      <span>分辨率 {formatItemResolution(item)}</span>
+                      <span>格式 {item.actual_format ?? "检测中"}</span>
                       <span>已用 {formatClock(item.elapsed_seconds)}</span>
                       <span>剩余 {formatClock(item.eta)}</span>
                       {item.speed ? <span>{formatBytesPerSecond(item.speed)}</span> : <span>-- KB/s</span>}
@@ -1059,9 +1051,15 @@ function JobQueue({
                     {item.resolution_fallback && (
                       <ResolutionFallbackNotice
                         fallback={item.resolution_fallback}
-                        restartLabel={`以 ${item.resolution_fallback.fallback_resolution} 重启`}
-                        restartAriaLabel={`以 ${item.resolution_fallback.fallback_resolution} 重启 ${item.title}`}
-                        onRestart={() => onRestartItem(job.id, item.id, item.resolution_fallback?.fallback_resolution)}
+                        restartLabel={item.status === "failed" ? `以 ${item.resolution_fallback.fallback_resolution} 重启` : undefined}
+                        restartAriaLabel={
+                          item.status === "failed" ? `以 ${item.resolution_fallback.fallback_resolution} 重启 ${item.title}` : undefined
+                        }
+                        onRestart={
+                          item.status === "failed"
+                            ? () => onRestartItem(job.id, item.id, item.resolution_fallback?.fallback_resolution)
+                            : undefined
+                        }
                       />
                     )}
                     <div className="progress-bar item-progress">
@@ -1086,17 +1084,19 @@ function ResolutionFallbackNotice({
   onRestart
 }: {
   fallback: ResolutionFallback;
-  restartLabel: string;
-  restartAriaLabel: string;
-  onRestart: () => void;
+  restartLabel?: string;
+  restartAriaLabel?: string;
+  onRestart?: () => void;
 }) {
   return (
     <div className="resolution-fallback-note">
       <span>{fallback.message}</span>
-      <button className="ghost-button" type="button" aria-label={restartAriaLabel} onClick={onRestart}>
-        <RotateCcw size={15} />
-        {restartLabel}
-      </button>
+      {onRestart && restartLabel && restartAriaLabel && (
+        <button className="ghost-button" type="button" aria-label={restartAriaLabel} onClick={onRestart}>
+          <RotateCcw size={15} />
+          {restartLabel}
+        </button>
+      )}
     </div>
   );
 }
@@ -1176,28 +1176,7 @@ function formatFileSize(bytes: number | null | undefined): string {
   return `${value.toFixed(1)} ${units[unitIndex]}`;
 }
 
-function formatFormatOption(format: FormatOption): string {
-  const parts = [
-    format.format_id,
-    format.height ? `${format.height}p` : null,
-    format.fps ? `${Number.isInteger(format.fps) ? format.fps.toFixed(0) : format.fps}fps` : null,
-    format.ext,
-    formatFileSize(format.filesize)
-  ];
-  return parts.filter(Boolean).join(" · ");
-}
-
 function formatSelectedQualitySize(analysis: AnalyzeResponse, options: DownloadOptions): string {
-  if (options.format_id) {
-    const format = analysis.formats.find((item) => item.format_id === options.format_id);
-    if (!format) return `${options.format_id} · 大小未知`;
-    return [
-      format.format_id,
-      format.height ? `${format.height}p` : null,
-      formatFileSize(format.filesize)
-    ].filter(Boolean).join(" · ");
-  }
-
   if (options.resolution === "best") {
     return "最佳可用 · 大小未知";
   }
@@ -1208,6 +1187,13 @@ function formatSelectedQualitySize(analysis: AnalyzeResponse, options: DownloadO
     .map((format) => format.filesize as number);
   const size = matchingSizes.length ? Math.max(...matchingSizes) : null;
   return `${options.resolution} · ${formatFileSize(size)}`;
+}
+
+function formatItemResolution(item: { actual_width: number | null; actual_height: number | null }): string {
+  if (item.actual_width == null || item.actual_height == null) {
+    return "检测中";
+  }
+  return `${item.actual_width}x${item.actual_height}`;
 }
 
 function formatBytesPerSecond(bytes: number): string {

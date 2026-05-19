@@ -478,6 +478,45 @@ class YtDlpService:
             return None
         return max(candidates, key=lambda resolution: resolution[0] * resolution[1])
 
+    def actual_format_from_progress_payload(self, payload: dict[str, Any]) -> str | None:
+        info = payload.get("info_dict")
+        if not isinstance(info, dict):
+            return None
+
+        requested_formats = info.get("requested_formats")
+        if isinstance(requested_formats, list):
+            video = next(
+                (
+                    fmt
+                    for fmt in requested_formats
+                    if isinstance(fmt, dict) and fmt.get("vcodec") not in {None, "none"}
+                ),
+                None,
+            )
+            audio = next(
+                (
+                    fmt
+                    for fmt in requested_formats
+                    if isinstance(fmt, dict) and fmt.get("acodec") not in {None, "none"}
+                ),
+                None,
+            )
+            if video:
+                ext = str(video.get("ext") or info.get("ext") or "").strip()
+                codecs = [self._short_codec(video.get("vcodec"))]
+                if audio:
+                    codecs.append(self._short_codec(audio.get("acodec")))
+                codec_label = " + ".join(codec for codec in codecs if codec)
+                return " · ".join(part for part in [ext, codec_label] if part) or None
+
+        ext = str(info.get("ext") or "").strip()
+        codecs = [
+            self._short_codec(info.get("vcodec")),
+            self._short_codec(info.get("acodec")),
+        ]
+        codec_label = " + ".join(codec for codec in codecs if codec)
+        return " · ".join(part for part in [ext, codec_label] if part) or None
+
     def detect_file_resolution(self, file_path: Path) -> tuple[int, int] | None:
         ffmpeg_path = self._ffmpeg_executable()
         if not ffmpeg_path or not file_path.exists():
@@ -531,7 +570,12 @@ class YtDlpService:
             return "bv*+ba/b"
         if options.resolution.endswith("p") and options.resolution[:-1].isdigit():
             height = int(options.resolution[:-1])
-            return f"bv*[height={height}][ext=mp4]+ba[ext=m4a]/bv*[height={height}]+ba/b[height={height}]"
+            return (
+                f"bv*[height={height}][ext=mp4][vcodec^=avc1]+ba[ext=m4a][acodec^=mp4a]/"
+                f"bv*[height={height}][ext=mp4]+ba[ext=m4a]/"
+                f"bv*[height={height}]+ba/"
+                f"b[height={height}]"
+            )
         return "bv*+ba/b"
 
     def _single_file_format_selector(self, options: DownloadOptions) -> str:
@@ -539,13 +583,11 @@ class YtDlpService:
             return options.format_id
         if options.resolution.endswith("p") and options.resolution[:-1].isdigit():
             height = int(options.resolution[:-1])
-            return f"best[height={height}][ext=mp4]/best[height={height}]"
+            return f"b[height={height}][ext=mp4]/b[height={height}]"
         return "best[ext=mp4]/best"
 
     def _requires_ffmpeg(self, options: DownloadOptions) -> bool:
-        return bool(options.format_id) or (
-            options.resolution.endswith("p") and options.resolution[:-1].isdigit()
-        )
+        return bool(options.format_id)
 
     def _ffmpeg_executable(self) -> str | None:
         system_ffmpeg = shutil.which("ffmpeg")
@@ -611,6 +653,11 @@ class YtDlpService:
         except (TypeError, ValueError):
             return None
         return parsed if parsed > 0 else None
+
+    def _short_codec(self, value: Any) -> str | None:
+        if not value or value == "none":
+            return None
+        return str(value).split(".", 1)[0]
 
     @staticmethod
     def _resolution_height(resolution: str) -> int | None:

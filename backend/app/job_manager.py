@@ -134,6 +134,7 @@ class JobManager:
                 item.output_path = None
                 item.actual_width = None
                 item.actual_height = None
+                item.actual_format = None
                 item.options_json = None
                 item.requested_resolution = None
                 item.fallback_resolution = None
@@ -166,6 +167,7 @@ class JobManager:
             item.output_path = None
             item.actual_width = None
             item.actual_height = None
+            item.actual_format = None
             item.options_json = (
                 self._options_with_resolution(DownloadOptions.model_validate_json(job.options_json), resolution).model_dump_json()
                 if resolution
@@ -321,6 +323,7 @@ class JobManager:
         item.eta = None
         item.actual_width = None
         item.actual_height = None
+        item.actual_format = None
         item.updated_at = now
         job.current_item_title = item.title
         job.updated_at = now
@@ -353,6 +356,9 @@ class JobManager:
                         resolution = self.service.detect_file_resolution(Path(hook_item.output_path))
                     if resolution is not None:
                         hook_item.actual_width, hook_item.actual_height = resolution
+                    hook_item.actual_format = self.service.actual_format_from_progress_payload(payload)
+                    if hook_item.actual_format is None and hook_item.output_path:
+                        hook_item.actual_format = self._format_from_output_path(Path(hook_item.output_path))
                 hook_item.speed = payload.get("speed")
                 hook_item.eta = payload.get("eta")
                 hook_item.updated_at = utc_now()
@@ -376,6 +382,7 @@ class JobManager:
                 )
 
         try:
+            options = self._options_for_available_resolution(session, item, options)
             self._download_with_cookie_refresh(
                 item.source_url,
                 options,
@@ -402,6 +409,8 @@ class JobManager:
                 resolution = self.service.detect_file_resolution(Path(item.output_path))
                 if resolution is not None:
                     item.actual_width, item.actual_height = resolution
+            if item.actual_format is None and item.output_path:
+                item.actual_format = self._format_from_output_path(Path(item.output_path))
             item.status = JobStatus.succeeded.value
             item.progress = 100.0
         finally:
@@ -551,6 +560,39 @@ class JobManager:
             return job_options
         return DownloadOptions.model_validate(json.loads(item.options_json))
 
+    def _options_for_available_resolution(
+        self,
+        session: Session,
+        item: JobItem,
+        options: DownloadOptions,
+    ) -> DownloadOptions:
+        if options.mode == "subtitles_only" or options.format_id:
+            return options
+        if YtDlpService._resolution_height(options.resolution) is None:
+            return options
+
+        analysis = self.service.extract_metadata(item.source_url, cookies_path=self._cookies_path())
+        requested_height = YtDlpService._resolution_height(options.resolution)
+        available_heights = {
+            int(format.height)
+            for format in analysis.formats
+            if format.height is not None
+        }
+        if requested_height in available_heights:
+            return options
+
+        fallback = YtDlpService.suggest_lower_resolution(options.resolution, analysis.formats)
+        if not fallback:
+            raise RuntimeError(f"当前没有 {options.resolution} 的视频，也没有低于该清晰度的可用视频格式。")
+
+        item.requested_resolution = options.resolution
+        item.fallback_resolution = fallback
+        item.error = None
+        item.updated_at = utc_now()
+        session.add(item)
+        session.commit()
+        return self._options_with_resolution(options, fallback)
+
     def _options_with_resolution(self, options: DownloadOptions, resolution: str) -> DownloadOptions:
         return options.model_copy(update={"resolution": resolution, "format_id": None})
 
@@ -573,6 +615,10 @@ class JobManager:
 
     def _resolution_fallback_message(self, requested_resolution: str, fallback_resolution: str) -> str:
         return f"当前没有 {requested_resolution} 的视频，低于选定分辨率的最高可用分辨率是 {fallback_resolution}。"
+
+    def _format_from_output_path(self, output_path: Path) -> str | None:
+        suffix = output_path.suffix.lower().lstrip(".")
+        return suffix or None
 
     def _cookies_path(self) -> Path | None:
         path = self.settings.cookies_path

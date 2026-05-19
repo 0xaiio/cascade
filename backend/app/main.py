@@ -374,6 +374,7 @@ def _read_job(session: Session, job_id: str) -> JobRead:
         error=job.error,
         download_dir=job.download_dir,
         actual_resolution=_actual_resolution(items),
+        actual_format=_actual_format(items),
         resolution_fallback=_job_resolution_fallback(items),
         created_at=job.created_at,
         updated_at=job.updated_at,
@@ -396,9 +397,10 @@ def _read_job(session: Session, job_id: str) -> JobRead:
                 output_path=item.output_path,
                 actual_width=item.actual_width,
                 actual_height=item.actual_height,
+                actual_format=item.actual_format,
                 requested_resolution=item.requested_resolution,
                 fallback_resolution=item.fallback_resolution,
-                resolution_fallback=_resolution_fallback(item.requested_resolution, item.fallback_resolution),
+                resolution_fallback=_resolution_fallback(item.requested_resolution, item.fallback_resolution, item.status),
                 error=item.error,
                 created_at=item.created_at,
                 updated_at=item.updated_at,
@@ -425,20 +427,37 @@ def _actual_resolution(items: list[JobItem]) -> str | None:
     return f"{width}x{height}"
 
 
+def _actual_format(items: list[JobItem]) -> str | None:
+    formats = {item.actual_format for item in items if item.actual_format}
+    if not formats:
+        return None
+    if len(formats) > 1:
+        return "混合格式"
+    return next(iter(formats))
+
+
 def _job_resolution_fallback(items: list[JobItem]) -> ResolutionFallback | None:
     if len(items) != 1:
         return None
     item = items[0]
-    return _resolution_fallback(item.requested_resolution, item.fallback_resolution)
+    return _resolution_fallback(item.requested_resolution, item.fallback_resolution, item.status)
 
 
-def _resolution_fallback(requested_resolution: str | None, fallback_resolution: str | None) -> ResolutionFallback | None:
+def _resolution_fallback(
+    requested_resolution: str | None,
+    fallback_resolution: str | None,
+    status: str | None = None,
+) -> ResolutionFallback | None:
     if not requested_resolution or not fallback_resolution:
         return None
+    if status != "failed":
+        message = f"已从 {requested_resolution} 自动降级到 {fallback_resolution}。"
+    else:
+        message = f"当前没有 {requested_resolution} 的视频，低于选定分辨率的最高可用分辨率是 {fallback_resolution}。"
     return ResolutionFallback(
         requested_resolution=requested_resolution,
         fallback_resolution=fallback_resolution,
-        message=f"当前没有 {requested_resolution} 的视频，低于选定分辨率的最高可用分辨率是 {fallback_resolution}。",
+        message=message,
     )
 
 
