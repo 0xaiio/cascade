@@ -16,3 +16,11 @@
 - Change: added an internal fallback policy module for reason constants and `ResolutionFallback` response construction; `JobManager` records reasons and `main.py` delegates response construction.
 - Verification: `python -m pytest backend\tests -q` -> 75 passed.
 - Functional invariance: no API fields, messages, database columns, or download behavior changed.
+
+## Iteration 2 - Extract Job Read Model Projection
+
+- Problem: FastAPI route wiring also contained job serialization, aggregate resolution/format calculation, fallback projection, and elapsed-time calculation.
+- Reason: read-model projection is pure API response assembly; separating it keeps route handlers focused on HTTP concerns and makes response behavior easier to test/review.
+- Change: added an internal job read-model module and left `main.py` with a thin 404 wrapper around it.
+- Verification: `python -m pytest backend\tests -q` -> 75 passed.
+- Functional invariance: job list/detail response fields and values are unchanged.

@@ -1,6 +1,5 @@
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Callable
 
@@ -13,9 +12,9 @@ from sqlmodel import Session, select
 from .config import AppSettings, REPO_ROOT, get_settings
 from .db import create_app_engine, init_db, session_dependency
 from .events import EventBroker
-from .fallback_policy import build_resolution_fallback
+from .job_read_model import read_job
 from .job_manager import JobManager, new_id
-from .models import Job, JobItem, Setting, utc_now
+from .models import Job, JobItem, Setting
 from .paths import safe_path_name
 from .schemas import (
     AnalyzeRequest,
@@ -26,9 +25,7 @@ from .schemas import (
     DiagnosticsRead,
     JobBatchActionRequest,
     JobBatchActionResponse,
-    JobItemRead,
     JobRead,
-    ResolutionFallback,
     RestartJobRequest,
     SettingsRead,
     SettingsUpdate,
@@ -367,115 +364,10 @@ def _selected_entries(url: str, analysis: AnalyzeResponse, playlist_items: list[
 
 
 def _read_job(session: Session, job_id: str) -> JobRead:
-    job = session.get(Job, job_id)
-    if not job:
+    payload = read_job(session, job_id)
+    if payload is None:
         raise HTTPException(status_code=404, detail="Job not found.")
-    items = session.exec(select(JobItem).where(JobItem.job_id == job_id).order_by(JobItem.index)).all()
-    return JobRead(
-        id=job.id,
-        url=job.url,
-        title=job.title,
-        status=job.status,
-        progress=job.progress,
-        speed=job.speed,
-        eta=job.eta,
-        total_items=job.total_items,
-        completed_items=job.completed_items,
-        failed_items=job.failed_items,
-        current_item_title=job.current_item_title,
-        error=job.error,
-        download_dir=job.download_dir,
-        actual_resolution=_actual_resolution(items),
-        actual_format=_actual_format(items),
-        resolution_fallback=_job_resolution_fallback(items),
-        created_at=job.created_at,
-        updated_at=job.updated_at,
-        started_at=job.started_at,
-        finished_at=job.finished_at,
-        elapsed_seconds=_elapsed_seconds(job.started_at, job.finished_at),
-        items=[
-            JobItemRead(
-                id=item.id,
-                job_id=item.job_id,
-                source_url=item.source_url,
-                title=item.title,
-                index=item.index,
-                status=item.status,
-                progress=item.progress,
-                downloaded_bytes=item.downloaded_bytes,
-                total_bytes=item.total_bytes,
-                speed=item.speed,
-                eta=item.eta,
-                output_path=item.output_path,
-                actual_width=item.actual_width,
-                actual_height=item.actual_height,
-                actual_format=item.actual_format,
-                requested_resolution=item.requested_resolution,
-                fallback_resolution=item.fallback_resolution,
-                fallback_reason=item.fallback_reason,
-                resolution_fallback=_resolution_fallback(
-                    item.requested_resolution,
-                    item.fallback_resolution,
-                    item.status,
-                    item.fallback_reason,
-                ),
-                error=item.error,
-                created_at=item.created_at,
-                updated_at=item.updated_at,
-                started_at=item.started_at,
-                finished_at=item.finished_at,
-                elapsed_seconds=_elapsed_seconds(item.started_at, item.finished_at),
-            )
-            for item in items
-        ],
-    )
-
-
-def _actual_resolution(items: list[JobItem]) -> str | None:
-    resolutions = {
-        (item.actual_width, item.actual_height)
-        for item in items
-        if item.actual_width is not None and item.actual_height is not None
-    }
-    if not resolutions:
-        return None
-    if len(resolutions) > 1:
-        return "混合分辨率"
-    width, height = next(iter(resolutions))
-    return f"{width}x{height}"
-
-
-def _actual_format(items: list[JobItem]) -> str | None:
-    formats = {item.actual_format for item in items if item.actual_format}
-    if not formats:
-        return None
-    if len(formats) > 1:
-        return "混合格式"
-    return next(iter(formats))
-
-
-def _job_resolution_fallback(items: list[JobItem]) -> ResolutionFallback | None:
-    if len(items) != 1:
-        return None
-    item = items[0]
-    return _resolution_fallback(item.requested_resolution, item.fallback_resolution, item.status, item.fallback_reason)
-
-
-def _resolution_fallback(
-    requested_resolution: str | None,
-    fallback_resolution: str | None,
-    status: str | None = None,
-    reason: str | None = None,
-) -> ResolutionFallback | None:
-    return build_resolution_fallback(requested_resolution, fallback_resolution, status, reason)
-
-
-def _elapsed_seconds(started_at: datetime | None, finished_at: datetime | None) -> int:
-    if not started_at:
-        return 0
-    start = _as_aware_utc(started_at)
-    finish = _as_aware_utc(finished_at) if finished_at else utc_now()
-    return max(0, int((finish - start).total_seconds()))
+    return payload
 
 
 def _job_download_dir(root_dir: Path, analysis: AnalyzeResponse, job_id: str) -> Path:
@@ -483,12 +375,6 @@ def _job_download_dir(root_dir: Path, analysis: AnalyzeResponse, job_id: str) ->
         return root_dir
     folder = safe_path_name(analysis.title, fallback=f"playlist-{job_id[:8]}")
     return root_dir / folder
-
-
-def _as_aware_utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value.astimezone(UTC)
 
 
 def _set_setting(session: Session, key: str, value: str) -> None:
