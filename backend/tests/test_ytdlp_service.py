@@ -544,8 +544,8 @@ def test_edge_cdp_fallback_terminates_process_tree(monkeypatch, tmp_path: Path) 
     def fake_run(args, **kwargs):
         calls.append(args)
 
-    monkeypatch.setattr("app.ytdlp_service.os.name", "nt")
-    monkeypatch.setattr("app.ytdlp_service.subprocess.run", fake_run)
+    monkeypatch.setattr("app.browser_cookies.os.name", "nt")
+    monkeypatch.setattr("app.browser_cookies.subprocess.run", fake_run)
 
     YtDlpService(download_dir=tmp_path)._terminate_edge_process(FakeProcess())
 

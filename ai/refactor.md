@@ -24,3 +24,11 @@
 - Change: added an internal job read-model module and left `main.py` with a thin 404 wrapper around it.
 - Verification: `python -m pytest backend\tests -q` -> 75 passed.
 - Functional invariance: job list/detail response fields and values are unchanged.
+
+## Iteration 3 - Extract Browser Cookie Importer
+
+- Problem: the yt-dlp service mixed download/analyze behavior with browser-cookie import details, including Edge lock handling, DPAPI fallback, CDP cookie extraction, and cookie-domain filtering.
+- Reason: browser-cookie import is a separate integration boundary with OS/browser-specific failure modes; isolating it keeps the download service easier to reason about and preserves a smaller public surface for tests.
+- Change: moved cookie import result/error types, auto browser candidates, YouTube cookie filtering, Edge process shutdown, and CDP extraction into an internal browser-cookie importer; `YtDlpService.import_browser_cookies()` remains the compatibility entry point.
+- Verification: `python -m pytest backend\tests -q` -> 75 passed.
+- Functional invariance: import API responses, error detail shapes, browser fallback order, and cookie file output are unchanged.
