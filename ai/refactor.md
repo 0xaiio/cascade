@@ -56,3 +56,11 @@
 - Change: moved `JobQueue` and its fallback notice subcomponent into `frontend/src/components/JobQueue.tsx`.
 - Verification: `cd frontend && npm test` -> 28 passed; `cd frontend && npm run build` -> passed.
 - Functional invariance: task center labels, controls, expansion behavior, fallback buttons, and callbacks are unchanged.
+
+## Iteration 7 - Organize Test Fixtures
+
+- Problem: API and frontend tests both carried large fake-service/fixture blocks before the actual test cases, making the behavior under test harder to find.
+- Reason: test doubles and static payload fixtures are supporting structure; moving them to focused helper modules improves scanability without changing assertions.
+- Change: moved backend yt-dlp fake services into `backend/tests/fakes.py` and moved frontend payload fixtures into `frontend/src/test/appFixtures.ts`.
+- Verification: `python -m pytest backend\tests -q` -> 75 passed; `cd frontend && npm test` -> 28 passed.
+- Functional invariance: no test case, assertion, fixture value, or mocked endpoint behavior was removed or semantically changed.
