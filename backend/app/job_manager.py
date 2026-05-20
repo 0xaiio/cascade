@@ -11,15 +11,15 @@ from sqlmodel import Session, select
 
 from .config import AppSettings
 from .events import EventBroker
+from .fallback_policy import (
+    MEDIA_STREAM_BLOCKED,
+    REQUESTED_RESOLUTION_MISSING,
+    REQUESTED_RESOLUTION_UNSELECTABLE,
+    SOURCE_BELOW_720_ONLY,
+)
 from .models import Job, JobEvent, JobItem, JobStatus, utc_now
 from .schemas import DownloadOptions
 from .ytdlp_service import DownloadCancelled, MIN_AUTO_FALLBACK_HEIGHT, YtDlpService
-
-
-REQUESTED_RESOLUTION_MISSING = "requested_resolution_missing"
-SOURCE_BELOW_720_ONLY = "source_below_720_only"
-REQUESTED_RESOLUTION_UNSELECTABLE = "requested_resolution_unselectable"
-MEDIA_STREAM_BLOCKED = "media_stream_blocked"
 
 
 class JobManager:
