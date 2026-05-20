@@ -32,3 +32,11 @@
 - Change: moved cookie import result/error types, auto browser candidates, YouTube cookie filtering, Edge process shutdown, and CDP extraction into an internal browser-cookie importer; `YtDlpService.import_browser_cookies()` remains the compatibility entry point.
 - Verification: `python -m pytest backend\tests -q` -> 75 passed.
 - Functional invariance: import API responses, error detail shapes, browser fallback order, and cookie file output are unchanged.
+
+## Iteration 4 - Extract yt-dlp Format Helpers
+
+- Problem: selector construction, actual format/resolution extraction, and fallback-resolution calculation were embedded inside the service that also owns network/download orchestration.
+- Reason: these operations are deterministic transformations over options, metadata, and format lists; moving them into pure helpers reduces service size and makes format policy easier to review independently.
+- Change: added an internal yt-dlp format helper module and kept the existing `YtDlpService` methods as compatibility proxies.
+- Verification: `python -m pytest backend\tests -q` -> 75 passed.
+- Functional invariance: generated selectors, actual format strings, resolution extraction, and fallback suggestions are unchanged.

@@ -19,6 +19,20 @@ from .browser_cookies import (
     BrowserCookieImportResult,
 )
 from .schemas import AnalyzeResponse, DownloadOptions, FormatOption, SubtitleOption, VideoEntry
+from .ytdlp_formats import (
+    DEFAULT_MIN_AUTO_FALLBACK_HEIGHT,
+    actual_format_from_info_dict,
+    format_selector,
+    has_resolution_at_or_above,
+    positive_int,
+    requires_ffmpeg,
+    resolution_from_info_dict,
+    resolution_from_mapping,
+    resolution_height,
+    short_codec,
+    single_file_format_selector,
+    suggest_lower_resolution,
+)
 
 
 YTDLP_REQUEST_SLEEP_SECONDS = 1.0
@@ -45,7 +59,7 @@ COOKIE_REQUIRED_AUTH_HINTS = (
     "confirm your age",
     "age-restricted",
 )
-MIN_AUTO_FALLBACK_HEIGHT = 720
+MIN_AUTO_FALLBACK_HEIGHT = DEFAULT_MIN_AUTO_FALLBACK_HEIGHT
 
 
 class DownloadCancelled(RuntimeError):
@@ -335,24 +349,7 @@ class YtDlpService:
         return self._resolution_from_info_dict(info)
 
     def _resolution_from_info_dict(self, info: dict[str, Any]) -> tuple[int, int] | None:
-        direct = self._resolution_from_mapping(info)
-        if direct:
-            return direct
-
-        requested_formats = info.get("requested_formats")
-        if not isinstance(requested_formats, list):
-            return None
-
-        candidates = [
-            resolution
-            for fmt in requested_formats
-            if isinstance(fmt, dict)
-            and fmt.get("vcodec") not in {None, "none"}
-            and (resolution := self._resolution_from_mapping(fmt))
-        ]
-        if not candidates:
-            return None
-        return max(candidates, key=lambda resolution: resolution[0] * resolution[1])
+        return resolution_from_info_dict(info)
 
     def actual_format_from_progress_payload(self, payload: dict[str, Any]) -> str | None:
         info = payload.get("info_dict")
@@ -361,39 +358,7 @@ class YtDlpService:
         return self._actual_format_from_info_dict(info)
 
     def _actual_format_from_info_dict(self, info: dict[str, Any]) -> str | None:
-        requested_formats = info.get("requested_formats")
-        if isinstance(requested_formats, list):
-            video = next(
-                (
-                    fmt
-                    for fmt in requested_formats
-                    if isinstance(fmt, dict) and fmt.get("vcodec") not in {None, "none"}
-                ),
-                None,
-            )
-            audio = next(
-                (
-                    fmt
-                    for fmt in requested_formats
-                    if isinstance(fmt, dict) and fmt.get("acodec") not in {None, "none"}
-                ),
-                None,
-            )
-            if video:
-                ext = str(video.get("ext") or info.get("ext") or "").strip()
-                codecs = [self._short_codec(video.get("vcodec"))]
-                if audio:
-                    codecs.append(self._short_codec(audio.get("acodec")))
-                codec_label = " + ".join(codec for codec in codecs if codec)
-                return " · ".join(part for part in [ext, codec_label] if part) or None
-
-        ext = str(info.get("ext") or "").strip()
-        codecs = [
-            self._short_codec(info.get("vcodec")),
-            self._short_codec(info.get("acodec")),
-        ]
-        codec_label = " + ".join(codec for codec in codecs if codec)
-        return " · ".join(part for part in [ext, codec_label] if part) or None
+        return actual_format_from_info_dict(info)
 
     def detect_file_resolution(self, file_path: Path) -> tuple[int, int] | None:
         ffmpeg_path = self._ffmpeg_executable()
@@ -422,40 +387,19 @@ class YtDlpService:
         min_height: int = MIN_AUTO_FALLBACK_HEIGHT,
         allow_below_min_if_source_below_min: bool = False,
     ) -> str | None:
-        requested_height = YtDlpService._resolution_height(requested_resolution)
-        if requested_height is None:
-            return None
-        heights = {
-            int(format.height)
-            for format in formats
-            if format.height is not None
-        }
-        lower_heights = {
-            height
-            for height in heights
-            if height < requested_height
-        }
-        safe_lower_heights = {
-            height
-            for height in lower_heights
-            if height >= min_height
-        }
-        if safe_lower_heights:
-            return f"{max(safe_lower_heights)}p"
-        if allow_below_min_if_source_below_min and lower_heights and not any(height >= min_height for height in heights):
-            return f"{max(lower_heights)}p"
-        return None
+        return suggest_lower_resolution(
+            requested_resolution,
+            formats,
+            min_height=min_height,
+            allow_below_min_if_source_below_min=allow_below_min_if_source_below_min,
+        )
 
     @staticmethod
     def has_resolution_at_or_above(
         formats: list[FormatOption],
         min_height: int = MIN_AUTO_FALLBACK_HEIGHT,
     ) -> bool:
-        return any(
-            int(format.height)
-            for format in formats
-            if format.height is not None and int(format.height) >= min_height
-        )
+        return has_resolution_at_or_above(formats, min_height=min_height)
 
     @staticmethod
     def is_requested_format_unavailable_error(exc: Exception) -> bool:
@@ -519,33 +463,13 @@ class YtDlpService:
         return False
 
     def _format_selector(self, options: DownloadOptions, allow_merge: bool = True) -> str:
-        if not allow_merge:
-            return self._single_file_format_selector(options)
-        if options.format_id:
-            return f"{options.format_id}+ba/{options.format_id}"
-        if options.resolution == "best":
-            return "bv*+ba/b"
-        if options.resolution.endswith("p") and options.resolution[:-1].isdigit():
-            height = int(options.resolution[:-1])
-            return (
-                f"bv*[height={height}][ext=mp4][vcodec^=avc1]+ba[ext=m4a][acodec^=mp4a]/"
-                f"bv*[height={height}][ext=mp4]+ba[ext=m4a]/"
-                f"bv*[height={height}]+ba/"
-                f"b[height={height}][protocol^=m3u8]/"
-                f"b[height={height}]"
-            )
-        return "bv*+ba/b"
+        return format_selector(options, allow_merge=allow_merge)
 
     def _single_file_format_selector(self, options: DownloadOptions) -> str:
-        if options.format_id:
-            return options.format_id
-        if options.resolution.endswith("p") and options.resolution[:-1].isdigit():
-            height = int(options.resolution[:-1])
-            return f"b[height={height}][ext=mp4]/b[height={height}]"
-        return "best[ext=mp4]/best"
+        return single_file_format_selector(options)
 
     def _requires_ffmpeg(self, options: DownloadOptions) -> bool:
-        return bool(options.format_id)
+        return requires_ffmpeg(options)
 
     def _normalize_youtube_profile(self, youtube_profile: str) -> str:
         return YOUTUBE_PROFILE_ALIASES.get(youtube_profile, youtube_profile)
@@ -665,34 +589,17 @@ class YtDlpService:
         return output[0] if output else None
 
     def _resolution_from_mapping(self, value: dict[str, Any]) -> tuple[int, int] | None:
-        width = self._positive_int(value.get("width"))
-        height = self._positive_int(value.get("height"))
-        if width is None or height is None:
-            return None
-        return width, height
+        return resolution_from_mapping(value)
 
     def _positive_int(self, value: Any) -> int | None:
-        if value is None:
-            return None
-        try:
-            parsed = int(value)
-        except (TypeError, ValueError):
-            return None
-        return parsed if parsed > 0 else None
+        return positive_int(value)
 
     def _short_codec(self, value: Any) -> str | None:
-        if not value or value == "none":
-            return None
-        return str(value).split(".", 1)[0]
+        return short_codec(value)
 
     @staticmethod
     def _resolution_height(resolution: str) -> int | None:
-        if not resolution.endswith("p"):
-            return None
-        value = resolution[:-1]
-        if not value.isdigit():
-            return None
-        return int(value)
+        return resolution_height(resolution)
 
     def _node_version_supported(self, version: str | None) -> bool:
         if not version:
