@@ -87,6 +87,8 @@ class JobBatchActionRequest(BaseModel):
 class ResolutionFallback(BaseModel):
     requested_resolution: str
     fallback_resolution: str
+    reason: str | None = None
+    restart_resolution: str | None = None
     message: str
 
 
@@ -108,6 +110,7 @@ class JobItemRead(BaseModel):
     actual_format: str | None = None
     requested_resolution: str | None = None
     fallback_resolution: str | None = None
+    fallback_reason: str | None = None
     resolution_fallback: ResolutionFallback | None = None
     error: str | None = None
     created_at: datetime

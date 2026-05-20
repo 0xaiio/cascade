@@ -69,6 +69,7 @@ class JobItem(SQLModel, table=True):
     options_json: Optional[str] = None
     requested_resolution: Optional[str] = None
     fallback_resolution: Optional[str] = None
+    fallback_reason: Optional[str] = None
     error: Optional[str] = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)

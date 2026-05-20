@@ -63,6 +63,14 @@ class BrowserCookieImportResult:
     filename: str
 
 
+@dataclass(frozen=True)
+class DownloadPreparation:
+    is_selectable: bool
+    width: int | None = None
+    height: int | None = None
+    actual_format: str | None = None
+
+
 class BrowserCookieImportError(RuntimeError):
     def __init__(self, code: str, browser: str | None, message: str, raw_detail: str | None = None) -> None:
         super().__init__(message)
@@ -415,6 +423,39 @@ class YtDlpService:
             ffmpeg=self.get_ffmpeg_status(),
         )
 
+    def prepare_download(
+        self,
+        url: str,
+        options: DownloadOptions,
+        cookies_path: Path | None = None,
+    ) -> DownloadPreparation:
+        if options.mode == "subtitles_only":
+            return DownloadPreparation(is_selectable=True)
+
+        ydl_opts = self.build_download_options(options, cookies_path)
+        ydl_opts["skip_download"] = True
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            if not info:
+                return DownloadPreparation(is_selectable=False)
+            formats = info.get("formats") or []
+            selector = ydl.build_format_selector(str(ydl_opts.get("format") or "best"))
+            selected = list(ydl._select_formats(formats, selector))
+
+        if not selected:
+            return DownloadPreparation(is_selectable=False)
+
+        selected_format = selected[0]
+        resolution = self._resolution_from_info_dict(selected_format)
+        actual_format = self._actual_format_from_info_dict(selected_format)
+        return DownloadPreparation(
+            is_selectable=True,
+            width=resolution[0] if resolution else None,
+            height=resolution[1] if resolution else None,
+            actual_format=actual_format,
+        )
+
     def build_download_options(
         self,
         options: DownloadOptions,
@@ -553,7 +594,9 @@ class YtDlpService:
         info = payload.get("info_dict")
         if not isinstance(info, dict):
             return None
+        return self._resolution_from_info_dict(info)
 
+    def _resolution_from_info_dict(self, info: dict[str, Any]) -> tuple[int, int] | None:
         direct = self._resolution_from_mapping(info)
         if direct:
             return direct
@@ -577,7 +620,9 @@ class YtDlpService:
         info = payload.get("info_dict")
         if not isinstance(info, dict):
             return None
+        return self._actual_format_from_info_dict(info)
 
+    def _actual_format_from_info_dict(self, info: dict[str, Any]) -> str | None:
         requested_formats = info.get("requested_formats")
         if isinstance(requested_formats, list):
             video = next(
@@ -637,18 +682,42 @@ class YtDlpService:
         requested_resolution: str,
         formats: list[FormatOption],
         min_height: int = MIN_AUTO_FALLBACK_HEIGHT,
+        allow_below_min_if_source_below_min: bool = False,
     ) -> str | None:
         requested_height = YtDlpService._resolution_height(requested_resolution)
         if requested_height is None:
             return None
-        lower_heights = {
+        heights = {
             int(format.height)
             for format in formats
-            if format.height is not None and min_height <= int(format.height) < requested_height
+            if format.height is not None
         }
-        if not lower_heights:
-            return None
-        return f"{max(lower_heights)}p"
+        lower_heights = {
+            height
+            for height in heights
+            if height < requested_height
+        }
+        safe_lower_heights = {
+            height
+            for height in lower_heights
+            if height >= min_height
+        }
+        if safe_lower_heights:
+            return f"{max(safe_lower_heights)}p"
+        if allow_below_min_if_source_below_min and lower_heights and not any(height >= min_height for height in heights):
+            return f"{max(lower_heights)}p"
+        return None
+
+    @staticmethod
+    def has_resolution_at_or_above(
+        formats: list[FormatOption],
+        min_height: int = MIN_AUTO_FALLBACK_HEIGHT,
+    ) -> bool:
+        return any(
+            int(format.height)
+            for format in formats
+            if format.height is not None and int(format.height) >= min_height
+        )
 
     @staticmethod
     def is_requested_format_unavailable_error(exc: Exception) -> bool:

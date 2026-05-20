@@ -74,6 +74,7 @@ export interface JobItem {
   actual_format: string | null;
   requested_resolution: string | null;
   fallback_resolution: string | null;
+  fallback_reason: string | null;
   resolution_fallback: ResolutionFallback | null;
   error: string | null;
   created_at: string;
@@ -140,5 +141,7 @@ export interface ApiErrorDetail {
 export interface ResolutionFallback {
   requested_resolution: string;
   fallback_resolution: string;
+  reason: string | null;
+  restart_resolution: string | null;
   message: string;
 }

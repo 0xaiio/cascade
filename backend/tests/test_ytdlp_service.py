@@ -344,6 +344,24 @@ def test_suggests_highest_available_resolution_below_requested(tmp_path: Path) -
     assert service.suggest_lower_resolution("best", [FormatOption(format_id="18", label="360p", height=360)]) is None
 
 
+def test_suggests_low_resolution_only_when_source_has_no_720_or_higher(tmp_path: Path) -> None:
+    service = YtDlpService(download_dir=tmp_path)
+
+    assert service.suggest_lower_resolution(
+        "1080p",
+        [FormatOption(format_id="18", label="360p mp4", height=360, ext="mp4")],
+        allow_below_min_if_source_below_min=True,
+    ) == "360p"
+    assert service.suggest_lower_resolution(
+        "1080p",
+        [
+            FormatOption(format_id="137", label="1080p mp4", height=1080, ext="mp4"),
+            FormatOption(format_id="18", label="360p mp4", height=360, ext="mp4"),
+        ],
+        allow_below_min_if_source_below_min=True,
+    ) is None
+
+
 def test_download_options_accept_task_specific_download_dir(monkeypatch, tmp_path: Path) -> None:
     service = YtDlpService(download_dir=tmp_path / "root")
     target_dir = tmp_path / "root" / "Course"

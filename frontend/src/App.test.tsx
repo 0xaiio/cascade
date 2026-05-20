@@ -66,6 +66,7 @@ const jobPayload: Job = {
       actual_format: "mp4 · avc1 + mp4a",
       requested_resolution: null,
       fallback_resolution: null,
+      fallback_reason: null,
       resolution_fallback: null,
       downloaded_bytes: 34,
       total_bytes: 100,
@@ -138,13 +139,25 @@ const playlistJobPayload: Job = {
 const resolutionFallback = {
   requested_resolution: "1080p",
   fallback_resolution: "720p",
-  message: "当前没有 1080p 的视频，低于选定分辨率的最高可用分辨率是 720p。"
+  reason: "media_stream_blocked",
+  restart_resolution: "720p",
+  message: "当前 1080p 媒体流下载被 YouTube 拒绝或连接重置，可尝试以 720p 重启。"
 };
 
 const automaticResolutionFallback = {
   requested_resolution: "1080p",
   fallback_resolution: "720p",
-  message: "已从 1080p 自动降级到 720p。"
+  reason: "requested_resolution_missing",
+  restart_resolution: null,
+  message: "视频本来没有 1080p，已自动降级到 720p。"
+};
+
+const unselectableResolutionFallback = {
+  requested_resolution: "1080p",
+  fallback_resolution: "720p",
+  reason: "requested_resolution_unselectable",
+  restart_resolution: "1080p",
+  message: "检测到 1080p 清晰度，但该清晰度当前没有可下载的视频/音频组合，已自动降级到 720p。"
 };
 
 const singleFallbackJobPayload: Job = {
@@ -166,6 +179,7 @@ const singleFallbackJobPayload: Job = {
       error: resolutionFallback.message,
       requested_resolution: "1080p",
       fallback_resolution: "720p",
+      fallback_reason: "media_stream_blocked",
       resolution_fallback: resolutionFallback
     }
   ]
@@ -183,6 +197,7 @@ const playlistFallbackJobPayload: Job = {
       error: resolutionFallback.message,
       requested_resolution: "1080p",
       fallback_resolution: "720p",
+      fallback_reason: "media_stream_blocked",
       resolution_fallback: resolutionFallback
     }
   ]
@@ -785,6 +800,7 @@ describe("App", () => {
             ...playlistJobPayload.items[0],
             requested_resolution: "1080p",
             fallback_resolution: "720p",
+            fallback_reason: "requested_resolution_missing",
             resolution_fallback: automaticResolutionFallback
           },
           playlistJobPayload.items[1]
@@ -796,5 +812,37 @@ describe("App", () => {
     expect(await screen.findByText("Playlist batch")).toBeInTheDocument();
     expect(screen.getByText(automaticResolutionFallback.message)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "以 720p 重启 Part one" })).not.toBeInTheDocument();
+  });
+
+  test("shows original resolution retry for succeeded unselectable fallback", async () => {
+    currentJobsPayload = [
+      {
+        ...playlistJobPayload,
+        items: [
+          {
+            ...playlistJobPayload.items[0],
+            requested_resolution: "1080p",
+            fallback_resolution: "720p",
+            fallback_reason: "requested_resolution_unselectable",
+            resolution_fallback: unselectableResolutionFallback
+          },
+          playlistJobPayload.items[1]
+        ]
+      }
+    ];
+    const user = userEvent.setup();
+    render(<App />);
+
+    expect(await screen.findByText("Playlist batch")).toBeInTheDocument();
+    expect(screen.getByText(unselectableResolutionFallback.message)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "以 1080p 重试 Part one" }));
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/jobs/job-playlist/items/item-playlist-1/restart",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ resolution: "1080p" })
+      })
+    );
   });
 });

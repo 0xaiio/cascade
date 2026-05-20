@@ -36,6 +36,7 @@ def _ensure_columns(engine: Engine) -> None:
             "options_json": "TEXT",
             "requested_resolution": "TEXT",
             "fallback_resolution": "TEXT",
+            "fallback_reason": "TEXT",
         },
     }
     with engine.begin() as connection:

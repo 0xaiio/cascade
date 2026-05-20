@@ -949,6 +949,10 @@ function JobQueue({
           const isPlaylist = job.total_items > 1;
           const defaultExpanded = isPlaylist && ["running", "failed"].includes(job.status);
           const isExpanded = isPlaylist ? expandedJobIds[job.id] ?? defaultExpanded : true;
+          const jobRestartResolution = job.resolution_fallback?.restart_resolution ?? null;
+          const jobRestartLabel = job.resolution_fallback
+            ? resolutionFallbackRestartLabel(job.resolution_fallback, "job")
+            : undefined;
           return (
           <article key={job.id} className="job-card">
             <div className="job-row">
@@ -1007,20 +1011,23 @@ function JobQueue({
             {!isPlaylist && job.resolution_fallback && (
               <ResolutionFallbackNotice
                 fallback={job.resolution_fallback}
-                restartLabel={job.status === "failed" ? `以 ${job.resolution_fallback.fallback_resolution} 重启任务` : undefined}
-                restartAriaLabel={
-                  job.status === "failed" ? `以 ${job.resolution_fallback.fallback_resolution} 重启任务 ${title}` : undefined
-                }
+                restartLabel={jobRestartLabel}
+                restartAriaLabel={jobRestartLabel ? `${jobRestartLabel} ${title}` : undefined}
                 onRestart={
-                  job.status === "failed"
-                    ? () => onRestart(job.id, job.resolution_fallback?.fallback_resolution)
+                  jobRestartResolution
+                    ? () => onRestart(job.id, jobRestartResolution)
                     : undefined
                 }
               />
             )}
             {job.items.length > 0 && isPlaylist && isExpanded && (
               <div className="item-list">
-                {job.items.map((item) => (
+                {job.items.map((item) => {
+                  const itemRestartResolution = item.resolution_fallback?.restart_resolution ?? null;
+                  const itemRestartLabel = item.resolution_fallback
+                    ? resolutionFallbackRestartLabel(item.resolution_fallback, "item")
+                    : undefined;
+                  return (
                   <div key={item.id} className="job-item-detail">
                     <div className="item-row">
                       <span>{item.index}. {item.title} · {item.status}</span>
@@ -1051,13 +1058,11 @@ function JobQueue({
                     {item.resolution_fallback && (
                       <ResolutionFallbackNotice
                         fallback={item.resolution_fallback}
-                        restartLabel={item.status === "failed" ? `以 ${item.resolution_fallback.fallback_resolution} 重启` : undefined}
-                        restartAriaLabel={
-                          item.status === "failed" ? `以 ${item.resolution_fallback.fallback_resolution} 重启 ${item.title}` : undefined
-                        }
+                        restartLabel={itemRestartLabel}
+                        restartAriaLabel={itemRestartLabel ? `${itemRestartLabel} ${item.title}` : undefined}
                         onRestart={
-                          item.status === "failed"
-                            ? () => onRestartItem(job.id, item.id, item.resolution_fallback?.fallback_resolution)
+                          itemRestartResolution
+                            ? () => onRestartItem(job.id, item.id, itemRestartResolution)
                             : undefined
                         }
                       />
@@ -1066,7 +1071,8 @@ function JobQueue({
                       <span style={{ width: `${Math.max(0, Math.min(100, item.progress))}%` }} />
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </article>
@@ -1099,6 +1105,16 @@ function ResolutionFallbackNotice({
       )}
     </div>
   );
+}
+
+function resolutionFallbackRestartLabel(fallback: ResolutionFallback, scope: "job" | "item"): string | undefined {
+  if (!fallback.restart_resolution) {
+    return undefined;
+  }
+  if (fallback.reason === "requested_resolution_unselectable") {
+    return `以 ${fallback.restart_resolution} 重试`;
+  }
+  return scope === "job" ? `以 ${fallback.restart_resolution} 重启任务` : `以 ${fallback.restart_resolution} 重启`;
 }
 
 function formatDuration(seconds: number | null): string {

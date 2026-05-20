@@ -3,9 +3,11 @@ import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 from sqlmodel import Session
 
 from app.config import AppSettings
@@ -74,6 +76,9 @@ class FakeYtDlpService:
         self.downloads.append({"url": url, "download_dir": download_dir})
         progress_hook({"status": "finished", "filename": f"{url}.mp4"})
 
+    def prepare_download(self, url, options, cookies_path=None):
+        return SimpleNamespace(is_selectable=True, width=None, height=None, actual_format=None)
+
     def resolution_from_progress_payload(self, payload):
         return None
 
@@ -94,6 +99,11 @@ class BlockingYtDlpService(FakeYtDlpService):
         self.started.put(url)
         self.release.wait(timeout=5)
         progress_hook({"status": "finished", "filename": f"{url}.mp4"})
+
+
+class PreparedBlockingYtDlpService(BlockingYtDlpService):
+    def prepare_download(self, url, options, cookies_path=None):
+        return SimpleNamespace(is_selectable=True, width=1920, height=1080, actual_format="mp4 · avc1 + mp4a")
 
 
 class SingleAutoFallbackYtDlpService(FakeYtDlpService):
@@ -264,6 +274,108 @@ class NoLowerResolutionYtDlpService(FakeYtDlpService):
     def detect_file_resolution(self, file_path):
         return None
 
+
+class LowOnlyFallbackYtDlpService(FakeYtDlpService):
+    def __init__(self):
+        super().__init__()
+        self.download_options: list[DownloadOptions] = []
+
+    def extract_metadata(self, url, cookies_path=None):
+        return AnalyzeResponse(
+            url=url,
+            title="Low source",
+            is_playlist=False,
+            entries=[],
+            formats=[FormatOption(format_id="18", label="360p mp4", height=360, ext="mp4")],
+            subtitles=[],
+            automatic_subtitles=[],
+            ffmpeg={"ffmpeg": True, "ffprobe": True},
+        )
+
+    def prepare_download(self, url, options, cookies_path=None):
+        if options.resolution == "360p":
+            return SimpleNamespace(is_selectable=True, width=640, height=360, actual_format="mp4 · avc1 + mp4a")
+        return SimpleNamespace(is_selectable=False, width=None, height=None, actual_format=None)
+
+    def download(self, url, options, progress_hook, should_cancel, cookies_path=None, download_dir=None):
+        self.download_options.append(options)
+        progress_hook(
+            {
+                "status": "finished",
+                "filename": f"{url}.mp4",
+                "info_dict": {"ext": "mp4", "vcodec": "avc1.42001E", "acodec": "mp4a.40.2", "width": 640, "height": 360},
+            }
+        )
+
+    def resolution_from_progress_payload(self, payload):
+        return (640, 360)
+
+    def actual_format_from_progress_payload(self, payload):
+        return "mp4 · avc1 + mp4a"
+
+
+class UnselectableHighWithSafeFallbackService(FakeYtDlpService):
+    def __init__(self):
+        super().__init__()
+        self.download_options: list[DownloadOptions] = []
+
+    def extract_metadata(self, url, cookies_path=None):
+        return AnalyzeResponse(
+            url=url,
+            title="Unselectable high",
+            is_playlist=False,
+            entries=[],
+            formats=[
+                FormatOption(format_id="137", label="1080p mp4", height=1080, ext="mp4"),
+                FormatOption(format_id="22", label="720p mp4", height=720, ext="mp4"),
+            ],
+            subtitles=[],
+            automatic_subtitles=[],
+            ffmpeg={"ffmpeg": True, "ffprobe": True},
+        )
+
+    def prepare_download(self, url, options, cookies_path=None):
+        if options.resolution == "1080p":
+            return SimpleNamespace(is_selectable=False, width=None, height=None, actual_format=None)
+        return SimpleNamespace(is_selectable=True, width=1280, height=720, actual_format="mp4 · avc1 + mp4a")
+
+    def download(self, url, options, progress_hook, should_cancel, cookies_path=None, download_dir=None):
+        self.download_options.append(options)
+        progress_hook(
+            {
+                "status": "finished",
+                "filename": f"{url}.mp4",
+                "info_dict": {
+                    "requested_formats": [
+                        {"format_id": "22", "ext": "mp4", "vcodec": "avc1.64001f", "acodec": "none", "width": 1280, "height": 720},
+                        {"format_id": "140", "ext": "m4a", "vcodec": "none", "acodec": "mp4a.40.2"},
+                    ]
+                },
+            }
+        )
+
+    def resolution_from_progress_payload(self, payload):
+        return (1280, 720)
+
+    def actual_format_from_progress_payload(self, payload):
+        return "mp4 · avc1 + mp4a"
+
+
+class UnselectableHighWithoutSafeFallbackService(UnselectableHighWithSafeFallbackService):
+    def extract_metadata(self, url, cookies_path=None):
+        return AnalyzeResponse(
+            url=url,
+            title="Unsafe low fallback",
+            is_playlist=False,
+            entries=[],
+            formats=[
+                FormatOption(format_id="137", label="1080p mp4", height=1080, ext="mp4"),
+                FormatOption(format_id="18", label="360p mp4", height=360, ext="mp4"),
+            ],
+            subtitles=[],
+            automatic_subtitles=[],
+            ffmpeg={"ffmpeg": True, "ffprobe": True},
+        )
 
 class BrowserImportYtDlpService(FakeYtDlpService):
     def __init__(self):
@@ -558,6 +670,37 @@ def wait_for_job_status(client: TestClient, job_id: str, status: str) -> dict:
             return payload
         time.sleep(0.05)
     raise AssertionError(f"Job {job_id} did not reach {status}")
+
+
+def test_job_item_shows_predetected_resolution_and_format_while_downloading(tmp_path: Path) -> None:
+    service = PreparedBlockingYtDlpService()
+
+    with TestClient(create_app(settings=make_settings(tmp_path), ytdlp_service=service)) as client:
+        response = client.post(
+            "/api/jobs",
+            json={"url": "https://youtu.be/prepared", "options": {"mode": "video_subtitles", "resolution": "1080p"}},
+        )
+        assert response.status_code == 201
+        job_id = response.json()["id"]
+        assert service.started.get(timeout=2) == "https://youtu.be/prepared"
+        try:
+            for _ in range(20):
+                payload = client.get(f"/api/jobs/{job_id}").json()
+                item = payload["items"][0]
+                if item["actual_width"] == 1920:
+                    break
+                time.sleep(0.05)
+            else:
+                raise AssertionError("pre-detected item metadata was not published while download was running")
+
+            assert payload["status"] == "running"
+            assert payload["actual_resolution"] == "1920x1080"
+            assert payload["actual_format"] == "mp4 · avc1 + mp4a"
+            assert item["actual_width"] == 1920
+            assert item["actual_height"] == 1080
+            assert item["actual_format"] == "mp4 · avc1 + mp4a"
+        finally:
+            service.release.set()
 
 
 def test_default_concurrency_is_stability_first(tmp_path: Path) -> None:
@@ -873,7 +1016,14 @@ def test_job_download_suggests_lower_resolution_after_http_403_without_auto_rest
     assert item["status"] == "failed"
     assert item["requested_resolution"] == "1080p"
     assert item["fallback_resolution"] == "720p"
-    assert item["resolution_fallback"]["message"] == "当前下载未能在 1080p 下完成，可尝试以 720p 重启。"
+    assert item["fallback_reason"] == "media_stream_blocked"
+    assert item["resolution_fallback"] == {
+        "requested_resolution": "1080p",
+        "fallback_resolution": "720p",
+        "reason": "media_stream_blocked",
+        "restart_resolution": "720p",
+        "message": "当前 1080p 媒体流下载被 YouTube 拒绝或连接重置，可尝试以 720p 重启。",
+    }
     assert item["actual_width"] is None
     assert item["actual_height"] is None
 
@@ -899,6 +1049,7 @@ def test_job_download_reports_clear_error_when_all_http_403_retries_fail(tmp_pat
     assert "重新导入 cookies" in item["error"]
     assert item["requested_resolution"] == "1080p"
     assert item["fallback_resolution"] == "720p"
+    assert item["fallback_reason"] == "media_stream_blocked"
 
 
 def test_job_download_does_not_store_empty_error_when_http_403_is_wrapped(tmp_path: Path) -> None:
@@ -941,7 +1092,9 @@ def test_job_download_does_not_auto_downgrade_after_mid_download_failure(tmp_pat
     assert item["total_bytes"] == 10_485_760
     assert item["requested_resolution"] == "1080p"
     assert item["fallback_resolution"] == "720p"
-    assert item["resolution_fallback"]["message"] == "当前下载未能在 1080p 下完成，可尝试以 720p 重启。"
+    assert item["fallback_reason"] == "media_stream_blocked"
+    assert item["resolution_fallback"]["restart_resolution"] == "720p"
+    assert item["resolution_fallback"]["message"] == "当前 1080p 媒体流下载被 YouTube 拒绝或连接重置，可尝试以 720p 重启。"
     assert item["actual_width"] is None
     assert item["actual_height"] is None
 
@@ -978,6 +1131,26 @@ def test_diagnostics_returns_impersonation_status_from_real_service(monkeypatch,
     payload = response.json()
     assert payload["dependencies"]["impersonation_available"] is True
     assert payload["dependencies"]["impersonation_targets"] == ["safari", "chrome"]
+
+
+def test_init_db_adds_fallback_reason_to_existing_jobitem_table(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    engine = create_app_engine(settings)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE jobitem ("
+                "id TEXT PRIMARY KEY, job_id TEXT, source_url TEXT, title TEXT, "
+                "status TEXT, progress FLOAT, created_at DATETIME, updated_at DATETIME"
+                ")"
+            )
+        )
+
+    init_db(engine)
+
+    with engine.begin() as connection:
+        columns = {row[1] for row in connection.execute(text("PRAGMA table_info(jobitem)"))}
+    assert "fallback_reason" in columns
 
 
 def test_job_read_includes_realtime_progress_fields(tmp_path: Path) -> None:
@@ -1124,7 +1297,14 @@ def test_playlist_download_auto_falls_back_to_highest_lower_resolution(tmp_path:
     assert second["status"] == "succeeded"
     assert second["requested_resolution"] == "1080p"
     assert second["fallback_resolution"] == "720p"
-    assert second["resolution_fallback"]["message"] == "已从 1080p 自动降级到 720p。"
+    assert second["fallback_reason"] == "requested_resolution_missing"
+    assert second["resolution_fallback"] == {
+        "requested_resolution": "1080p",
+        "fallback_resolution": "720p",
+        "reason": "requested_resolution_missing",
+        "restart_resolution": None,
+        "message": "视频本来没有 1080p，已自动降级到 720p。",
+    }
     assert second["actual_width"] == 1280
     assert second["actual_height"] == 720
     assert second["actual_format"] == "mp4 · avc1 + mp4a"
@@ -1148,10 +1328,13 @@ def test_single_download_auto_falls_back_to_highest_lower_resolution(tmp_path: P
     assert [option.resolution for option in service.download_options] == ["720p"]
     assert item["requested_resolution"] == "1080p"
     assert item["fallback_resolution"] == "720p"
+    assert item["fallback_reason"] == "requested_resolution_missing"
     assert item["resolution_fallback"] == {
         "requested_resolution": "1080p",
         "fallback_resolution": "720p",
-        "message": "已从 1080p 自动降级到 720p。",
+        "reason": "requested_resolution_missing",
+        "restart_resolution": None,
+        "message": "视频本来没有 1080p，已自动降级到 720p。",
     }
     assert payload["resolution_fallback"] == item["resolution_fallback"]
     assert item["error"] is None
@@ -1160,14 +1343,45 @@ def test_single_download_auto_falls_back_to_highest_lower_resolution(tmp_path: P
     assert item["actual_format"] == "mp4 · avc1 + mp4a"
 
 
-def test_unavailable_resolution_without_lower_format_fails_with_clear_error(tmp_path: Path) -> None:
-    service = NoLowerResolutionYtDlpService()
+def test_low_source_can_auto_fallback_below_720_with_clear_reason(tmp_path: Path) -> None:
+    service = LowOnlyFallbackYtDlpService()
 
     with TestClient(create_app(settings=make_settings(tmp_path), ytdlp_service=service)) as client:
         response = client.post(
             "/api/jobs",
             json={
-                "url": "https://youtu.be/no-lower",
+                "url": "https://youtu.be/low-source",
+                "options": {"mode": "video_subtitles", "resolution": "1080p"},
+            },
+        )
+        assert response.status_code == 201
+        payload = wait_for_job_status(client, response.json()["id"], "succeeded")
+
+    item = payload["items"][0]
+    assert [option.resolution for option in service.download_options] == ["360p"]
+    assert item["status"] == "succeeded"
+    assert item["requested_resolution"] == "1080p"
+    assert item["fallback_resolution"] == "360p"
+    assert item["fallback_reason"] == "source_below_720_only"
+    assert item["resolution_fallback"] == {
+        "requested_resolution": "1080p",
+        "fallback_resolution": "360p",
+        "reason": "source_below_720_only",
+        "restart_resolution": None,
+        "message": "视频本身没有 720p 或更高清晰度，已自动降级到最高可用的 360p。",
+    }
+    assert item["actual_width"] == 640
+    assert item["actual_height"] == 360
+
+
+def test_existing_high_resolution_does_not_auto_fallback_below_720(tmp_path: Path) -> None:
+    service = UnselectableHighWithoutSafeFallbackService()
+
+    with TestClient(create_app(settings=make_settings(tmp_path), ytdlp_service=service)) as client:
+        response = client.post(
+            "/api/jobs",
+            json={
+                "url": "https://youtu.be/no-safe-lower",
                 "options": {"mode": "video_subtitles", "resolution": "1080p"},
             },
         )
@@ -1175,9 +1389,39 @@ def test_unavailable_resolution_without_lower_format_fails_with_clear_error(tmp_
         payload = wait_for_job_status(client, response.json()["id"], "failed")
 
     item = payload["items"][0]
+    assert service.download_options == []
     assert item["status"] == "failed"
-    assert item["error"] == "当前没有 1080p 的视频，也没有 720p 或更高的可用降级清晰度。"
-    assert service.download_called is False
+    assert item["fallback_resolution"] is None
+    assert item["fallback_reason"] is None
+    assert item["error"] == "检测到 1080p 清晰度，但该清晰度当前没有可下载的视频/音频组合，也没有 720p 或更高的可用降级清晰度。"
+
+
+def test_unselectable_high_resolution_auto_fallback_keeps_original_restart(tmp_path: Path) -> None:
+    service = UnselectableHighWithSafeFallbackService()
+
+    with TestClient(create_app(settings=make_settings(tmp_path), ytdlp_service=service)) as client:
+        response = client.post(
+            "/api/jobs",
+            json={
+                "url": "https://youtu.be/unselectable-high",
+                "options": {"mode": "video_subtitles", "resolution": "1080p"},
+            },
+        )
+        assert response.status_code == 201
+        payload = wait_for_job_status(client, response.json()["id"], "succeeded")
+
+    item = payload["items"][0]
+    assert [option.resolution for option in service.download_options] == ["720p"]
+    assert item["requested_resolution"] == "1080p"
+    assert item["fallback_resolution"] == "720p"
+    assert item["fallback_reason"] == "requested_resolution_unselectable"
+    assert item["resolution_fallback"] == {
+        "requested_resolution": "1080p",
+        "fallback_resolution": "720p",
+        "reason": "requested_resolution_unselectable",
+        "restart_resolution": "1080p",
+        "message": "检测到 1080p 清晰度，但该清晰度当前没有可下载的视频/音频组合，已自动降级到 720p。",
+    }
 
 
 def test_restart_job_with_resolution_updates_job_options(tmp_path: Path) -> None:
