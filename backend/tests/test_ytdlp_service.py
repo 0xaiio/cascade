@@ -174,6 +174,7 @@ def test_download_options_enable_resumable_stable_retry_defaults(tmp_path: Path)
     retry_sleep = opts["retry_sleep_functions"]
     assert set(retry_sleep) == {"http", "fragment", "file_access", "extractor"}
     assert retry_sleep["http"](3) > retry_sleep["http"](1)
+    assert retry_sleep["http"](n=3) > retry_sleep["http"](n=1)
 
 
 def test_throttled_rate_can_be_disabled(tmp_path: Path) -> None:

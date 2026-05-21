@@ -597,7 +597,7 @@ class YtDlpService:
         except importlib.metadata.PackageNotFoundError:
             return None
 
-    def _retry_sleep_functions(self) -> dict[str, Callable[[int], float]]:
+    def _retry_sleep_functions(self) -> dict[str, Callable[..., float]]:
         return {
             "http": self._bounded_retry_sleep,
             "fragment": self._bounded_retry_sleep,
@@ -606,12 +606,12 @@ class YtDlpService:
         }
 
     @staticmethod
-    def _bounded_retry_sleep(attempt: int) -> float:
-        return min(30.0, max(1, attempt) * 2.0)
+    def _bounded_retry_sleep(n: int = 0, **_: Any) -> float:
+        return min(30.0, max(1, n) * 2.0)
 
     @staticmethod
-    def _short_retry_sleep(attempt: int) -> float:
-        return min(10.0, max(1, attempt) * 1.0)
+    def _short_retry_sleep(n: int = 0, **_: Any) -> float:
+        return min(10.0, max(1, n) * 1.0)
 
     def _available_impersonation_targets(self) -> list[str]:
         try:
