@@ -65,7 +65,7 @@ class DownloadOptions(BaseModel):
     write_thumbnail: bool = False
     skip_existing: bool = True
     speed_limit_kbps: int | None = Field(default=2048, ge=1)
-    retries: int = Field(default=3, ge=0, le=20)
+    retries: int = Field(default=10, ge=0, le=20)
     notify_on_complete: bool = False
 
 

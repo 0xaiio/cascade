@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 import importlib.metadata
+import logging
 from pathlib import Path
 import re
 import shutil
@@ -18,6 +19,7 @@ from .browser_cookies import (
     BrowserCookieImportError,
     BrowserCookieImportResult,
 )
+from .log_safety import sanitize_log_message
 from .schemas import AnalyzeResponse, DownloadOptions, FormatOption, SubtitleOption, VideoEntry
 from .ytdlp_formats import (
     DEFAULT_MIN_AUTO_FALLBACK_HEIGHT,
@@ -44,6 +46,7 @@ YTDLP_FILE_ACCESS_RETRIES = 5
 YTDLP_EXTRACTOR_RETRIES = 5
 YTDLP_CONCURRENT_FRAGMENT_DOWNLOADS = 1
 DEFAULT_ANTI403_HTTP_CHUNK_SIZE_MB = 16
+DEFAULT_THROTTLED_RATE_KBPS = 64
 YOUTUBE_DOWNLOAD_PROFILES = ("default", "mweb_pot_chrome", "safari_hls", "chrome_default")
 YOUTUBE_ANTI403_PROFILES = frozenset(YOUTUBE_DOWNLOAD_PROFILES[1:])
 YOUTUBE_PROFILE_ALIASES = {"anti403": "safari_hls"}
@@ -60,6 +63,7 @@ COOKIE_REQUIRED_AUTH_HINTS = (
     "age-restricted",
 )
 MIN_AUTO_FALLBACK_HEIGHT = DEFAULT_MIN_AUTO_FALLBACK_HEIGHT
+logger = logging.getLogger(__name__)
 
 
 class DownloadCancelled(RuntimeError):
@@ -82,12 +86,14 @@ class YtDlpService:
         youtube_visitor_data: str | None = None,
         youtube_po_browser_path: str | None = None,
         anti403_http_chunk_size_mb: int = DEFAULT_ANTI403_HTTP_CHUNK_SIZE_MB,
+        throttled_rate_kbps: int = DEFAULT_THROTTLED_RATE_KBPS,
     ) -> None:
         self.download_dir = download_dir
         self.youtube_po_token = youtube_po_token
         self.youtube_visitor_data = youtube_visitor_data
         self.youtube_po_browser_path = youtube_po_browser_path
         self.anti403_http_chunk_size_mb = max(1, anti403_http_chunk_size_mb)
+        self.throttled_rate_kbps = max(0, throttled_rate_kbps)
 
     def get_ffmpeg_status(self) -> dict[str, bool]:
         return {"ffmpeg": self._ffmpeg_executable() is not None, "ffprobe": shutil.which("ffprobe") is not None}
@@ -246,8 +252,10 @@ class YtDlpService:
         impersonate_target = self._impersonation_target(youtube_profile)
         if impersonate_target:
             ydl_opts["impersonate"] = ImpersonateTarget.from_str(impersonate_target)
-        if youtube_profile in YOUTUBE_ANTI403_PROFILES:
+        if options.mode != "subtitles_only":
             ydl_opts["http_chunk_size"] = self.anti403_http_chunk_size_mb * 1024 * 1024
+            if self.throttled_rate_kbps > 0:
+                ydl_opts["throttledratelimit"] = self.throttled_rate_kbps * 1024
 
         if options.speed_limit_kbps:
             ydl_opts["ratelimit"] = options.speed_limit_kbps * 1024
@@ -268,7 +276,11 @@ class YtDlpService:
                 raise RuntimeError(
                     f"ffmpeg is required to download {requested} without silently falling back to a lower resolution."
                 )
-            ydl_opts["format"] = self._format_selector(options, allow_merge=ffmpeg_available)
+            ydl_opts["format"] = self._format_selector(
+                options,
+                allow_merge=ffmpeg_available,
+                prefer_hls=youtube_profile == "safari_hls",
+            )
             if ffmpeg_available:
                 ydl_opts["ffmpeg_location"] = ffmpeg_path
                 ydl_opts["merge_output_format"] = "mp4"
@@ -304,6 +316,13 @@ class YtDlpService:
             except DownloadCancelled:
                 raise
             except Exception as exc:
+                logger.warning(
+                    "yt-dlp profile failed: profile=%s resolution=%s error_class=%s error=%s",
+                    youtube_profile,
+                    options.resolution,
+                    type(exc).__name__,
+                    sanitize_log_message(self.readable_error_message(exc)),
+                )
                 if youtube_profile == "default" and not self.is_media_stream_blocked_error(exc):
                     raise
                 if first_retryable_error is None:
@@ -423,8 +442,17 @@ class YtDlpService:
             "connection reset",
             "connectionreseterror",
             "connection was reset",
+            "read operation timed out",
+            "read timed out",
+            "timed out",
+            "remote end closed",
+            "remote host closed",
             "recv failure",
             "curl: (35)",
+            "curl: (56)",
+            "incompleteread",
+            "tls",
+            "ssl",
             "10054",
             "远程主机强迫关闭",
         )
@@ -462,8 +490,8 @@ class YtDlpService:
                 return True
         return False
 
-    def _format_selector(self, options: DownloadOptions, allow_merge: bool = True) -> str:
-        return format_selector(options, allow_merge=allow_merge)
+    def _format_selector(self, options: DownloadOptions, allow_merge: bool = True, prefer_hls: bool = False) -> str:
+        return format_selector(options, allow_merge=allow_merge, prefer_hls=prefer_hls)
 
     def _single_file_format_selector(self, options: DownloadOptions) -> str:
         return single_file_format_selector(options)

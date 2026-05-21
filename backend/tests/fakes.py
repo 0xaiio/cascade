@@ -76,6 +76,13 @@ class FakeYtDlpService:
         return None
 
 
+class AverageSpeedYtDlpService(FakeYtDlpService):
+    def download(self, url, options, progress_hook, should_cancel, cookies_path=None, download_dir=None):
+        progress_hook({"status": "downloading", "downloaded_bytes": 0, "total_bytes": 8192, "speed": 4096})
+        progress_hook({"status": "downloading", "downloaded_bytes": 4096, "total_bytes": 8192, "speed": 2048})
+        progress_hook({"status": "finished", "downloaded_bytes": 8192, "total_bytes": 8192, "filename": f"{url}.mp4"})
+
+
 class BlockingYtDlpService(FakeYtDlpService):
     def __init__(self):
         super().__init__()

@@ -24,7 +24,7 @@ def read_job(session: Session, job_id: str) -> JobRead | None:
         completed_items=job.completed_items,
         failed_items=job.failed_items,
         current_item_title=job.current_item_title,
-        error=job.error,
+        error=_job_error(job, items),
         download_dir=job.download_dir,
         actual_resolution=_actual_resolution(items),
         actual_format=_actual_format(items),
@@ -108,6 +108,12 @@ def _job_resolution_fallback(items: list[JobItem]) -> ResolutionFallback | None:
     )
 
 
+def _job_error(job: Job, items: list[JobItem]) -> str | None:
+    if len(items) == 1 and items[0].status == "failed" and items[0].error:
+        return items[0].error
+    return job.error
+
+
 def _elapsed_seconds(started_at: datetime | None, finished_at: datetime | None) -> int:
     if not started_at:
         return 0
@@ -120,4 +126,3 @@ def _as_aware_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
-

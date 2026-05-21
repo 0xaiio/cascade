@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import threading
 from contextlib import suppress
 from pathlib import Path
@@ -17,9 +18,14 @@ from .fallback_policy import (
     REQUESTED_RESOLUTION_UNSELECTABLE,
     SOURCE_BELOW_720_ONLY,
 )
+from .log_safety import sanitize_log_message
 from .models import Job, JobEvent, JobItem, JobStatus, utc_now
 from .schemas import DownloadOptions
+from .transfer_stats import TransferStats
 from .ytdlp_service import DownloadCancelled, MIN_AUTO_FALLBACK_HEIGHT, YtDlpService
+
+
+logger = logging.getLogger(__name__)
 
 
 class JobManager:
@@ -342,6 +348,7 @@ class JobManager:
         session.add(job)
         session.commit()
         self._publish_threadsafe({"type": "item_started", "job_id": job.id, "item_id": item.id, "title": item.title})
+        transfer_stats = TransferStats()
 
         def progress_hook(payload: dict[str, Any]) -> None:
             if job.id in self._deleted:
@@ -355,7 +362,9 @@ class JobManager:
                 total = payload.get("total_bytes") or payload.get("total_bytes_estimate")
                 downloaded = payload.get("downloaded_bytes")
                 if downloaded is not None:
-                    hook_item.downloaded_bytes = int(downloaded)
+                    downloaded_bytes = int(downloaded)
+                    transfer_stats.record(downloaded_bytes)
+                    hook_item.downloaded_bytes = downloaded_bytes
                 if total is not None:
                     hook_item.total_bytes = int(total)
                     hook_item.progress = min(100.0, (float(downloaded or 0) / float(total)) * 100.0)
@@ -420,6 +429,7 @@ class JobManager:
             else:
                 item.error = YtDlpService.readable_error_message(exc)
                 self._annotate_resolution_fallback(item, options, exc)
+            self._log_item_failure(item, options, exc)
         else:
             session.refresh(item)
             if item.actual_width is None and item.actual_height is None and item.output_path:
@@ -435,7 +445,7 @@ class JobManager:
                 return
             item.finished_at = utc_now() if item.status != JobStatus.paused.value else None
             if item.status in {JobStatus.succeeded.value, JobStatus.failed.value, JobStatus.cancelled.value}:
-                item.speed = None
+                item.speed = transfer_stats.average_speed()
                 item.eta = None
             item.updated_at = utc_now()
             session.add(item)
@@ -521,14 +531,14 @@ class JobManager:
             job.finished_at = utc_now()
         elif job.failed_items:
             job.status = JobStatus.failed.value
-            job.error = f"{job.failed_items} item(s) failed."
+            job.error = self._job_error_message(session, job)
             job.finished_at = utc_now()
         else:
             job.status = JobStatus.succeeded.value
             job.progress = 100.0
             job.finished_at = utc_now()
         job.current_item_title = None
-        job.speed = None
+        job.speed = None if job.status == JobStatus.paused.value else self._terminal_job_speed(session, job.id)
         job.eta = None
         job.updated_at = utc_now()
         session.add(job)
@@ -571,6 +581,24 @@ class JobManager:
         if not items:
             return 0.0
         return sum(item.progress for item in items) / len(items)
+
+    def _terminal_job_speed(self, session: Session, job_id: str) -> float | None:
+        items = session.exec(select(JobItem).where(JobItem.job_id == job_id)).all()
+        speeds = [
+            float(item.speed)
+            for item in items
+            if item.status in {JobStatus.succeeded.value, JobStatus.failed.value, JobStatus.cancelled.value}
+            and item.speed is not None
+        ]
+        if not speeds:
+            return None
+        return sum(speeds) / len(speeds)
+
+    def _job_error_message(self, session: Session, job: Job) -> str:
+        items = session.exec(select(JobItem).where(JobItem.job_id == job.id)).all()
+        if len(items) == 1 and items[0].error:
+            return items[0].error
+        return f"{job.failed_items} item(s) failed."
 
     def _item_options(self, item: JobItem, job_options: DownloadOptions) -> DownloadOptions:
         if not item.options_json:
@@ -743,6 +771,26 @@ class JobManager:
             "YouTube 拒绝了媒体流下载（HTTP 403）或重置了媒体流连接。后台已在当前清晰度下尝试 PO-token provider、"
             "浏览器 impersonation、断点续传和传输重试；请重新导入 cookies 后重试。若浏览器可正常播放但仍失败，"
             "请检查网络/代理是否能稳定访问 YouTube 媒体域名，或配置有效的 YouTube PO token。"
+        )
+
+    def _log_item_failure(self, item: JobItem, options: DownloadOptions, exc: Exception) -> None:
+        if YtDlpService.is_cookie_required_error(exc):
+            category = "cookie_required"
+        elif YtDlpService.is_media_stream_blocked_error(exc):
+            category = "media_stream_blocked"
+        elif YtDlpService.is_requested_format_unavailable_error(exc):
+            category = "format_unavailable"
+        else:
+            category = "download_failed"
+        logger.warning(
+            "download item failed: job_id=%s item_id=%s title=%r resolution=%s category=%s error_class=%s error=%s",
+            item.job_id,
+            item.id,
+            item.title,
+            options.resolution,
+            category,
+            type(exc).__name__,
+            sanitize_log_message(YtDlpService.readable_error_message(exc)),
         )
 
     def _format_from_output_path(self, output_path: Path) -> str | None:

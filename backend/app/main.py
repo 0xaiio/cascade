@@ -50,6 +50,7 @@ def create_app(
         youtube_visitor_data=app_settings.youtube_visitor_data,
         youtube_po_browser_path=app_settings.youtube_po_browser_path,
         anti403_http_chunk_size_mb=app_settings.anti403_http_chunk_size_mb,
+        throttled_rate_kbps=app_settings.throttled_rate_kbps,
     )
     with Session(engine) as session:
         _apply_stored_settings(session, app_settings, service)
@@ -106,6 +107,7 @@ def create_app(
             **dependencies,
             "youtube_max_parallel_downloads": app_settings.youtube_max_parallel_downloads,
             "anti403_http_chunk_size_mb": app_settings.anti403_http_chunk_size_mb,
+            "throttled_rate_kbps": app_settings.throttled_rate_kbps,
         }
         return DiagnosticsRead(cookies_enabled=app_settings.cookies_path.exists(), dependencies=dependencies)
 

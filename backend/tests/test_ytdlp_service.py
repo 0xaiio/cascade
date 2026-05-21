@@ -83,6 +83,9 @@ def test_media_stream_blocked_detection_handles_connection_reset(tmp_path: Path)
     assert service.is_media_stream_blocked_error(
         RuntimeError("ERROR: [download] Got error: Failed to perform, curl: (35) Recv failure: Connection was reset.")
     )
+    assert service.is_media_stream_blocked_error(RuntimeError("The read operation timed out"))
+    assert service.is_media_stream_blocked_error(RuntimeError("Remote end closed connection without response"))
+    assert service.is_media_stream_blocked_error(RuntimeError("IncompleteRead(123 bytes read)"))
     assert not service.is_media_stream_blocked_error(RuntimeError("Requested format is not available."))
 
 
@@ -134,8 +137,21 @@ def test_safari_hls_download_options_use_safari_profile_accepted_by_ytdlp(monkey
     assert str(opts["impersonate"]) == "safari"
     assert opts["extractor_args"]["youtube"]["player_client"] == ["web_safari", "default"]
     assert opts["http_chunk_size"] == 16 * 1024 * 1024
+    assert opts["format"].startswith("b[height=720][protocol^=m3u8]/")
     with yt_dlp.YoutubeDL(opts):
         pass
+
+
+def test_default_download_options_use_stability_defaults(tmp_path: Path) -> None:
+    options = DownloadOptions()
+    service = YtDlpService(download_dir=tmp_path)
+
+    opts = service.build_download_options(options, cookies_path=None)
+
+    assert options.retries == 10
+    assert opts["retries"] == 10
+    assert opts["http_chunk_size"] == 16 * 1024 * 1024
+    assert opts["throttledratelimit"] == 64 * 1024
 
 
 def test_download_options_enable_resumable_stable_retry_defaults(tmp_path: Path) -> None:
@@ -153,10 +169,19 @@ def test_download_options_enable_resumable_stable_retry_defaults(tmp_path: Path)
     assert opts["extractor_retries"] == 5
     assert opts["socket_timeout"] == 30
     assert opts["concurrent_fragment_downloads"] == 1
-    assert "http_chunk_size" not in opts
+    assert opts["http_chunk_size"] == 16 * 1024 * 1024
+    assert opts["throttledratelimit"] == 64 * 1024
     retry_sleep = opts["retry_sleep_functions"]
     assert set(retry_sleep) == {"http", "fragment", "file_access", "extractor"}
     assert retry_sleep["http"](3) > retry_sleep["http"](1)
+
+
+def test_throttled_rate_can_be_disabled(tmp_path: Path) -> None:
+    service = YtDlpService(download_dir=tmp_path, throttled_rate_kbps=0)
+
+    opts = service.build_download_options(DownloadOptions(mode="video_subtitles", resolution="best"), cookies_path=None)
+
+    assert "throttledratelimit" not in opts
 
 
 def test_po_token_env_config_is_passed_to_youtube_extractor_args(monkeypatch, tmp_path: Path) -> None:

@@ -76,7 +76,7 @@ const INITIAL_OPTIONS: DownloadOptions = {
   write_thumbnail: false,
   skip_existing: true,
   speed_limit_kbps: 2048,
-  retries: 3,
+  retries: 10,
   notify_on_complete: false
 };
 

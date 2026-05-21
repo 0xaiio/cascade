@@ -6,22 +6,25 @@ from .schemas import DownloadOptions, FormatOption
 DEFAULT_MIN_AUTO_FALLBACK_HEIGHT = 720
 
 
-def format_selector(options: DownloadOptions, allow_merge: bool = True) -> str:
+def format_selector(options: DownloadOptions, allow_merge: bool = True, prefer_hls: bool = False) -> str:
     if not allow_merge:
         return single_file_format_selector(options)
     if options.format_id:
         return f"{options.format_id}+ba/{options.format_id}"
     if options.resolution == "best":
-        return "bv*+ba/b"
+        return "b[protocol^=m3u8]/bv*+ba/b" if prefer_hls else "bv*+ba/b"
     if options.resolution.endswith("p") and options.resolution[:-1].isdigit():
         height = int(options.resolution[:-1])
-        return (
+        selector = (
             f"bv*[height={height}][ext=mp4][vcodec^=avc1]+ba[ext=m4a][acodec^=mp4a]/"
             f"bv*[height={height}][ext=mp4]+ba[ext=m4a]/"
             f"bv*[height={height}]+ba/"
             f"b[height={height}][protocol^=m3u8]/"
             f"b[height={height}]"
         )
+        if prefer_hls:
+            return f"b[height={height}][protocol^=m3u8]/{selector}"
+        return selector
     return "bv*+ba/b"
 
 

@@ -358,6 +358,7 @@ describe("App", () => {
     render(<App />);
 
     const speedLimit = screen.getByLabelText("限速 KB/s");
+    expect(screen.getByLabelText("重试次数")).toHaveValue(10);
     expect(speedLimit).toHaveValue(2048);
     expect(screen.getByText("清空表示不限速")).toBeInTheDocument();
 
@@ -539,6 +540,45 @@ describe("App", () => {
     expect(screen.getByText("大小未知 / 大小未知")).toBeInTheDocument();
     expect(screen.getAllByText("分辨率 1920x1080").length).toBeGreaterThan(0);
     expect(screen.getAllByText("格式 mp4 · avc1 + mp4a").length).toBeGreaterThan(0);
+  });
+
+  test("keeps average speed visible after a job completes", async () => {
+    currentJobsPayload = [
+      {
+        ...jobPayload,
+        status: "succeeded",
+        progress: 100,
+        speed: 1024,
+        eta: null,
+        completed_items: 1,
+        finished_at: "2026-05-15T10:01:00Z",
+        items: []
+      }
+    ];
+    render(<App />);
+
+    expect(await screen.findByText("Running video")).toBeInTheDocument();
+    expect(screen.getByText("1.0 KB/s")).toBeInTheDocument();
+  });
+
+  test("shows concrete single video failure reason in task center", async () => {
+    currentJobsPayload = [
+      {
+        ...jobPayload,
+        status: "failed",
+        progress: 40,
+        error: "YouTube 媒体流连接中断，请重新导入 cookies 后重试。",
+        failed_items: 1,
+        speed: 1536,
+        eta: null,
+        items: []
+      }
+    ];
+    render(<App />);
+
+    expect(await screen.findByText("Running video")).toBeInTheDocument();
+    expect(screen.getByText(/YouTube 媒体流连接中断/)).toBeInTheDocument();
+    expect(screen.getByText("1.5 KB/s")).toBeInTheDocument();
   });
 
   test("restarts a single playlist item from task center", async () => {

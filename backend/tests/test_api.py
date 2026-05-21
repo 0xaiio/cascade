@@ -13,9 +13,11 @@ from app.db import create_app_engine, init_db
 from app.main import create_app
 from app.models import Job, JobItem, Setting
 from app.schemas import DownloadOptions, FormatOption
+from app.transfer_stats import TransferStats
 from app.ytdlp_service import YtDlpService
 
 from fakes import (
+    AverageSpeedYtDlpService,
     AutoFallbackYtDlpService,
     BlockingYtDlpService,
     BotChallengeYtDlpService,
@@ -544,6 +546,7 @@ def test_diagnostics_returns_runtime_and_cookie_status(tmp_path: Path) -> None:
     assert payload["dependencies"]["youtube_visitor_data_configured"] is False
     assert payload["dependencies"]["youtube_max_parallel_downloads"] == 1
     assert payload["dependencies"]["anti403_http_chunk_size_mb"] == 16
+    assert payload["dependencies"]["throttled_rate_kbps"] == 64
 
 
 def test_diagnostics_returns_impersonation_status_from_real_service(monkeypatch, tmp_path: Path) -> None:
@@ -641,6 +644,50 @@ def test_job_read_includes_realtime_progress_fields(tmp_path: Path) -> None:
     assert payload["items"][0]["actual_width"] == 1920
     assert payload["items"][0]["actual_height"] == 1080
     assert payload["items"][0]["actual_format"] == "mp4 · avc1 + mp4a"
+
+
+def test_finished_download_keeps_average_speed(tmp_path: Path, monkeypatch) -> None:
+    service = AverageSpeedYtDlpService()
+    times = iter([10.0, 11.0, 13.0])
+    monkeypatch.setattr("app.job_manager.TransferStats", lambda: TransferStats(clock=lambda: next(times)))
+
+    with TestClient(create_app(settings=make_settings(tmp_path), ytdlp_service=service)) as client:
+        response = client.post(
+            "/api/jobs",
+            json={
+                "url": "https://youtu.be/average-speed",
+                "options": {"mode": "video_subtitles", "resolution": "720p"},
+            },
+        )
+        assert response.status_code == 201
+        payload = wait_for_job_status(client, response.json()["id"], "succeeded")
+
+    expected_speed = 8192 / 3
+    assert payload["speed"] == expected_speed
+    assert payload["items"][0]["speed"] == expected_speed
+
+
+def test_single_video_failed_job_surfaces_item_error(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    seed_job(tmp_path, "job-single-failed", status="failed")
+    engine = create_app_engine(make_settings(tmp_path))
+    with Session(engine) as session:
+        job = session.get(Job, "job-single-failed")
+        assert job is not None
+        job.failed_items = 1
+        job.error = "1 item(s) failed."
+        session.add(job)
+        item = session.get(JobItem, "job-single-failed-item")
+        assert item is not None
+        item.status = "failed"
+        item.error = "YouTube 媒体流连接中断，请重新导入 cookies 后重试。"
+        session.add(item)
+        session.commit()
+
+    response = client.get("/api/jobs/job-single-failed")
+
+    assert response.status_code == 200
+    assert response.json()["error"] == "YouTube 媒体流连接中断，请重新导入 cookies 后重试。"
 
 
 def test_playlist_job_read_reports_mixed_actual_resolution(tmp_path: Path) -> None:
