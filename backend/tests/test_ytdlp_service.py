@@ -524,26 +524,28 @@ def test_download_options_enable_supported_js_runtime(monkeypatch, tmp_path: Pat
     assert opts["js_runtimes"] == {"node": {"path": "C:/Program Files/nodejs/node.exe"}}
 
 
-def test_default_speed_limit_is_2048_kbps(tmp_path: Path) -> None:
+def test_default_speed_limit_is_unlimited(tmp_path: Path) -> None:
+    service = YtDlpService(download_dir=tmp_path)
+    options = DownloadOptions(mode="video_subtitles", resolution="best")
+
+    opts = service.build_download_options(
+        options,
+        cookies_path=None,
+    )
+
+    assert options.speed_limit_kbps is None
+    assert "ratelimit" not in opts
+
+
+def test_explicit_speed_limit_sets_yt_dlp_ratelimit(tmp_path: Path) -> None:
     service = YtDlpService(download_dir=tmp_path)
 
     opts = service.build_download_options(
-        DownloadOptions(mode="video_subtitles", resolution="best"),
+        DownloadOptions(mode="video_subtitles", resolution="best", speed_limit_kbps=2048),
         cookies_path=None,
     )
 
     assert opts["ratelimit"] == 2048 * 1024
-
-
-def test_empty_speed_limit_means_unlimited(tmp_path: Path) -> None:
-    service = YtDlpService(download_dir=tmp_path)
-
-    opts = service.build_download_options(
-        DownloadOptions(mode="video_subtitles", resolution="best", speed_limit_kbps=None),
-        cookies_path=None,
-    )
-
-    assert "ratelimit" not in opts
 
 
 def test_import_browser_cookies_saves_only_youtube_related_cookies(monkeypatch, tmp_path: Path) -> None:
