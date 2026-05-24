@@ -534,3 +534,26 @@ Thumbs.db
 - 自动降级只适用于数字清晰度策略，不适用于具体 `format_id`。
 - 自动降级必须可见，不能静默发生。
 - playlist 允许不同子视频降级到不同分辨率。
+
+---
+
+# 2026-05-24 +08:00 - 下载任务与相关下载文件删除功能计划
+
+## Summary
+增加显式删除入口：每个任务/视频都有“仅删除任务”和“删除任务并删除已下载文件”两个操作。`delete_files=true` 删除该任务已知输出视频及字幕、metadata、缩略图、description、info.json 等相关 sidecar。删除运行中的任务/视频允许立即执行；删除 playlist 最后一个子视频时，同时删除父级 playlist 任务。每个阶段同步更新文档、提交并 `git push origin main`。
+
+## Key Changes
+- 后端新增 `POST /api/jobs/{job_id}/items/delete`，请求体为 `{ "item_ids": string[], "delete_files": boolean }`，响应体包含 `deleted_item_ids`、`job_deleted` 和剩余 `job`。
+- `JobManager` 增加子视频删除能力，支持删除一个或多个 `JobItem`、刷新父任务聚合状态、删除最后一个子项时删除父任务，并用 `_deleted_items` 取消运行中的子视频。
+- 现有 job 删除和批量 job 删除保留，`delete_files=true` 继续删除输出文件及 sidecar，并限制在下载根目录或 job 目录下。
+- 前端移除任务中心全局“删除任务时同时删除已下载视频”复选框；任务、playlist 子视频和批量工具栏均提供“仅删除任务”和“删除任务并删除已下载文件”两个显式按钮，删除文件路径需要确认弹窗。
+- 同步更新 `docs/` 中 API、用户手册、需求、技术、实现、测试、维护文档和相关 PlantUML 图。
+
+## Test Plan
+- 后端：覆盖默认删除保留文件、`delete_files=true` 删除视频和 sidecar、playlist 子视频删除后刷新父任务、删除全部子视频时父任务消失、运行中子视频删除取消下载、无匹配 item 返回 404。
+- 前端：覆盖全局复选框不存在、单任务双删除按钮、确认框取消不发请求、playlist 子视频单个/多选删除、新批量双删除按钮。
+- 全量验证：`python -m compileall backend\app`、`python -m pytest backend\tests -q`、`cd frontend && npm test`、`cd frontend && npm run build`、`git diff --check`。
+
+## Assumptions
+- `ai/brainstorming.md` 是用户未跟踪文件，本次不触碰。
+- 删除运行中内容允许立即执行；文件删除基于数据库已知 `output_path`，未记录最终输出路径时只删除任务记录。

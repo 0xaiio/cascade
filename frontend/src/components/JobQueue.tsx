@@ -27,7 +27,7 @@ export function JobQueue({
   selectedJobIds: Set<string>;
   onBatchAction: (action: JobBatchAction) => void;
   onDeleteFilesWithJobsChange: (checked: boolean) => void;
-  onDelete: (jobId: string) => void;
+  onDelete: (jobId: string, deleteFiles?: boolean) => void;
   onPause: (jobId: string) => void;
   onRestart: (jobId: string, resolution?: string) => void;
   onRestartItem: (jobId: string, itemId: string, resolution?: string) => void;
@@ -129,7 +129,22 @@ export function JobQueue({
                     <RotateCcw size={18} />
                   </button>
                 )}
-                <button className="icon-button danger" type="button" title="删除" aria-label={`删除 ${title}`} onClick={() => onDelete(job.id)}>
+                <button
+                  className="icon-button danger"
+                  type="button"
+                  title="仅删除任务"
+                  aria-label={`仅删除任务 ${title}`}
+                  onClick={() => onDelete(job.id, false)}
+                >
+                  <Trash2 size={18} />
+                </button>
+                <button
+                  className="icon-button danger"
+                  type="button"
+                  title="删除任务和已下载文件"
+                  aria-label={`删除任务和已下载文件 ${title}`}
+                  onClick={() => onDelete(job.id, true)}
+                >
                   <Trash2 size={18} />
                 </button>
               </div>

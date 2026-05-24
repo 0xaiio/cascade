@@ -258,8 +258,11 @@ export default function App() {
     updateJobInList(await restartJobItem(jobId, itemId, resolution));
   }
 
-  async function handleDeleteJob(jobId: string) {
-    await deleteJob(jobId, deleteFilesWithJobs);
+  async function handleDeleteJob(jobId: string, deleteFiles = false) {
+    if (deleteFiles && !window.confirm("将删除该任务记录及其已下载的视频、字幕、metadata、缩略图和 description 等相关文件。是否继续？")) {
+      return;
+    }
+    await deleteJob(jobId, deleteFiles);
     setJobs((current) => current.filter((job) => job.id !== jobId));
   }
 
@@ -332,7 +335,7 @@ export default function App() {
               selectedJobIds={selectedJobIds}
               onBatchAction={(action) => void handleBatchAction(action).catch((err) => setError(err.message))}
               onDeleteFilesWithJobsChange={setDeleteFilesWithJobs}
-              onDelete={(jobId) => void handleDeleteJob(jobId).catch((err) => setError(err.message))}
+              onDelete={(jobId, deleteFiles) => void handleDeleteJob(jobId, deleteFiles).catch((err) => setError(err.message))}
               onPause={(jobId) => void handlePauseJob(jobId).catch((err) => setError(err.message))}
               onRestart={(jobId, resolution) => void handleRestartJob(jobId, resolution).catch((err) => setError(err.message))}
               onRestartItem={(jobId, itemId, resolution) => void handleRestartJobItem(jobId, itemId, resolution).catch((err) => setError(err.message))}

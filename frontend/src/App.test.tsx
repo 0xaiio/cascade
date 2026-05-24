@@ -428,9 +428,8 @@ describe("App", () => {
 
     await user.click(screen.getByLabelText("选择任务 Running video"));
     await user.click(screen.getByLabelText("选择任务 Paused video"));
-    await user.click(screen.getByLabelText("删除任务时同时删除已下载视频"));
     await user.click(screen.getByRole("button", { name: "批量暂停" }));
-    await user.click(screen.getByRole("button", { name: "删除 Running video" }));
+    await user.click(screen.getByRole("button", { name: "删除任务和已下载文件 Running video" }));
 
     expect(fetch).toHaveBeenCalledWith("/api/jobs/job-running/pause", expect.objectContaining({ method: "POST" }));
     expect(fetch).toHaveBeenCalledWith("/api/jobs/job-paused/restart", expect.objectContaining({ method: "POST" }));

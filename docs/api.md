@@ -23,7 +23,7 @@
 | `POST` | `/api/jobs/{job_id}/pause` | 暂停任务。 | `JobRead` |
 | `POST` | `/api/jobs/{job_id}/restart` | 重启任务，可覆盖清晰度。 | [`RestartJobRequest`](../backend/app/schemas.py#L77) |
 | `POST` | `/api/jobs/{job_id}/items/{item_id}/restart` | 重启 playlist 中单个子视频，可覆盖清晰度。 | `RestartJobRequest` |
-| `DELETE` | `/api/jobs/{job_id}` | 删除任务，可选删除产物。 | 查询参数 `delete_files` |
+| `DELETE` | `/api/jobs/{job_id}` | 删除任务，可选删除输出视频及字幕、metadata、缩略图、description 等相关文件。 | 查询参数 `delete_files` |
 | `GET` | `/api/events` | SSE 任务事件流。 | `text/event-stream` |
 | `GET` | `/api/settings` | 获取设置。 | [`SettingsRead`](../backend/app/schemas.py#L153) |
 | `PUT` | `/api/settings` | 更新设置。 | [`SettingsUpdate`](../backend/app/schemas.py#L162) |
