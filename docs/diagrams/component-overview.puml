@@ -1,0 +1,48 @@
+@startuml
+title Component Overview
+skinparam componentStyle rectangle
+skinparam shadowing false
+
+package "Frontend" {
+  [App.tsx] as App
+  [JobQueue.tsx] as Queue
+  [api.ts] as ApiClient
+  [types.ts] as Types
+  [quality.ts] as Quality
+  [formatting.ts] as Formatting
+}
+
+package "Backend" {
+  [main.py\nFastAPI routes] as Main
+  [job_manager.py\nqueue/workers] as Manager
+  [job_read_model.py\nAPI projection] as ReadModel
+  [ytdlp_service.py\nyt-dlp boundary] as Service
+  [browser_cookies.py\ncookie import] as Cookies
+  [ytdlp_formats.py\nselectors] as Formats
+  [fallback_policy.py\nmessages] as Fallback
+  [download_progress.py\nstream aggregation] as Progress
+  [transfer_stats.py\naverage speed] as Stats
+  [db.py + models.py\nSQLite] as Data
+}
+
+App --> Queue
+App --> ApiClient
+App --> Quality
+Queue --> Formatting
+ApiClient --> Types
+ApiClient --> Main : HTTP
+Main --> Manager
+Main --> ReadModel
+Main --> Service
+Main --> Data
+Manager --> Service
+Manager --> Progress
+Manager --> Stats
+Manager --> Fallback
+Manager --> Data
+ReadModel --> Fallback
+ReadModel --> Data
+Service --> Formats
+Service --> Cookies
+Service --> Data : dependency status only
+@enduml

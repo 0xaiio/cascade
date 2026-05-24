@@ -1,0 +1,37 @@
+@startuml
+title Cookies Import and Use Flow
+skinparam shadowing false
+
+start
+:User analyzes URL or starts download;
+if (cookies file exists?) then (yes)
+  :Pass data/cookies.txt to yt-dlp;
+else (no)
+  :Run unauthenticated;
+endif
+
+if (YouTube requires login/bot check?) then (yes)
+  :Try browser cookie import;
+  if (browser cookie DB locked?) then (yes)
+    if (Edge and user confirmed close?) then (yes)
+      :Close Edge and retry import;
+    else (no)
+      :Return browser_locked error;
+      stop
+    endif
+  endif
+
+  if (Edge DPAPI decrypt fails?) then (yes)
+    :Start temporary headless Edge CDP session;
+    :Read YouTube/Google cookies via DevTools;
+  endif
+
+  :Filter YouTube/Google cookies;
+  :Save data/cookies.txt;
+  :Retry analyze/download once;
+else (no)
+  :Continue normally;
+endif
+
+stop
+@enduml

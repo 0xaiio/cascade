@@ -1,0 +1,43 @@
+@startuml
+title Single Video Analyze and Download
+skinparam shadowing false
+
+actor User
+participant "React UI" as UI
+participant "FastAPI routes" as API
+participant "JobManager" as Manager
+participant "YtDlpService" as Service
+database "SQLite" as DB
+participant "yt-dlp" as YTDLP
+participant "YouTube" as YouTube
+
+User -> UI : submit video URL
+UI -> API : POST /api/analyze
+API -> Service : extract_metadata(url, cookies)
+Service -> YTDLP : extract_info(download=false)
+YTDLP -> YouTube : metadata request
+YouTube --> YTDLP : metadata
+YTDLP --> Service : info_dict
+Service --> API : AnalyzeResponse
+API --> UI : title, formats, subtitles
+
+User -> UI : create job
+UI -> API : POST /api/jobs
+API -> DB : insert Job + JobItem
+API -> Manager : enqueue(job_id)
+Manager -> DB : mark running
+Manager -> Service : prepare_download()
+Service -> YTDLP : select planned format
+Service --> Manager : width/height/format
+Manager -> DB : store planned actual fields
+Manager -> Service : download()
+Service -> YTDLP : download with progress hook
+YTDLP -> YouTube : media stream
+YTDLP --> Manager : progress payloads
+Manager -> DB : update progress
+UI -> API : GET /api/jobs
+API -> DB : read projection
+API --> UI : JobRead
+YTDLP --> Service : completed
+Manager -> DB : mark succeeded
+@enduml

@@ -1,0 +1,28 @@
+@startuml
+title Download Lifecycle
+skinparam shadowing false
+
+[*] --> queued : create job/item
+queued --> running : worker picks item
+running --> succeeded : download completes
+running --> failed : unrecoverable error
+running --> paused : user pauses
+queued --> paused : user pauses before worker
+queued --> cancelled : user cancels
+running --> cancelled : cancel requested
+paused --> queued : restart
+failed --> queued : restart
+succeeded --> queued : restart
+cancelled --> queued : restart
+queued --> [*] : delete
+running --> [*] : delete
+paused --> [*] : delete
+failed --> [*] : delete
+succeeded --> [*] : delete
+cancelled --> [*] : delete
+
+note right of running
+Progress is aggregated across yt-dlp
+sub-stream payloads and remains monotonic.
+end note
+@enduml

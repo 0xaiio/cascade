@@ -1,0 +1,90 @@
+# 测试文档
+
+适用读者：需要验证功能、回归下载策略或审查文档同步情况的开发者和测试者。
+
+## 自动测试命令
+
+后端语法检查：
+
+```powershell
+python -m compileall backend\app
+```
+
+后端测试：
+
+```powershell
+python -m pytest backend\tests -q
+```
+
+前端测试和构建：
+
+```powershell
+cd frontend
+npm test
+npm run build
+```
+
+空白检查：
+
+```powershell
+git diff --check
+```
+
+## 后端测试范围
+
+后端测试位于 [backend/tests](../backend/tests/)。
+
+| 文件 | 重点 |
+| --- | --- |
+| [test_api.py](../backend/tests/test_api.py) | API 行为、任务创建、重启、删除、cookies、设置和诊断。 |
+| [test_ytdlp_service.py](../backend/tests/test_ytdlp_service.py) | yt-dlp 参数、profile、PO token、aria2c、格式选择和错误识别。 |
+| [test_download_progress.py](../backend/tests/test_download_progress.py) | 多子流进度聚合，避免进度回退。 |
+| [test_transfer_stats.py](../backend/tests/test_transfer_stats.py) | 平均速度计算。 |
+| [test_paths.py](../backend/tests/test_paths.py) | 安全路径名。 |
+| [test_log_safety.py](../backend/tests/test_log_safety.py) | 日志敏感信息清洗。 |
+| [fakes.py](../backend/tests/fakes.py) | API 测试的 fake service 和辅助对象。 |
+
+默认自动测试不依赖真实 YouTube 下载，避免网络、地区、cookies 和 YouTube 风控导致不稳定。
+
+## 前端测试范围
+
+前端组件测试位于 [App.test.tsx](../frontend/src/App.test.tsx)，测试夹具在 [frontend/src/test](../frontend/src/test/)。
+
+重点覆盖：
+
+- 链接解析和 playlist 条目选择。
+- 下载选项默认值和提交请求体。
+- cookies 上传、浏览器导入、Edge 锁库提示。
+- 任务中心状态、进度、速度、实际分辨率和实际格式展示。
+- 分辨率降级提示和重启按钮。
+
+## 手动验收
+
+每次修改下载策略、cookies、任务中心或 API 时，建议执行：
+
+1. 启动后端和前端。
+2. 解析一个公开单视频，确认可显示标题、封面、清晰度和字幕信息。
+3. 创建 1080p 下载任务，确认任务中心在下载前或下载开始后很快显示实际分辨率和格式。
+4. 解析一个小 playlist，选择多个条目，确认单项进度、失败原因和聚合状态。
+5. 清除 cookies 后解析需要登录态的视频，确认错误提示可理解；重新导入 cookies 后重试。
+6. 对失败任务执行指定清晰度重启，确认请求体和任务中心提示符合 [API 文档](api.md#endpoint)。
+7. 下载完成后确认速度仍显示平均值。
+
+## 高风险回归点
+
+- YouTube 页面或媒体流变化导致 `yt-dlp` 解析或下载参数失效。
+- 分离音视频流导致进度回退。
+- 媒体流 403/连接重置被错误地自动降清晰度重下。
+- 720p 自动降级底线失效。
+- 单视频失败原因被任务级聚合错误覆盖。
+- Cookies 导入暴露敏感信息或擅自关闭浏览器。
+- README 与 `docs/` 重复，导致后续维护分叉。
+
+## 文档验收
+
+文档变更也应验证：
+
+- 所有新增 Markdown 链接指向存在文件。
+- 每个 SVG 图都由同名 `.puml` 生成，并嵌入至少一份文档。
+- README 保持入口页，不重新复制 API、技术策略或排障长文。
+- `git diff --check` 无输出。

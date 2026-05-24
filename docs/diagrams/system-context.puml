@@ -1,0 +1,28 @@
+@startuml
+title YouTube Downloader System Context
+skinparam componentStyle rectangle
+skinparam shadowing false
+
+actor "Local user" as User
+node "User machine" {
+  component "React/Vite UI\nfrontend/src" as UI
+  component "FastAPI backend\nbackend/app" as API
+  database "SQLite\n data/app.sqlite3" as DB
+  folder "Downloads\n downloads/" as Files
+  component "Browser cookies\nEdge/Chrome/Firefox" as BrowserCookies
+  component "ffmpeg / imageio-ffmpeg" as FFMPEG
+}
+
+cloud "YouTube\nmetadata and media" as YouTube
+component "yt-dlp\nPython API" as YTDLP
+
+User --> UI : operate
+UI --> API : HTTP + SSE
+API --> DB : jobs/settings/events
+API --> YTDLP : analyze/download
+API --> BrowserCookies : import cookies
+YTDLP --> YouTube : extract/download
+YTDLP --> FFMPEG : merge streams
+YTDLP --> Files : write media/subtitles
+API --> Files : delete selected outputs
+@enduml

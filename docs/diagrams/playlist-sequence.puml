@@ -1,0 +1,39 @@
+@startuml
+title Playlist Download Sequence
+skinparam shadowing false
+
+actor User
+participant "React UI" as UI
+participant "FastAPI routes" as API
+participant "JobManager" as Manager
+database "SQLite" as DB
+participant "YtDlpService" as Service
+participant "yt-dlp" as YTDLP
+
+User -> UI : submit playlist URL
+UI -> API : POST /api/analyze
+API -> Service : extract_metadata(extract_flat=in_playlist)
+Service -> YTDLP : extract playlist entries
+YTDLP --> Service : entries
+Service --> API : AnalyzeResponse(entries)
+API --> UI : playlist table
+
+User -> UI : select entries and create job
+UI -> API : POST /api/jobs(options.playlist_items)
+API -> DB : insert one Job
+loop selected entries
+  API -> DB : insert JobItem(index, title, source_url)
+end
+API -> Manager : enqueue(job_id)
+
+loop queued JobItems ordered by index
+  Manager -> Service : prepare_download(item)
+  Manager -> Service : download(item)
+  Service --> Manager : progress/finished/error
+  Manager -> DB : update item and aggregate job
+end
+
+Manager -> DB : finish job
+UI -> API : GET /api/jobs
+API --> UI : aggregate status and expandable items
+@enduml

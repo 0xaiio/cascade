@@ -1,0 +1,65 @@
+@startuml
+title Core Data Model
+skinparam shadowing false
+
+class Setting {
+  +key: str
+  +value: str
+}
+
+class Job {
+  +id: str
+  +url: str
+  +title: str
+  +status: str
+  +options_json: str
+  +progress: float
+  +speed: float?
+  +eta: int?
+  +total_items: int
+  +completed_items: int
+  +failed_items: int
+  +download_dir: str?
+  +error: str?
+}
+
+class JobItem {
+  +id: str
+  +job_id: str
+  +source_url: str
+  +title: str
+  +index: int
+  +status: str
+  +progress: float
+  +downloaded_bytes: int?
+  +total_bytes: int?
+  +actual_width: int?
+  +actual_height: int?
+  +actual_format: str?
+  +requested_resolution: str?
+  +fallback_resolution: str?
+  +fallback_reason: str?
+  +error: str?
+}
+
+class JobEvent {
+  +id: int?
+  +job_id: str
+  +item_id: str?
+  +event_type: str
+  +payload_json: str
+}
+
+class JobRead {
+  +items: list<JobItemRead>
+  +actual_resolution: str?
+  +actual_format: str?
+  +resolution_fallback: ResolutionFallback?
+}
+
+Job "1" --> "*" JobItem : contains
+Job "1" --> "*" JobEvent : emits
+JobItem "0..1" --> "*" JobEvent : item events
+Job --> JobRead : projected by job_read_model
+JobItem --> JobRead : projected by job_read_model
+@enduml
