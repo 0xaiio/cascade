@@ -114,6 +114,7 @@ export function JobQueue({
           const isPlaylist = job.total_items > 1;
           const primaryItem = job.items[0] ?? null;
           const canPlayJob = !isPlaylist && Boolean(primaryItem?.output_path);
+          const canOpenPlaylistFolder = isPlaylist && Boolean(job.download_dir);
           const defaultExpanded = isPlaylist && ["running", "failed"].includes(job.status);
           const isExpanded = isPlaylist ? expandedJobIds[job.id] ?? defaultExpanded : true;
           const jobRestartResolution = job.resolution_fallback?.restart_resolution ?? null;
@@ -145,6 +146,18 @@ export function JobQueue({
                     onClick={() => toggleExpanded(job.id, isExpanded)}
                   >
                     <ChevronDown size={18} />
+                  </button>
+                )}
+                {isPlaylist && (
+                  <button
+                    className="icon-button"
+                    type="button"
+                    title={canOpenPlaylistFolder ? "打开合集文件夹" : "合集文件夹尚不可用"}
+                    aria-label={`打开合集文件夹 ${title}`}
+                    disabled={!canOpenPlaylistFolder}
+                    onClick={() => onOpenFolder(job.id)}
+                  >
+                    <FolderOpen size={18} />
                   </button>
                 )}
                 {!isPlaylist && (

@@ -94,7 +94,7 @@ API 返回不直接暴露 SQLModel，而由 [read_job](../backend/app/job_read_m
 
 任务中心删除入口分为任务级和 playlist 子视频级：任务级调用 `DELETE /api/jobs/{job_id}`，子视频级调用 `POST /api/jobs/{job_id}/items/delete`。删除文件入口统一在发请求前用确认弹窗保护。
 
-任务中心播放和打开视频文件夹入口调用后端受控本机打开 API：单视频任务调用 `POST /api/jobs/{job_id}/play` 与 `POST /api/jobs/{job_id}/open-folder`，playlist 子视频调用对应的 item endpoint。后端只根据数据库中的 `output_path` 打开本地文件或父目录，不接受前端传入任意路径。
+任务中心播放和打开文件夹入口调用后端受控本机打开 API：单视频任务调用 `POST /api/jobs/{job_id}/play` 与 `POST /api/jobs/{job_id}/open-folder`，playlist 子视频调用对应的 item endpoint，playlist 任务行用同一个 open-folder endpoint 打开 `Job.download_dir`。后端只根据数据库中的 `output_path` 或 `download_dir` 打开本地文件/目录，不接受前端传入任意路径。
 
 ## 日志安全
 

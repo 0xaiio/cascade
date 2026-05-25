@@ -248,8 +248,7 @@ def create_app(
     @app.post("/api/jobs/{job_id}/open-folder", status_code=204)
     async def open_job_video_folder(job_id: str, session: SessionDep) -> Response:
         job = _require_job(session, job_id)
-        item = _single_job_item(session, job)
-        await _open_local_path(open_local_path, _output_folder(item))
+        await _open_local_path(open_local_path, _job_folder(session, job))
         return Response(status_code=204)
 
     @app.post("/api/jobs/{job_id}/items/{item_id}/play", status_code=204)
@@ -462,6 +461,18 @@ def _output_folder(item: JobItem) -> Path:
     folder = _output_file(item).parent
     if not folder.is_dir():
         raise HTTPException(status_code=409, detail="视频文件夹不存在。")
+    return folder
+
+
+def _job_folder(session: Session, job: Job) -> Path:
+    items = session.exec(select(JobItem).where(JobItem.job_id == job.id).order_by(JobItem.index)).all()
+    if len(items) == 1:
+        return _output_folder(items[0])
+    if not job.download_dir:
+        raise HTTPException(status_code=409, detail="合集文件夹尚不可用。")
+    folder = Path(job.download_dir).expanduser()
+    if not folder.is_dir():
+        raise HTTPException(status_code=409, detail="合集文件夹不存在。")
     return folder
 
 

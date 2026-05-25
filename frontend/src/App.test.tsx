@@ -93,6 +93,7 @@ describe("App", () => {
         if (
           (url.endsWith("/api/jobs/job-running/play") ||
             url.endsWith("/api/jobs/job-running/open-folder") ||
+            url.endsWith("/api/jobs/job-playlist/open-folder") ||
             url.endsWith("/api/jobs/job-playlist/items/item-playlist-1/open-folder") ||
             url.endsWith("/api/jobs/job-playlist/items/item-playlist-1/play")) &&
           init?.method === "POST"
@@ -535,6 +536,22 @@ describe("App", () => {
       "/api/jobs/job-playlist/items/item-playlist-1/open-folder",
       expect.objectContaining({ method: "POST" })
     );
+  });
+
+  test("opens playlist folders from task center", async () => {
+    currentJobsPayload = [
+      {
+        ...playlistJobPayload,
+        download_dir: "D:\\Videos\\Playlist batch"
+      }
+    ];
+    const user = userEvent.setup();
+    render(<App />);
+
+    expect(await screen.findByText("Playlist batch")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "打开合集文件夹 Playlist batch" }));
+
+    expect(fetch).toHaveBeenCalledWith("/api/jobs/job-playlist/open-folder", expect.objectContaining({ method: "POST" }));
   });
 
   test("passes delete files option to batch delete", async () => {

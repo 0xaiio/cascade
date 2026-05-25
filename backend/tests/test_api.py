@@ -1545,6 +1545,47 @@ def test_open_playlist_item_folder_opens_output_parent(tmp_path: Path) -> None:
     assert opened == [playlist_dir]
 
 
+def test_open_playlist_folder_opens_job_download_dir(tmp_path: Path) -> None:
+    opened: list[Path] = []
+    playlist_dir = tmp_path / "downloads" / "Course"
+    output_file = playlist_dir / "one.mp4"
+    playlist_dir.mkdir(parents=True)
+    output_file.write_text("video", encoding="utf-8")
+    engine = create_app_engine(make_settings(tmp_path))
+    init_db(engine)
+    with Session(engine) as session:
+        session.add(
+            Job(
+                id="job-playlist-folder",
+                url="https://youtube.com/playlist?list=abc",
+                title="Course",
+                status="succeeded",
+                options_json="{}",
+                total_items=2,
+                download_dir=str(playlist_dir),
+            )
+        )
+        for index in [1, 2]:
+            session.add(
+                JobItem(
+                    id=f"item-folder-{index}",
+                    job_id="job-playlist-folder",
+                    source_url=f"https://youtu.be/{index}",
+                    title=f"Part {index}",
+                    index=index,
+                    status="succeeded",
+                    output_path=str(output_file),
+                )
+            )
+        session.commit()
+    client = make_client(tmp_path, system_opener=opened.append)
+
+    response = client.post("/api/jobs/job-playlist-folder/open-folder")
+
+    assert response.status_code == 204
+    assert opened == [playlist_dir]
+
+
 def test_batch_job_actions_pause_restart_and_delete_multiple_jobs(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     first_id = "job-first"
