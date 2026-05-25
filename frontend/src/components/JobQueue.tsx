@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState } from "react";
-import { Check, ChevronDown, Copy, FileX2, FolderOpen, Gauge, Pause, Play, RotateCcw, Trash2 } from "lucide-react";
+import { Check, ChevronDown, Copy, ExternalLink, FileX2, FolderOpen, Gauge, Pause, Play, RotateCcw, Trash2 } from "lucide-react";
 import type { Job, JobBatchAction, ResolutionFallback } from "../types";
 import {
   formatBytesPerSecond,
@@ -19,6 +19,7 @@ export function JobQueue({
   onDeleteItems,
   onOpenFolder,
   onOpenItemFolder,
+  onOpenSourcePage,
   onPause,
   onPlay,
   onPlayItem,
@@ -34,6 +35,7 @@ export function JobQueue({
   onDeleteItems: (jobId: string, itemIds: string[], deleteFiles?: boolean) => void;
   onOpenFolder: (jobId: string) => void;
   onOpenItemFolder: (jobId: string, itemId: string) => void;
+  onOpenSourcePage: (sourceUrl: string) => void;
   onPause: (jobId: string) => void;
   onPlay: (jobId: string) => void;
   onPlayItem: (jobId: string, itemId: string) => void;
@@ -208,6 +210,15 @@ export function JobQueue({
                 >
                   {isJobCopied ? <Check size={18} /> : <Copy size={18} />}
                 </button>
+                <button
+                  className="icon-button"
+                  type="button"
+                  title="打开 YouTube 页面"
+                  aria-label={`打开 YouTube 页面 ${title}`}
+                  onClick={() => onOpenSourcePage(job.url)}
+                >
+                  <ExternalLink size={18} />
+                </button>
                 {["queued", "running"].includes(job.status) && (
                   <button className="icon-button" type="button" title="暂停" aria-label={`暂停 ${title}`} onClick={() => onPause(job.id)}>
                     <Pause size={18} />
@@ -338,6 +349,15 @@ export function JobQueue({
                           onClick={() => void copySourceLink(itemCopyKey, item.source_url)}
                         >
                           {isItemCopied ? <Check size={16} /> : <Copy size={16} />}
+                        </button>
+                        <button
+                          className="icon-button item-action-button"
+                          type="button"
+                          title="打开 YouTube 页面"
+                          aria-label={`打开 YouTube 页面 ${item.title}`}
+                          onClick={() => onOpenSourcePage(item.source_url)}
+                        >
+                          <ExternalLink size={16} />
                         </button>
                         {item.status !== "running" && (
                           <button

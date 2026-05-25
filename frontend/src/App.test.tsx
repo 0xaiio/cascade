@@ -581,6 +581,22 @@ describe("App", () => {
     expect(writeText).toHaveBeenCalledWith("https://youtu.be/one");
   });
 
+  test("opens YouTube pages for single video playlist and playlist items", async () => {
+    const user = userEvent.setup();
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    render(<App />);
+
+    expect(await screen.findByText("Running video")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "打开 YouTube 页面 Running video" }));
+    expect(openSpy).toHaveBeenCalledWith("https://youtu.be/running", "_blank", "noopener,noreferrer");
+
+    await user.click(screen.getByRole("button", { name: "打开 YouTube 页面 Playlist batch" }));
+    expect(openSpy).toHaveBeenCalledWith("https://youtube.com/playlist?list=abc", "_blank", "noopener,noreferrer");
+
+    await user.click(screen.getByRole("button", { name: "打开 YouTube 页面 Part one" }));
+    expect(openSpy).toHaveBeenCalledWith("https://youtu.be/one", "_blank", "noopener,noreferrer");
+  });
+
   test("passes delete files option to batch delete", async () => {
     const user = userEvent.setup();
     render(<App />);

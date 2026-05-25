@@ -322,6 +322,10 @@ export default function App() {
     }
   }
 
+  function openSourcePage(sourceUrl: string) {
+    window.open(sourceUrl, "_blank", "noopener,noreferrer");
+  }
+
   return (
     <main className="app-shell">
       <section className="workspace">
@@ -382,6 +386,7 @@ export default function App() {
               onPause={(jobId) => void handlePauseJob(jobId).catch((err) => setError(err.message))}
               onOpenFolder={(jobId) => void openJobFolder(jobId).catch((err) => setError(err.message))}
               onOpenItemFolder={(jobId, itemId) => void openJobItemFolder(jobId, itemId).catch((err) => setError(err.message))}
+              onOpenSourcePage={openSourcePage}
               onPlay={(jobId) => void playJobVideo(jobId).catch((err) => setError(err.message))}
               onPlayItem={(jobId, itemId) => void playJobItemVideo(jobId, itemId).catch((err) => setError(err.message))}
               onRestart={(jobId, resolution) => void handleRestartJob(jobId, resolution).catch((err) => setError(err.message))}

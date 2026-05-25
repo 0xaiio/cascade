@@ -98,6 +98,8 @@ API 返回不直接暴露 SQLModel，而由 [read_job](../backend/app/job_read_m
 
 任务中心复制链接入口是纯前端行为，使用 `navigator.clipboard.writeText()` 复制 `Job.url` 或 `JobItem.source_url`，成功后按钮短暂显示“已复制”。
 
+任务中心跳转 YouTube 页面同样是纯前端行为，使用 `window.open(sourceUrl, "_blank", "noopener,noreferrer")` 打开 `Job.url` 或 `JobItem.source_url`，不经过后端本地文件打开接口。
+
 ## 日志安全
 
 下载失败日志会记录 job id、item id、标题、清晰度、错误分类和清洗后的错误文本，见 [_log_item_failure](../backend/app/job_manager.py#L776)。日志清洗工具位于 [log_safety.py](../backend/app/log_safety.py#L11)，用于避免敏感 query、cookies 或 token 进入日志。

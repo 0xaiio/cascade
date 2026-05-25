@@ -594,6 +594,13 @@ Thumbs.db
 - 单视频任务、playlist 任务和 playlist 子视频支持打开所在文件夹。
 - 单视频与合集支持复制源链接，并支持跳转到 YouTube 页面。
 
+## Implementation Status
+- [x] Step 1：单视频任务和 playlist 子视频播放入口已实现并推送。
+- [x] Step 2：单视频任务和 playlist 子视频打开所在文件夹入口已实现并推送。
+- [x] Step 3：playlist 任务行打开合集文件夹入口已实现并推送。
+- [x] Step 4：单视频、playlist 和子视频复制源链接入口已实现并推送。
+- [x] Step 5：单视频、playlist 和子视频跳转 YouTube 页面入口已实现并推送。
+
 ## Test Plan
 - 后端：覆盖播放视频、打开视频目录、打开 playlist 目录、缺少路径/文件不存在/任务不存在的错误语义。
 - 前端：覆盖播放、打开目录、复制链接反馈、跳转 YouTube 页面和按钮禁用状态。
