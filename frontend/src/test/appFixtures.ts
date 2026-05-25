@@ -89,6 +89,7 @@ export const pausedJobPayload: Job = {
 export const playlistJobPayload: Job = {
   ...jobPayload,
   id: "job-playlist",
+  url: "https://youtube.com/playlist?list=abc",
   title: "Playlist batch",
   actual_resolution: "混合分辨率",
   actual_format: "混合格式",
@@ -100,6 +101,7 @@ export const playlistJobPayload: Job = {
       ...jobPayload.items[0],
       id: "item-playlist-1",
       job_id: "job-playlist",
+      source_url: "https://youtu.be/one",
       title: "Part one",
       index: 1,
       progress: 50,
@@ -116,6 +118,7 @@ export const playlistJobPayload: Job = {
       ...jobPayload.items[0],
       id: "item-playlist-2",
       job_id: "job-playlist",
+      source_url: "https://youtu.be/two",
       title: "Part two",
       index: 2,
       progress: 0,

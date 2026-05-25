@@ -96,6 +96,8 @@ API 返回不直接暴露 SQLModel，而由 [read_job](../backend/app/job_read_m
 
 任务中心播放和打开文件夹入口调用后端受控本机打开 API：单视频任务调用 `POST /api/jobs/{job_id}/play` 与 `POST /api/jobs/{job_id}/open-folder`，playlist 子视频调用对应的 item endpoint，playlist 任务行用同一个 open-folder endpoint 打开 `Job.download_dir`。后端只根据数据库中的 `output_path` 或 `download_dir` 打开本地文件/目录，不接受前端传入任意路径。
 
+任务中心复制链接入口是纯前端行为，使用 `navigator.clipboard.writeText()` 复制 `Job.url` 或 `JobItem.source_url`，成功后按钮短暂显示“已复制”。
+
 ## 日志安全
 
 下载失败日志会记录 job id、item id、标题、清晰度、错误分类和清洗后的错误文本，见 [_log_item_failure](../backend/app/job_manager.py#L776)。日志清洗工具位于 [log_safety.py](../backend/app/log_safety.py#L11)，用于避免敏感 query、cookies 或 token 进入日志。

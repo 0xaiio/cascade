@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState } from "react";
-import { ChevronDown, FileX2, FolderOpen, Gauge, Pause, Play, RotateCcw, Trash2 } from "lucide-react";
+import { Check, ChevronDown, Copy, FileX2, FolderOpen, Gauge, Pause, Play, RotateCcw, Trash2 } from "lucide-react";
 import type { Job, JobBatchAction, ResolutionFallback } from "../types";
 import {
   formatBytesPerSecond,
@@ -14,6 +14,7 @@ export function JobQueue({
   jobs,
   selectedJobIds,
   onBatchAction,
+  onCopyLink,
   onDelete,
   onDeleteItems,
   onOpenFolder,
@@ -28,6 +29,7 @@ export function JobQueue({
   jobs: Job[];
   selectedJobIds: Set<string>;
   onBatchAction: (action: JobBatchAction, deleteFiles?: boolean) => void;
+  onCopyLink: (sourceUrl: string) => Promise<void>;
   onDelete: (jobId: string, deleteFiles?: boolean) => void;
   onDeleteItems: (jobId: string, itemIds: string[], deleteFiles?: boolean) => void;
   onOpenFolder: (jobId: string) => void;
@@ -42,6 +44,7 @@ export function JobQueue({
   const selectedCount = selectedJobIds.size;
   const [expandedJobIds, setExpandedJobIds] = useState<Record<string, boolean>>({});
   const [selectedItemIdsByJob, setSelectedItemIdsByJob] = useState<Record<string, Set<string>>>({});
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   useEffect(() => {
     setExpandedJobIds((current) => {
@@ -76,6 +79,16 @@ export function JobQueue({
       else delete next[jobId];
       return next;
     });
+  }
+
+  async function copySourceLink(key: string, sourceUrl: string) {
+    try {
+      await onCopyLink(sourceUrl);
+      setCopiedKey(key);
+      window.setTimeout(() => setCopiedKey((current) => (current === key ? null : current)), 1500);
+    } catch {
+      // The parent surfaces clipboard failures in the shared alert area.
+    }
   }
 
   return (
@@ -115,6 +128,8 @@ export function JobQueue({
           const primaryItem = job.items[0] ?? null;
           const canPlayJob = !isPlaylist && Boolean(primaryItem?.output_path);
           const canOpenPlaylistFolder = isPlaylist && Boolean(job.download_dir);
+          const jobCopyKey = `job:${job.id}`;
+          const isJobCopied = copiedKey === jobCopyKey;
           const defaultExpanded = isPlaylist && ["running", "failed"].includes(job.status);
           const isExpanded = isPlaylist ? expandedJobIds[job.id] ?? defaultExpanded : true;
           const jobRestartResolution = job.resolution_fallback?.restart_resolution ?? null;
@@ -184,6 +199,15 @@ export function JobQueue({
                     <FolderOpen size={18} />
                   </button>
                 )}
+                <button
+                  className="icon-button"
+                  type="button"
+                  title={isJobCopied ? "已复制" : "复制链接"}
+                  aria-label={`${isJobCopied ? "已复制" : "复制链接"} ${title}`}
+                  onClick={() => void copySourceLink(jobCopyKey, job.url)}
+                >
+                  {isJobCopied ? <Check size={18} /> : <Copy size={18} />}
+                </button>
                 {["queued", "running"].includes(job.status) && (
                   <button className="icon-button" type="button" title="暂停" aria-label={`暂停 ${title}`} onClick={() => onPause(job.id)}>
                     <Pause size={18} />
@@ -270,6 +294,8 @@ export function JobQueue({
                   const itemRestartLabel = item.resolution_fallback
                     ? resolutionFallbackRestartLabel(item.resolution_fallback, "item")
                     : undefined;
+                  const itemCopyKey = `item:${item.id}`;
+                  const isItemCopied = copiedKey === itemCopyKey;
                   return (
                   <div key={item.id} className="job-item-detail">
                     <div className="item-row">
@@ -303,6 +329,15 @@ export function JobQueue({
                           onClick={() => onOpenItemFolder(job.id, item.id)}
                         >
                           <FolderOpen size={16} />
+                        </button>
+                        <button
+                          className="icon-button item-action-button"
+                          type="button"
+                          title={isItemCopied ? "已复制" : "复制链接"}
+                          aria-label={`${isItemCopied ? "已复制" : "复制链接"} ${item.title}`}
+                          onClick={() => void copySourceLink(itemCopyKey, item.source_url)}
+                        >
+                          {isItemCopied ? <Check size={16} /> : <Copy size={16} />}
                         </button>
                         {item.status !== "running" && (
                           <button

@@ -31,6 +31,12 @@ describe("App", () => {
     browserCookieImportLocked = false;
     analyzeLockedByEdgeCookies = false;
     vi.stubGlobal("confirm", vi.fn(() => true));
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: vi.fn().mockResolvedValue(undefined)
+      }
+    });
     vi.stubGlobal("EventSource", class {
       onmessage: ((event: MessageEvent) => void) | null = null;
       close = vi.fn();
@@ -552,6 +558,27 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "打开合集文件夹 Playlist batch" }));
 
     expect(fetch).toHaveBeenCalledWith("/api/jobs/job-playlist/open-folder", expect.objectContaining({ method: "POST" }));
+  });
+
+  test("copies single video playlist and playlist item source links", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText }
+    });
+    render(<App />);
+
+    expect(await screen.findByText("Running video")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "复制链接 Running video" }));
+    expect(writeText).toHaveBeenCalledWith("https://youtu.be/running");
+    expect(screen.getByRole("button", { name: "已复制 Running video" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "复制链接 Playlist batch" }));
+    expect(writeText).toHaveBeenCalledWith("https://youtube.com/playlist?list=abc");
+
+    await user.click(screen.getByRole("button", { name: "复制链接 Part one" }));
+    expect(writeText).toHaveBeenCalledWith("https://youtu.be/one");
   });
 
   test("passes delete files option to batch delete", async () => {

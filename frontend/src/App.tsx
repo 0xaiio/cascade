@@ -308,6 +308,20 @@ export default function App() {
     );
   }
 
+  async function handleCopySourceLink(sourceUrl: string) {
+    try {
+      const clipboard = navigator.clipboard;
+      if (!clipboard?.writeText) {
+        throw new Error("当前浏览器不支持剪贴板写入。");
+      }
+      await clipboard.writeText(sourceUrl);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "复制链接失败。";
+      setError(message);
+      throw err;
+    }
+  }
+
   return (
     <main className="app-shell">
       <section className="workspace">
@@ -364,6 +378,7 @@ export default function App() {
               onDeleteItems={(jobId, itemIds, deleteFiles) =>
                 void handleDeleteJobItems(jobId, itemIds, deleteFiles).catch((err) => setError(err.message))
               }
+              onCopyLink={(sourceUrl) => handleCopySourceLink(sourceUrl)}
               onPause={(jobId) => void handlePauseJob(jobId).catch((err) => setError(err.message))}
               onOpenFolder={(jobId) => void openJobFolder(jobId).catch((err) => setError(err.message))}
               onOpenItemFolder={(jobId, itemId) => void openJobItemFolder(jobId, itemId).catch((err) => setError(err.message))}
