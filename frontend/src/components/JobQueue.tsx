@@ -144,6 +144,7 @@ export function JobQueue({
           const isPlaylist = job.total_items > 1;
           const primaryItem = job.items[0] ?? null;
           const canPlayJob = !isPlaylist && Boolean(primaryItem?.output_path);
+          const canOpenSingleFolder = !isPlaylist && Boolean(primaryItem?.output_path || job.download_dir);
           const canOpenPlaylistFolder = isPlaylist && Boolean(job.download_dir);
           const jobCopyKey = `job:${job.id}`;
           const isJobCopied = copiedKey === jobCopyKey;
@@ -209,9 +210,9 @@ export function JobQueue({
                   <button
                     className="icon-button"
                     type="button"
-                    title={canPlayJob ? "打开视频所在文件夹" : "视频文件尚不可用"}
+                    title={canOpenSingleFolder ? "打开视频所在文件夹" : "视频文件夹尚不可用"}
                     aria-label={`打开视频文件夹 ${title}`}
-                    disabled={!canPlayJob}
+                    disabled={!canOpenSingleFolder}
                     onClick={() => runLocalFileAction(jobLocalActionKey, () => onOpenFolder(job.id))}
                   >
                     <FolderOpen size={18} />
@@ -330,6 +331,7 @@ export function JobQueue({
                   const itemCopyKey = `item:${item.id}`;
                   const itemLocalActionKey = `item:${item.id}`;
                   const isItemCopied = copiedKey === itemCopyKey;
+                  const canOpenItemFolder = Boolean(item.output_path || job.download_dir);
                   return (
                   <div key={item.id} className="job-item-detail">
                     <div className="item-row">
@@ -357,9 +359,9 @@ export function JobQueue({
                         <button
                           className="icon-button item-action-button"
                           type="button"
-                          title={item.output_path ? "打开视频所在文件夹" : "视频文件尚不可用"}
+                          title={canOpenItemFolder ? "打开视频所在文件夹" : "视频文件夹尚不可用"}
                           aria-label={`打开视频文件夹 ${item.title}`}
-                          disabled={!item.output_path}
+                          disabled={!canOpenItemFolder}
                           onClick={() => runLocalFileAction(itemLocalActionKey, () => onOpenItemFolder(job.id, item.id))}
                         >
                           <FolderOpen size={16} />

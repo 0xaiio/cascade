@@ -96,7 +96,7 @@ npm run dev -- --port 5173
 | `YTDL_DOWNLOAD_DIR` | `downloads/` | 下载产物目录。 |
 | `YTDL_DATABASE_PATH` | `data/app.sqlite3` | SQLite 文件路径。 |
 | `YTDL_DEFAULT_CONCURRENCY` | 来自 `YTDL_YOUTUBE_MAX_PARALLEL_DOWNLOADS` 或 `5` | 后台 worker 并发。 |
-| `YTDL_DEFAULT_RESOLUTION` | `1080p` | 默认清晰度。 |
+| `YTDL_DEFAULT_RESOLUTION` | `1440p` | 默认清晰度。 |
 | `YTDL_YOUTUBE_PO_TOKEN` | 空 | 高级排障用 YouTube PO token。 |
 | `YTDL_YOUTUBE_VISITOR_DATA` | 空 | 与 PO token 配套的 visitor data。 |
 | `YTDL_YOUTUBE_PO_BROWSER_PATH` | 空 | PO-token provider 使用的浏览器路径。 |

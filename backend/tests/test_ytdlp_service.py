@@ -512,6 +512,17 @@ def test_subtitle_only_options_skip_video_and_include_languages(tmp_path: Path) 
     assert opts["cookiefile"] == str(tmp_path / "cookies.txt")
 
 
+def test_download_options_default_to_1440p_and_both_subtitle_sources(tmp_path: Path) -> None:
+    options = DownloadOptions()
+    service = YtDlpService(download_dir=tmp_path)
+    opts = service.build_download_options(options, cookies_path=None)
+
+    assert options.resolution == "1440p"
+    assert options.subtitle_source == "both"
+    assert opts["writesubtitles"] is True
+    assert opts["writeautomaticsub"] is True
+
+
 def test_explicit_resolution_uses_single_file_selector_without_any_ffmpeg(monkeypatch, tmp_path: Path) -> None:
     service = YtDlpService(download_dir=tmp_path)
     monkeypatch.setattr("app.ytdlp_service.shutil.which", lambda name: None)

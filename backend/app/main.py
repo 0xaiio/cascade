@@ -15,7 +15,7 @@ from .events import EventBroker
 from .job_read_model import read_job
 from .job_manager import JobManager, new_id
 from .models import Job, JobItem, Setting
-from .output_paths import resolve_existing_output_path
+from .output_paths import discover_existing_output_path, discover_output_file_candidates, resolve_existing_output_path
 from .paths import safe_path_name
 from .schemas import (
     AnalyzeRequest,
@@ -456,19 +456,34 @@ def _single_job_item(session: Session, job: Job) -> JobItem:
 
 
 def _output_file(item: JobItem, base_dir: str | Path | None = None) -> Path:
-    if not item.output_path:
+    base_path = Path(base_dir) if base_dir else None
+    path = resolve_existing_output_path(Path(item.output_path), base_path) if item.output_path else None
+    if path is None:
+        path = discover_existing_output_path(item.source_url, base_path)
+    if path is None:
         raise HTTPException(status_code=409, detail="视频文件尚不可用。")
-    path = resolve_existing_output_path(Path(item.output_path), Path(base_dir) if base_dir else None)
-    if not path:
+    if not path.is_file():
         raise HTTPException(status_code=409, detail="视频文件不存在。")
     return path
 
 
+def _item_folder(item: JobItem, base_dir: str | Path | None = None) -> Path:
+    base_path = Path(base_dir) if base_dir else None
+    path = resolve_existing_output_path(Path(item.output_path), base_path) if item.output_path else None
+    if not path:
+        discovered = discover_output_file_candidates(item.source_url, base_path)
+        path = discovered[0] if discovered else None
+    if path:
+        folder = path.parent
+        if folder.is_dir():
+            return folder
+    if base_path and base_path.is_dir():
+        return base_path
+    raise HTTPException(status_code=409, detail="视频文件夹不存在。")
+
+
 def _output_folder(item: JobItem, base_dir: str | Path | None = None) -> Path:
-    folder = _output_file(item, base_dir).parent
-    if not folder.is_dir():
-        raise HTTPException(status_code=409, detail="视频文件夹不存在。")
-    return folder
+    return _item_folder(item, base_dir)
 
 
 def _job_folder(session: Session, job: Job) -> Path:

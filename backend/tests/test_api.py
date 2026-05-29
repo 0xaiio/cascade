@@ -309,7 +309,7 @@ def test_settings_and_cookies_endpoints_do_not_expose_cookie_body(tmp_path: Path
     )
     assert settings_response.status_code == 200
     assert settings_response.json()["default_concurrency"] == 12
-    assert settings_response.json()["default_resolution"] == "1080p"
+    assert settings_response.json()["default_resolution"] == "1440p"
 
     cookie_response = client.post(
         "/api/cookies",
@@ -1446,6 +1446,67 @@ def test_play_single_video_resolves_relative_stale_stream_path_from_job_director
 
     assert response.status_code == 204
     assert opened == [final_file]
+
+
+def test_job_read_model_discovers_downloaded_video_without_output_path(tmp_path: Path) -> None:
+    download_dir = tmp_path / "downloads"
+    output_file = download_dir / "Item job-discovered [job-discovered].mp4"
+    output_file.parent.mkdir(parents=True)
+    output_file.write_text("video", encoding="utf-8")
+    seed_job(tmp_path, "job-discovered", status="succeeded")
+    client = make_client(tmp_path)
+
+    response = client.get("/api/jobs/job-discovered")
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["output_path"] == str(output_file)
+
+
+def test_play_single_video_discovers_downloaded_video_without_output_path(tmp_path: Path) -> None:
+    opened: list[Path] = []
+    download_dir = tmp_path / "downloads"
+    output_file = download_dir / "Item job-discovered-play [job-discovered-play].mp4"
+    output_file.parent.mkdir(parents=True)
+    output_file.write_text("video", encoding="utf-8")
+    seed_job(tmp_path, "job-discovered-play", status="succeeded")
+    client = make_client(tmp_path, system_opener=opened.append)
+
+    response = client.post("/api/jobs/job-discovered-play/play")
+
+    assert response.status_code == 204
+    assert opened == [output_file]
+
+
+def test_open_single_video_folder_uses_download_dir_when_output_path_is_unknown(tmp_path: Path) -> None:
+    opened: list[Path] = []
+    download_dir = tmp_path / "downloads"
+    download_dir.mkdir(parents=True)
+    seed_job(tmp_path, "job-open-folder-without-output", status="running", download_dir=download_dir)
+    client = make_client(tmp_path, system_opener=opened.append)
+
+    response = client.post("/api/jobs/job-open-folder-without-output/open-folder")
+
+    assert response.status_code == 204
+    assert opened == [download_dir]
+
+
+def test_delete_job_discovers_output_files_without_output_path(tmp_path: Path) -> None:
+    download_dir = tmp_path / "downloads"
+    video = download_dir / "Item job-discovered-delete [job-discovered-delete].mp4"
+    subtitle = download_dir / "Item job-discovered-delete [job-discovered-delete].en.vtt"
+    partial = download_dir / "Item job-discovered-delete [job-discovered-delete].f137.mp4.part"
+    download_dir.mkdir(parents=True)
+    for path in [video, subtitle, partial]:
+        path.write_text("download artifact", encoding="utf-8")
+    seed_job(tmp_path, "job-discovered-delete", status="running", download_dir=download_dir)
+    client = make_client(tmp_path)
+
+    response = client.delete("/api/jobs/job-discovered-delete?delete_files=true")
+
+    assert response.status_code == 204
+    assert not video.exists()
+    assert not subtitle.exists()
+    assert not partial.exists()
 
 
 def test_play_single_video_returns_409_when_output_missing(tmp_path: Path) -> None:

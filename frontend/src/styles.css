@@ -342,6 +342,26 @@ th {
   line-height: 1.45;
 }
 
+.subtitle-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #dfe6f2;
+  border-radius: 8px;
+  background: #f8fbff;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 850;
+  line-height: 1.45;
+}
+
+.subtitle-info svg {
+  flex: 0 0 auto;
+  color: #1f6feb;
+}
+
 .cookie-inline {
   display: flex;
   flex-wrap: wrap;
