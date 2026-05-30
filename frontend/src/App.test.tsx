@@ -226,8 +226,7 @@ describe("App", () => {
     expect(screen.queryByRole("heading", { name: "Cookies" })).not.toBeInTheDocument();
 
     const file = new File(["cookie"], "cookies.txt", { type: "text/plain" });
-    expect(within(analyzer as HTMLElement).getByText("选择")).toBeInTheDocument();
-    expect(within(analyzer as HTMLElement).getByText("cookies")).toBeInTheDocument();
+    expect(within(analyzer as HTMLElement).getByText("选择 cookies")).toBeInTheDocument();
     expect(within(analyzer as HTMLElement).queryByText("选择 cookies.txt")).not.toBeInTheDocument();
     await user.upload(within(analyzer as HTMLElement).getByLabelText("选择 cookies"), file);
 

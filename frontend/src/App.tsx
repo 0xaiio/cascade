@@ -488,24 +488,25 @@ function UrlAnalyzer({
         <textarea value={url} onChange={(event) => onUrlChange(event.target.value)} rows={3} />
       </label>
       <div className="cookie-inline">
-        <span className="cookie-inline-status">
-          <Cookie size={16} />
-          {settings?.cookies_enabled ? "已启用 cookies" : "未上传 cookies"}
-        </span>
-        <div className="cookie-inline-actions">
-          <label className="file-button compact-file-button">
-            <span>选择</span>
-            <span>cookies</span>
-            <input
-              aria-label="选择 cookies"
-              type="file"
-              accept=".txt"
-              onChange={(event) => onCookieUpload(event.target.files?.[0] ?? null)}
-            />
-          </label>
-          <button className="ghost-button" type="button" onClick={onCookieDelete} disabled={!settings?.cookies_enabled}>
-            清除 cookies
-          </button>
+        <div className="cookie-inline-primary">
+          <span className="cookie-inline-status">
+            <Cookie size={16} />
+            {settings?.cookies_enabled ? "已启用 cookies" : "未上传 cookies"}
+          </span>
+          <div className="cookie-inline-actions">
+            <label className="file-button compact-file-button">
+              <span>选择 cookies</span>
+              <input
+                aria-label="选择 cookies"
+                type="file"
+                accept=".txt"
+                onChange={(event) => onCookieUpload(event.target.files?.[0] ?? null)}
+              />
+            </label>
+            <button className="ghost-button cookie-clear-button" type="button" onClick={onCookieDelete} disabled={!settings?.cookies_enabled}>
+              清除 cookies
+            </button>
+          </div>
         </div>
         <div className="browser-cookie-import">
           <label className="compact-select-label">
