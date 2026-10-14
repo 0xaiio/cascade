@@ -22,6 +22,8 @@ package "L2 orchestration" {
   [job_manager.py\nqueue, workers, state machine] as Manager
   [job_read_model.py\nAPI projection] as ReadModel
   [events.py\nEventBroker] as Broker
+  [bili_manager.py\nbilibili queue, single worker] as BiliManager
+  [bili_read_model.py\nbilibili badges and read models] as BiliReadModel
 }
 
 package "L3 domain and policy" {
@@ -40,11 +42,18 @@ package "L3 domain and policy" {
   [transfer_stats.py\naverage speed] as Stats
   [output_paths.py\npath discovery] as Outputs
   [system_open.py\nplayer and folder] as Opener
+  [bili_upload.py\nsingle upload flow] as BiliUpload
+  [bili_bin.py\nbiliup boundary] as BiliBin
+  [bili_api.py\nbilibili member APIs] as BiliApi
+  [bili_auth.py\nqr login, cookie file] as BiliAuth
+  [bili_meta.py\nmetadata and limits] as BiliMeta
+  [bili_policy.py\nbilibili messages, badges] as BiliPolicy
 }
 
 package "L4 infrastructure" {
   [db.py\nengine, pragmas, migrations] as DB
   [logging_setup.py\nroot logger, rotating file] as Logging
+  [bili_http.py\nbilibili HTTP seam] as BiliHttp
 }
 
 package "L5 pure helpers" {
@@ -66,6 +75,7 @@ Main --> CookieHealth
 Main --> Connectivity
 Main --> Logging
 Main --> RuntimeEnv
+Main --> BiliManager
 Routers --> ApiCtx
 Routers --> ApiSupport
 Routers --> Artifacts
@@ -77,10 +87,15 @@ Routers --> Connectivity
 Routers --> RuntimeEnv
 Routers --> Proxy
 Routers --> Broker
+Routers --> BiliManager
+Routers --> BiliMeta
+Routers --> BiliReadModel
+Routers --> BiliUpload
 ApiCtx --> Manager
 ApiCtx --> Service
 ApiCtx --> DB
 ApiCtx --> Config
+ApiCtx --> BiliManager
 ApiSupport --> ReadModel
 ApiSupport --> Models
 ApiSupport --> Schemas
@@ -118,6 +133,38 @@ Connectivity --> Proxy
 Advice --> LogSafe
 Decisions --> Fallback
 Decisions --> Formats
+BiliManager --> Models
+BiliManager --> Schemas
+BiliManager --> Config
+BiliManager --> Broker
+BiliManager --> Service
+BiliManager --> Outputs
+BiliManager --> BiliUpload
+BiliManager --> BiliApi
+BiliManager --> BiliAuth
+BiliManager --> BiliBin
+BiliManager --> BiliHttp
+BiliManager --> BiliMeta
+BiliManager --> BiliPolicy
+BiliManager --> BiliReadModel
+BiliReadModel --> Models
+BiliReadModel --> Schemas
+BiliReadModel --> BiliMeta
+BiliReadModel --> BiliPolicy
+BiliReadModel --> ReadModel : elapsed_seconds
+BiliUpload --> Models
+BiliUpload --> BiliApi
+BiliUpload --> BiliBin
+BiliUpload --> BiliHttp
+BiliUpload --> BiliMeta
+BiliUpload --> BiliPolicy
+BiliUpload --> LogSafe
+BiliBin --> BiliMeta
+BiliBin --> BiliPolicy
+BiliApi --> BiliAuth
+BiliApi --> BiliHttp
+BiliAuth --> BiliHttp
+BiliPolicy --> Models
 DB --> Models
 Broker --> Schemas : JSON payloads
 
@@ -132,6 +179,10 @@ Two deliberate separations: parsing the proxy (proxy.py)
 is apart from proving it works (connectivity.py), and
 producing a cookie report (cookie_health.py) is apart from
 importing cookies (browser_cookies.py).
+The bilibili side repeats that split: bili_http.py knows no
+endpoint, bili_meta.py and bili_policy.py never send a
+request, and the "it really published" verdict lives in
+bili_upload.py only after bili_api.py reconciles the list.
 Violations to watch: importing job_manager from
 ytdlp_service, or importing yt-dlp types into schemas.
 end note

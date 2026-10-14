@@ -77,7 +77,7 @@ Vite 的代理如果还指着旧端口，`/api` 会静默打到别的程序上�
 **重启后端不会重新加载已打开的标签页。**
 
 单端口模式下前端是一份**构建后的静态产物**：`/` 返回 `frontend/dist/index.html`，`/assets`
-挂的是 `frontend/dist/assets`（见 [main.py](../backend/app/main.py#L117)）。重启服务只是把磁盘上
+挂的是 `frontend/dist/assets`（见 [main.py](../backend/app/main.py#L127)）。重启服务只是把磁盘上
 那批文件换成新的，浏览器里那个标签页手上的 HTML / CSS / JS **仍然是它打开那一刻下载的版本**，
 没有任何机制会替你去拿新的。
 

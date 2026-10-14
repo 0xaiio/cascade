@@ -1,12 +1,17 @@
-﻿import { XCircle } from "lucide-react";
+﻿import { CheckCircle2, XCircle } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ApiError,
   analyzeUrl,
   batchJobAction,
+  createBiliCollection,
+  createBiliUpload,
   createJob,
   deleteJob,
   deleteJobItems,
   deleteCookies,
+  getBiliPrefill,
+  getBiliUploadsSummary,
   getSettings,
   importBrowserCookies,
   listJobs,
@@ -17,10 +22,13 @@ import {
   playJobVideo,
   restartJob,
   restartJobItem,
+  retryBiliSeason,
+  retryBiliUpload,
   updateSettings,
   uploadCookies
 } from "./api";
 import { AnalysisPanel } from "./components/AnalysisPanel";
+import { BiliUploadDialog } from "./components/BiliUploadDialog";
 import { DownloadOptionsPanel } from "./components/DownloadOptionsPanel";
 import { JobQueue } from "./components/JobQueue";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -29,7 +37,16 @@ import { UrlAnalyzer } from "./components/UrlAnalyzer";
 import { browserCookieLockFromError, type BrowserCookieLock } from "./cookieLock";
 import { chooseAvailableResolution } from "./quality";
 import { effectiveSubtitleSourceForAnalysis } from "./subtitles";
-import type { AnalyzeResponse, DownloadOptions, Job, JobBatchAction, Settings } from "./types";
+import type {
+  AnalyzeResponse,
+  BiliJobUploads,
+  BiliMetadata,
+  BiliPrefill,
+  DownloadOptions,
+  Job,
+  JobBatchAction,
+  Settings
+} from "./types";
 
 const INITIAL_OPTIONS: DownloadOptions = {
   mode: "video_subtitles",
@@ -48,6 +65,17 @@ const INITIAL_OPTIONS: DownloadOptions = {
 };
 
 /**
+ * 徽标里算「跑完了」的档位。
+ *
+ * `unverified`（投上去了但核对不上）也算跑完 —— 否则这条记录会一直停在「上传中」的沉默里，
+ * 而它其实需要用户去看一眼。在途的 `uploading` 不算，避免把「开始」当「结束」播报。
+ */
+const BILI_SETTLED_BADGES = new Set(["uploaded", "partial", "unverified", "failed"]);
+
+/** 上传表单弹窗的入参：服务端预填的数据 + 点的是哪一条（单视频用）。 */
+type BiliDialogState = { prefill: BiliPrefill; isCollection: boolean; itemId: string | null };
+
+/**
  * 应用容器：**只做状态编排、请求发起与布局**。
  *
  * 展示职责一律在 `components/` 下（解析面板、解析结果、下载选项、任务中心、设置、状态点），
@@ -61,6 +89,12 @@ const INITIAL_OPTIONS: DownloadOptions = {
  * 2. **每次解析都会重置选择**：`applyAnalysisResult` 用设置里的默认字幕语言覆盖当前选择
  *    （出厂 `["en"]`）。副作用是可能留下一个该视频没有、下拉里也摘不掉的语言，见 ai/ui/README.md。
  * 3. **列表数据以服务端为准**：SSE 每来一条事件就重新拉一次 `/api/jobs`，本地只做乐观增删。
+ *
+ * B站 上传这一块的额外约定：
+ * 4. **徽标由服务端派生，前端只渲染**（`biliUploads[jobId].badge*`）。前端不自己判「算不算已上传」——
+ *    那个判据要同时看稿件与合集两条记录，写到前端必然与后端漂移。
+ * 5. **「跑完了」的提示靠比对上一次的徽标**，不能只看当前值：`biliUploads` 在每条 SSE 事件后都会
+ *    被重拉，不比对就会把「已经是已上传」反复播报一遍。
  */
 export default function App() {
   const [url, setUrl] = useState("");
@@ -78,19 +112,50 @@ export default function App() {
   const [runtimeSaveMessage, setRuntimeSaveMessage] = useState("");
   const runtimeSaveRequestSeq = useRef(0);
   const runtimeSaveClearTimer = useRef<number | null>(null);
+  const [biliUploads, setBiliUploads] = useState<Record<string, BiliJobUploads>>({});
+  const [biliDialog, setBiliDialog] = useState<BiliDialogState | null>(null);
+  const [biliNotice, setBiliNotice] = useState<string | null>(null);
+  /** 上一次观察到的徽标。用来区分「刚刚跑完」与「本来就是这状态」。 */
+  const previousBiliBadges = useRef<Record<string, string>>({});
 
   useEffect(() => {
     void getSettings().then(applySettings).catch((err) => setError(err.message));
     void listJobs().then(setJobs).catch(() => setJobs([]));
+    void refreshBiliUploads();
   }, []);
 
   useEffect(() => {
     const source = new EventSource("/api/events");
     source.onmessage = () => {
       void listJobs().then(setJobs).catch(() => undefined);
+      void refreshBiliUploads();
     };
     return () => source.close();
   }, []);
+
+  // 上传是后台跑的，界面只能靠这条轮询后的比对来给「完成了」的提示。
+  // **必须比对上一次的徽标**：`biliUploads` 在每条 SSE 事件后都会被重拉，
+  // 不比对就会把「已经是已上传」反复播报一遍。
+  useEffect(() => {
+    const settled: string[] = [];
+    for (const summary of Object.values(biliUploads)) {
+      const before = previousBiliBadges.current[summary.job_id];
+      if (before && before !== summary.badge && BILI_SETTLED_BADGES.has(summary.badge)) {
+        const title = jobs.find((job) => job.id === summary.job_id)?.title || "任务";
+        settled.push(`《${title}》${summary.badge_text}`);
+      }
+    }
+    previousBiliBadges.current = Object.fromEntries(
+      Object.values(biliUploads).map((summary) => [summary.job_id, summary.badge])
+    );
+    if (settled.length) setBiliNotice(settled.join("；"));
+  }, [biliUploads, jobs]);
+
+  useEffect(() => {
+    if (!biliNotice) return;
+    const timer = window.setTimeout(() => setBiliNotice(null), 10000);
+    return () => window.clearTimeout(timer);
+  }, [biliNotice]);
 
   useEffect(
     () => () => {
@@ -264,6 +329,86 @@ export default function App() {
     }
   }
 
+  // ---------------------------------------------------------------- B站 上传
+  /**
+   * 重拉 B站 徽标。**失败时不弹错误条**：这条请求只负责给按钮上色，拿不到就退回「未上传」，
+   * 不该打扰正在跑的下载主流程。
+   */
+  async function refreshBiliUploads() {
+    try {
+      const summary = await getBiliUploadsSummary();
+      setBiliUploads(Object.fromEntries(summary.jobs.map((entry) => [entry.job_id, entry])));
+    } catch {
+      // 见上：静默退回「未上传」。
+    }
+  }
+
+  /**
+   * 打开上传窗口。`itemId` 为空 = 整个任务（单视频任务 / 合集流程），
+   * 由服务端在 `prefill.kind` 里告诉我们该走哪种表单 —— **不在前端按条目数自己判断**。
+   */
+  async function handleBiliUpload(jobId: string, itemId: string | null) {
+    setError(null);
+    setBiliNotice(null);
+    try {
+      const prefill = await getBiliPrefill(jobId, itemId);
+      setBiliDialog({ prefill, isCollection: prefill.kind === "collection", itemId });
+    } catch (err) {
+      setError(biliMessage(err, "打不开上传窗口"));
+    }
+  }
+
+  /**
+   * 提交上传。**异常直接抛回弹窗**（在表单里就近报错），不写 `setError` ——
+   * 用户需要一边看着自己填的内容一边改，而不是去页顶找红条。
+   */
+  async function handleBiliSubmit(values: { metadata: BiliMetadata; makeCover: boolean; comment: string }) {
+    if (!biliDialog) return;
+    const { prefill, isCollection, itemId } = biliDialog;
+    let result: BiliJobUploads;
+    try {
+      result = isCollection
+        // 合集名与简介默认用服务端给的值（`season_title` 的口径是「任务名」，与后端
+        // `season_title or job.title` 一致）。界面上没有这两个输入框 —— 它们不该让用户填。
+        ? await createBiliCollection(
+            prefill.job_id,
+            values.metadata,
+            prefill.job_title,
+            prefill.season_desc,
+            values.makeCover,
+            values.comment
+          )
+        : await createBiliUpload(prefill.job_id, itemId, values.metadata, values.makeCover, values.comment);
+    } catch (err) {
+      throw new Error(biliMessage(err, "提交失败"));
+    }
+    setBiliUploads((current) => ({ ...current, [result.job_id]: result }));
+    setBiliDialog(null);
+    setBiliNotice(
+      isCollection
+        ? `已开始上传《${prefill.job_title}》的 ${prefill.items.length} 个视频，逐个投完后会自动归入同一个合集。`
+        : `已开始上传《${values.metadata.title}》，跑完这里会变成「已上传」。`
+    );
+  }
+
+  async function handleBiliRetryUpload(uploadId: string) {
+    try {
+      setBiliNotice((await retryBiliUpload(uploadId)).message);
+      await refreshBiliUploads();
+    } catch (err) {
+      setError(biliMessage(err, "重试失败"));
+    }
+  }
+
+  async function handleBiliRetrySeason(seasonRecordId: string) {
+    try {
+      setBiliNotice((await retryBiliSeason(seasonRecordId)).message);
+      await refreshBiliUploads();
+    } catch (err) {
+      setError(biliMessage(err, "重试归集失败"));
+    }
+  }
+
   function updateJobInList(job: Job) {
     setJobs((current) => current.map((item) => (item.id === job.id ? job : item)));
   }
@@ -349,8 +494,9 @@ export default function App() {
     }
   }
 
-  function openSourcePage(sourceUrl: string) {
-    window.open(sourceUrl, "_blank", "noopener,noreferrer");
+  /** 打开一个外部网页（原视频页、B站 稿件页）。同一个动作，只写一处 —— `noopener` 策略要一致。 */
+  function openExternalPage(url: string) {
+    window.open(url, "_blank", "noopener,noreferrer");
   }
 
   return (
@@ -371,6 +517,13 @@ export default function App() {
           <div className="alert" role="alert">
             <XCircle size={18} />
             {error}
+          </div>
+        )}
+
+        {biliNotice && (
+          <div className="notice" role="status">
+            <CheckCircle2 size={18} />
+            {biliNotice}
           </div>
         )}
 
@@ -402,9 +555,13 @@ export default function App() {
               />
             )}
             <JobQueue
+              biliUploads={biliUploads}
               jobs={jobs}
               selectedJobIds={selectedJobIds}
               onBatchAction={(action, deleteFiles) => void handleBatchAction(action, deleteFiles).catch((err) => setError(err.message))}
+              onBiliRetrySeason={(seasonRecordId) => void handleBiliRetrySeason(seasonRecordId)}
+              onBiliRetryUpload={(uploadId) => void handleBiliRetryUpload(uploadId)}
+              onBiliUpload={(jobId, itemId) => void handleBiliUpload(jobId, itemId)}
               onDelete={(jobId, deleteFiles) => void handleDeleteJob(jobId, deleteFiles).catch((err) => setError(err.message))}
               onDeleteItems={(jobId, itemIds, deleteFiles) =>
                 void handleDeleteJobItems(jobId, itemIds, deleteFiles).catch((err) => setError(err.message))
@@ -413,7 +570,8 @@ export default function App() {
               onPause={(jobId) => void handlePauseJob(jobId).catch((err) => setError(err.message))}
               onOpenFolder={(jobId) => openJobFolder(jobId)}
               onOpenItemFolder={(jobId, itemId) => openJobItemFolder(jobId, itemId)}
-              onOpenSourcePage={openSourcePage}
+              onOpenSourcePage={openExternalPage}
+              onOpenVideoPage={openExternalPage}
               onPlay={(jobId) => playJobVideo(jobId)}
               onPlayItem={(jobId, itemId) => playJobItemVideo(jobId, itemId)}
               onRestart={(jobId, resolution) => void handleRestartJob(jobId, resolution).catch((err) => setError(err.message))}
@@ -437,10 +595,33 @@ export default function App() {
                 void updateRuntimeDownloadOption(key, value).catch((err) => handleAppError(err, "保存下载设置失败"))
               }
             />
-            {settings && <SettingsPanel settings={settings} onSettingsChange={applySettings} />}
+            {settings && <SettingsPanel settings={settings} onSettingsChange={applySettings} onError={setError} />}
           </aside>
         </section>
       </section>
+      {biliDialog && (
+        <BiliUploadDialog
+          prefill={biliDialog.prefill}
+          isCollection={biliDialog.isCollection}
+          onCancel={() => setBiliDialog(null)}
+          onSubmit={handleBiliSubmit}
+        />
+      )}
     </main>
   );
+}
+
+/**
+ * 把接口错误拼成一句人话。
+ *
+ * B站 上传的 409（前置条件不满足：没装投稿工具、没登录）会在 `detail` 里一起给出 `advice`，
+ * 只显示 `message` 等于把「下一步做什么」丢掉 —— 那是本功能的验收口径之一。
+ */
+function biliMessage(err: unknown, fallback: string): string {
+  const message = err instanceof Error ? err.message : fallback;
+  if (!(err instanceof ApiError) || !err.detail || typeof err.detail !== "object") {
+    return message;
+  }
+  const advice = err.detail.advice?.trim();
+  return advice ? `${message} —— ${advice}` : message;
 }

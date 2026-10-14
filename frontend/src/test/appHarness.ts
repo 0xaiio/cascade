@@ -1,9 +1,12 @@
 import { cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, vi } from "vitest";
-import type { Job } from "../types";
+import type { BiliJobUploads, Job } from "../types";
 import {
   analyzePayload,
+  biliJobUploadsPayload,
+  biliPrefillSinglePayload,
+  biliStatusPayload,
   cookieHealthPayload,
   diagnosticsPayload,
   jobPayload,
@@ -64,7 +67,47 @@ export const mockState = {
   /** `POST /api/cookies/verify` 收到的请求体。 */
   cookieVerifyBodies: [] as Array<Record<string, unknown>>,
   /** `POST /api/diagnostics/runtime` 被调用了几次。 */
-  runtimeRefreshCount: 0
+  runtimeRefreshCount: 0,
+
+  /* ---------------------------------------------------------------- B站 上传 */
+  /** `GET /api/bilibili/status` 的结论。出厂是「工具在、没登录」。 */
+  biliStatus: biliStatusPayload,
+  /** `GET /api/bilibili/uploads/summary` 的任务级徽标。**出厂为空** —— 任务卡片保持原样。 */
+  biliUploads: [] as BiliJobUploads[],
+  /** `GET /api/bilibili/prefill` 的返回值。 */
+  biliPrefill: biliPrefillSinglePayload,
+  /** `POST /api/bilibili/uploads` / `collections` 完成后返回的记录。 */
+  biliSubmitResult: biliJobUploadsPayload,
+  /** 两条提交接口收到的请求体（用来断言「前端送上去的就是用户在表单里填的」）。 */
+  biliUploadBodies: [] as Array<Record<string, unknown>>,
+  biliCollectionBodies: [] as Array<Record<string, unknown>>,
+  /** `POST .../retry` 与 `.../group` 收到的记录 id。 */
+  biliRetryUploadIds: [] as string[],
+  biliRetrySeasonIds: [] as string[],
+  /** `GET /api/bilibili/prefill` 收到的两级参数。 */
+  biliPrefillQueries: [] as Array<{ jobId: string | null; itemId: string | null }>,
+  /** 扫码轮询的下一帧结论。`confirmed` 会让界面停止轮询并重新体检。 */
+  biliLoginPollState: "waiting",
+  biliLoginPollMessage: "等待扫码",
+  /** `POST .../retry` 的实际动作。`none` = 这条已经好了、什么都没做。 */
+  biliRetryAction: "reupload" as "reupload" | "reverify" | "none",
+  /** 非空时两条提交接口返回 409 并带上这句话 —— 用来测「提交被拒，表单不关、错误留在表单里」。 */
+  biliSubmitFailure: null as string | null,
+  /** 起过的 `EventSource`。测试用它发一条消息，验证「SSE 重拉后比对徽标」这条路。 */
+  eventSources: [] as Array<{ onmessage: ((event: MessageEvent) => void) | null; close: unknown }>,
+  /** `POST .../group` 返回的合集记录。 */
+  biliSeason: {
+    id: "season-1",
+    job_id: "job-playlist",
+    title: "Playlist batch",
+    desc: "Playlist batch（共 2 个视频，由本机下载工作流自动上传）",
+    season_id: 9001,
+    status: "grouped",
+    status_text: "已归入合集",
+    upload_ids: ["bili-1"],
+    error: null,
+    advice: null
+  }
 };
 
 /** 复位到出厂值。初始值与复位值必须同源，否则「第一个用例」与「后续用例」的前提会不一致。 */
@@ -83,6 +126,32 @@ function resetMockState(): void {
   mockState.proxyTestBodies = [];
   mockState.cookieVerifyBodies = [];
   mockState.runtimeRefreshCount = 0;
+  mockState.biliStatus = biliStatusPayload;
+  mockState.biliUploads = [];
+  mockState.biliPrefill = biliPrefillSinglePayload;
+  mockState.biliSubmitResult = biliJobUploadsPayload;
+  mockState.biliUploadBodies = [];
+  mockState.biliCollectionBodies = [];
+  mockState.biliRetryUploadIds = [];
+  mockState.biliRetrySeasonIds = [];
+  mockState.biliPrefillQueries = [];
+  mockState.biliLoginPollState = "waiting";
+  mockState.biliLoginPollMessage = "等待扫码";
+  mockState.biliRetryAction = "reupload";
+  mockState.biliSubmitFailure = null;
+  mockState.eventSources = [];
+  mockState.biliSeason = {
+    id: "season-1",
+    job_id: "job-playlist",
+    title: "Playlist batch",
+    desc: "Playlist batch（共 2 个视频，由本机下载工作流自动上传）",
+    season_id: 9001,
+    status: "grouped",
+    status_text: "已归入合集",
+    upload_ids: ["bili-1"],
+    error: null,
+    advice: null
+  };
 }
 
 /** 注册共享的替身与前后置钩子。测试文件在顶层调用一次。 */
@@ -99,7 +168,9 @@ export function installAppHarness(): void {
     vi.stubGlobal("EventSource", class {
       onmessage: ((event: MessageEvent) => void) | null = null;
       close = vi.fn();
-      constructor(public url: string) {}
+      constructor(public url: string) {
+        mockState.eventSources.push(this);
+      }
     });
 
     vi.stubGlobal(
@@ -225,6 +296,91 @@ export function installAppHarness(): void {
           }
           mockState.analyzeLockedByEdgeCookies = false;
           return Response.json(mockState.analyze);
+        }
+        // ---- B站 上传。**具体路径必须排在通配之前**，否则 `/uploads/summary` 会被
+        // `/uploads` 吃掉 —— 那是一条只在运行时才暴露的错配，类型检查看不出来。
+        if (url.includes("/api/bilibili/status")) {
+          return Response.json(mockState.biliStatus);
+        }
+        if (url.endsWith("/api/bilibili/tools/repair")) {
+          return Response.json(mockState.biliStatus);
+        }
+        if (url.endsWith("/api/bilibili/login/qrcode")) {
+          return Response.json({
+            qrcode_key: "qr-key-1",
+            url: "https://www.bilibili.com/h5/login?qrcode_key=qr-key-1",
+            // 真实的 SVG 由服务端用 `qrcode` 生成，这里给一段等价形状的替换物 ——
+            // 断言只关心「有没有内联渲染它」，不关心像素。
+            svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 3 3"><rect width="3" height="3" fill="#fff"/></svg>',
+            note: null,
+            expires_in: 180
+          });
+        }
+        if (url.includes("/api/bilibili/login/poll")) {
+          return Response.json({
+            state: mockState.biliLoginPollState,
+            message: mockState.biliLoginPollMessage,
+            logged_in: mockState.biliLoginPollState === "confirmed",
+            account: mockState.biliLoginPollState === "confirmed" ? { mid: 12345, name: "长沙的 HX" } : null
+          });
+        }
+        if (url.endsWith("/api/bilibili/cookies") && init?.method === "POST") {
+          return Response.json(mockState.biliStatus);
+        }
+        if (url.endsWith("/api/bilibili/cookies") && init?.method === "DELETE") {
+          return Response.json(mockState.biliStatus);
+        }
+        if (url.includes("/api/bilibili/prefill")) {
+          const query = new URL(url, "http://localhost").searchParams;
+          mockState.biliPrefillQueries.push({
+            jobId: query.get("job_id"),
+            itemId: query.get("item_id")
+          });
+          return Response.json(mockState.biliPrefill);
+        }
+        if (url.endsWith("/api/bilibili/uploads/summary")) {
+          return Response.json({ jobs: mockState.biliUploads });
+        }
+        if (url.includes("/api/bilibili/uploads/") && url.endsWith("/retry")) {
+          const uploadId = url.split("/api/bilibili/uploads/")[1].replace("/retry", "");
+          mockState.biliRetryUploadIds.push(uploadId);
+          // 三种动作的提示各不相同 —— 混成一句会让「重新核对」看起来像「重新上传」。
+          const message =
+            mockState.biliRetryAction === "none"
+              ? "这条已经上传成功，不需要重试。"
+              : mockState.biliRetryAction === "reverify"
+                ? "已重新核对。"
+                : "已重新排队。";
+          return Response.json({
+            action: mockState.biliRetryAction,
+            message,
+            upload: mockState.biliSubmitResult.uploads[0] ?? null
+          });
+        }
+        if (url.includes("/api/bilibili/collections/") && url.endsWith("/group")) {
+          mockState.biliRetrySeasonIds.push(url.split("/api/bilibili/collections/")[1].replace("/group", ""));
+          return Response.json({ message: "已重新归集。", season: mockState.biliSeason });
+        }
+        if (url.endsWith("/api/bilibili/uploads") && init?.method === "POST") {
+          mockState.biliUploadBodies.push(JSON.parse(String(init.body ?? "{}")));
+          if (mockState.biliSubmitFailure) {
+            return Response.json({ detail: mockState.biliSubmitFailure }, { status: 409 });
+          }
+          return Response.json(mockState.biliSubmitResult, { status: 201 });
+        }
+        if (url.endsWith("/api/bilibili/collections") && init?.method === "POST") {
+          mockState.biliCollectionBodies.push(JSON.parse(String(init.body ?? "{}")));
+          if (mockState.biliSubmitFailure) {
+            return Response.json({ detail: mockState.biliSubmitFailure }, { status: 409 });
+          }
+          return Response.json(mockState.biliSubmitResult, { status: 201 });
+        }
+        if (url.includes("/api/bilibili/uploads")) {
+          const jobId = new URL(url, "http://localhost").searchParams.get("job_id");
+          const entry = mockState.biliUploads.find((item) => item.job_id === jobId);
+          return Response.json(
+            entry ?? { job_id: jobId, badge: "none", badge_text: "未上传", badge_tone: "idle", uploads: [], season: null }
+          );
         }
         return Response.json({});
       })

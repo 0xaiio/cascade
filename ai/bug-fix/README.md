@@ -148,3 +148,12 @@ failed · 0/1 完成 · 当前没有 1440p 的视频，低于选定分辨率的�
 12. **`is_requested_format_unavailable_error` 是纯字符串匹配**（010 遗留）。yt-dlp 一旦改这句英文，
    两处归一同时失效，缺陷会以「降级不执行」的形式回归。有意保持窄匹配（宁可失效也不吞真故障），
    但没有版本探测或第二个关键词兜底。
+13. **删任务不连带删 B站 上传记录**（bilibili 分支移植发现）。`JobManager.delete()` /
+   `delete_items()` 只删 `JobEvent` / `JobItem` / `Job`，`bili_upload` / `bili_season` 会留下；
+   而 `read_all_job_uploads()` 的 job 集合正是从这两张表取并集，于是
+   `GET /api/bilibili/uploads/summary` 会一直为已不存在的任务回记录，行数也无限累积
+   （界面上看不见：前端按 `/api/jobs` 渲染徽标，所以这是个静默的存储面损伤）。
+   修法不止一行删表 —— 投稿跑在 `BiliManager` 的另一个 worker 上，删任务时可能正有一条在途，
+   删完再写回等于白删；要先给 `BiliManager` 加**按 job 取消在途上传**的能力
+   （现在还只有整体 `stop()`）。详见
+   [03-implementation.md §5.5](../feature/bilibili-upload/03-implementation.md#55-删任务不连带删上传记录)。

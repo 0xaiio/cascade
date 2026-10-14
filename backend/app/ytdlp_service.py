@@ -278,6 +278,13 @@ class YtDlpService:
     def get_ffmpeg_status(self) -> dict[str, bool]:
         return {"ffmpeg": self._ffmpeg_executable() is not None, "ffprobe": shutil.which("ffprobe") is not None}
 
+    def ffmpeg_executable(self) -> str | None:
+        """公开 `_ffmpeg_executable`：B站 上传要抽一帧当封面，用的必须是**同一个** ffmpeg。
+
+        再写一份探测就是两处真相 —— 诊断面板说「ffmpeg 可用」而抽封面失败，是最难查的那种不一致。
+        """
+        return self._ffmpeg_executable()
+
     def get_dependency_status(self) -> dict[str, bool | int | str | None | list[str]]:
         ffmpeg = self.get_ffmpeg_status()
         runtime = self._detect_js_runtime()

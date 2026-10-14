@@ -8,6 +8,7 @@
 """
 
 from .analyze import router as analyze_router
+from .bilibili import router as bilibili_router
 from .cookies import router as cookies_router
 from .diagnostics import router as diagnostics_router
 from .events import router as events_router
@@ -17,7 +18,7 @@ from .settings import router as settings_router
 
 # 顺序沿用重构前 `main.py` 的声明次序，但把同一资源聚在一起：`/api/cookies/verify` 随 cookies 归位
 # （原先它夹在自检路由中间），SSE 排在设置之后。路径之间没有前缀冲突，因此顺序不影响匹配结果，
-# 它只决定 OpenAPI 里的 operation 排列。
+# 它只决定 OpenAPI 里的 operation 排列。B站 排在最后：整个资源都是后加的。
 API_ROUTERS = (
     diagnostics_router,
     cookies_router,
@@ -26,4 +27,5 @@ API_ROUTERS = (
     job_files_router,
     settings_router,
     events_router,
+    bilibili_router,
 )

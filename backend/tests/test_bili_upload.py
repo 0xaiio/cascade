@@ -1,0 +1,821 @@
+"""`bili_upload`：把「一条下载好的视频」变成「B站 上可对账的稿件」。
+
+本模块被刻意设计成纯函数式（不写库、不发事件、不读全局配置），代价是 `UploadContext`
+要显式传进来；收益是**每一个分支都能离线跑**。用例因此集中钉四件在真实账号上极难复现、
+在本地却很容易写错的事（也就是模块文档里那份「业务判断清单」）：
+
+1. `biliup` 返回 0 **不等于**已发布 —— 必须过对账，查不到就停在「待核对」；
+2. 单条失败**不中断**整批；
+3. 进合集的条目**必须同时有 aid 与 cid**；
+4. 已有 `season_id` 时**不再新建**合集。
+
+再加一组「附加动作不能越级」的约束：封面抽不出来、评论发不出去，都不该把一次成功的投稿
+判成失败。
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from app.bili_bin import CommandResult
+from app.bili_http import HttpError
+from app.bili_meta import MetadataTemplate, UploadMetadata, default_collection_template, default_single
+from app.bili_policy import SEASON_CREATE_FAILED, SEASON_EPISODES_FAILED
+from app.bili_upload import (
+    COMMENT_MARKER,
+    DEFAULT_COLLECTION_GAP_SECONDS,
+    LOG_TAIL_LINES,
+    CollectionResult,
+    SeasonOutcome,
+    UploadContext,
+    UploadResult,
+    UploadTarget,
+    group_into_season,
+    prepare_cover,
+    render_collection,
+    reverify,
+    run_collection,
+    run_single,
+    tail_text,
+    validate_collection,
+)
+from app.models import BiliSeasonStatus, BiliUploadStatus
+from bili_fakes import UNSET, FakeBiliTransport, RecordingSleeper, ScriptedRunner, command_runner, write_video
+
+TITLE = "演示标题"
+JAR = {"SESSDATA": "sess", "bili_jct": "jct", "DedeUserID": "42"}
+
+
+# ---------------------------------------------------------------- 夹具与局部替身
+class RecordingCommandRunner:
+    """既跑上传也跑抽封面，并把 argv 记下来。
+
+    真实的 `extract_cover_frame` 判定成功的依据是**输出文件真的存在且非空**，
+    所以替身必须把文件造出来。不造的话「封面被带上」这条路径永远走不到 ——
+    用例会以为自己在验证封面，实际验证的是「没有封面」。
+    """
+
+    def __init__(self, *, ffmpeg: str = "ffmpeg", returncode: int = 0, stdout: str = "APP接口投稿成功") -> None:
+        self.ffmpeg = ffmpeg
+        self.returncode = returncode
+        self.stdout = stdout
+        self.argvs: list[list[str]] = []
+
+    @property
+    def upload_argv(self) -> list[str]:
+        return next(argv for argv in self.argvs if argv[0] != self.ffmpeg)
+
+    @property
+    def cover_calls(self) -> list[list[str]]:
+        return [argv for argv in self.argvs if argv[0] == self.ffmpeg]
+
+    def __call__(self, argv, timeout, on_line):
+        self.argvs.append(list(argv))
+        if argv[0] == self.ffmpeg:
+            out = Path(argv[-1])
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(b"\xff\xd8\xff\x00")
+            return CommandResult(0, "", "")
+        if on_line is not None:
+            for line in ("start pre_upload", "Upload completed", self.stdout):
+                on_line(line)
+        return CommandResult(self.returncode, self.stdout, "")
+
+
+def make_context(transport, *, runner, tmp_path: Path, **overrides) -> UploadContext:
+    base = {
+        "biliup_exe": "biliup.exe",
+        "cookie_path": tmp_path / "cookies.json",
+        "jar": dict(JAR),
+        "transport": transport,
+        "runner": runner,
+        "sleeper": RecordingSleeper(),
+        "verify_delay": 0.0,
+    }
+    base.update(overrides)
+    return UploadContext(**base)
+
+
+def archive(*, aid: int | None = 111, bvid: str | None = "BV1xx", title: str = TITLE, state: object = 0, cover: str | None = None) -> dict:
+    row: dict = {"title": title}
+    if aid is not None:
+        row["aid"] = aid
+    if bvid is not None:
+        row["bvid"] = bvid
+    if state is not None:
+        row["state"] = state
+    if cover is not None:
+        row["cover"] = cover
+    return row
+
+
+def single_meta(**overrides) -> UploadMetadata:
+    kwargs = {"job_title": "演示任务", "item_title": TITLE, "source_url": "https://youtu.be/x"}
+    kwargs.update(overrides)
+    return default_single(**kwargs)
+
+
+# ================================================================ run_single
+def test_run_single_happy_path_reaches_published_with_aid_bvid_and_cid(tmp_path):
+    """一次成功投稿要同时拿到 aid/bvid（对账给的）与 cid（稿件详情给的，归集必需）。"""
+    transport = FakeBiliTransport(archives=[archive(aid=111, bvid="BV1xx", state=0, cover="https://c/1.jpg")])
+    video = write_video(tmp_path / "a.mp4")
+    result = run_single(make_context(transport, runner=command_runner(), tmp_path=tmp_path), UploadTarget(1, TITLE, video), single_meta())
+    assert result.status == BiliUploadStatus.published.value
+    assert (result.aid, result.bvid, result.cid) == (111, "BV1xx", 7001)
+    assert result.verified_note == "已发布，可以正常观看"
+    assert result.episode_ready is True
+    assert result.ok is True
+    assert result.error is None and result.advice is None
+
+
+def test_run_single_reports_the_progress_it_measured_even_without_a_listener(tmp_path):
+    """进度是**落库字段**，不该取决于「这一刻有没有人在听」。
+
+    把进度回调当条件时，同一个投稿在后端观察到 0.6、在直连调用里观察到 0.0 —— 又是一处两处真相。
+    """
+    transport = FakeBiliTransport(archives=[archive()])
+    video = write_video(tmp_path / "a.mp4")
+    context = make_context(transport, runner=command_runner(), tmp_path=tmp_path)
+    assert context.on_progress is None
+    result = run_single(context, UploadTarget(1, TITLE, video), single_meta())
+    assert result.progress == pytest.approx(0.95)
+
+
+def test_run_single_streams_progress_monotonically(tmp_path):
+    transport = FakeBiliTransport(archives=[archive()])
+    video = write_video(tmp_path / "a.mp4")
+    seen: list[float] = []
+    context = make_context(transport, runner=command_runner(), tmp_path=tmp_path, on_progress=seen.append)
+    run_single(context, UploadTarget(1, TITLE, video), single_meta())
+    assert seen == [pytest.approx(0.20), pytest.approx(0.60), pytest.approx(0.95)]
+
+
+def test_run_single_prefers_the_platform_cover_over_the_local_frame(tmp_path):
+    """本地抽的封面被 B站 转码/裁切过，**平台那个才是最终生效的**。"""
+    transport = FakeBiliTransport(
+        archives=[archive(cover="https://i0.hdslb.com/bfs/archive/from-platform.jpg")],
+        video={"cid": 7001, "pic": "https://i0.hdslb.com/bfs/archive/final.jpg"},
+    )
+    video = write_video(tmp_path / "a.mp4")
+    result = run_single(make_context(transport, runner=command_runner(), tmp_path=tmp_path), UploadTarget(1, TITLE, video), single_meta())
+    assert result.cover_url == "https://i0.hdslb.com/bfs/archive/final.jpg"
+
+
+def test_run_single_falls_back_to_the_archive_cover_when_details_have_none(tmp_path):
+    transport = FakeBiliTransport(
+        archives=[archive(cover="https://i0.hdslb.com/bfs/archive/from-platform.jpg")],
+        video={"cid": 7001, "pic": ""},
+    )
+    video = write_video(tmp_path / "a.mp4")
+    result = run_single(make_context(transport, runner=command_runner(), tmp_path=tmp_path), UploadTarget(1, TITLE, video), single_meta())
+    assert result.cover_url == "https://i0.hdslb.com/bfs/archive/from-platform.jpg"
+
+
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    [
+        (0, BiliUploadStatus.published.value),
+        (-1, BiliUploadStatus.reviewing.value),
+        (-30, BiliUploadStatus.reviewing.value),
+        (-2, BiliUploadStatus.rejected.value),
+        (-16, BiliUploadStatus.rejected.value),
+        ("未来的某一档", BiliUploadStatus.unverified.value),
+    ],
+)
+def test_run_single_folds_platform_state_into_our_status(tmp_path, state, expected):
+    transport = FakeBiliTransport(archives=[archive(state=state)])
+    video = write_video(tmp_path / "a.mp4")
+    result = run_single(make_context(transport, runner=command_runner(), tmp_path=tmp_path), UploadTarget(1, TITLE, video), single_meta())
+    assert result.status == expected
+
+
+def test_run_single_does_not_claim_ok_for_a_rejected_archive(tmp_path):
+    """被退回的稿件存在于平台上，但绝不能说成「可以收工」。"""
+    transport = FakeBiliTransport(archives=[archive(state=-2)])
+    video = write_video(tmp_path / "a.mp4")
+    result = run_single(make_context(transport, runner=command_runner(), tmp_path=tmp_path), UploadTarget(1, TITLE, video), single_meta())
+    assert result.ok is False
+    assert "审核不通过" in (result.verified_note or "")
+
+
+def test_run_single_reports_unverified_when_the_command_succeeded_but_nothing_is_found(tmp_path):
+    """**本功能唯一不能妥协的一条。** `biliup` 返回 0 只说明命令跑完了。"""
+    transport = FakeBiliTransport(archives=[])
+    video = write_video(tmp_path / "a.mp4")
+    result = run_single(make_context(transport, runner=command_runner(), tmp_path=tmp_path), UploadTarget(1, TITLE, video), single_meta())
+    assert result.status == BiliUploadStatus.unverified.value
+    assert result.error == "已提交，但还没在 B站 看到它"
+    assert "重新核对" in (result.advice or "")
+    # 没核实的条目**不能**进合集：没有 aid/cid，加进去只会被平台拒。
+    assert (result.aid, result.cid) == (None, None)
+    assert result.episode_ready is False
+    assert result.ok is False
+
+
+def test_run_single_marks_failed_and_skips_verification_when_the_command_fails(tmp_path):
+    """命令失败时**不查对账** —— 那等于拿一次注定为空的查询去拖时间。"""
+    transport = FakeBiliTransport(archives=[archive()])
+    video = write_video(tmp_path / "a.mp4")
+    runner = command_runner(returncode=1, stdout="code 601 您上传视频过快", lines=("code 601 您上传视频过快",))
+    result = run_single(make_context(transport, runner=runner, tmp_path=tmp_path), UploadTarget(1, TITLE, video), single_meta())
+    assert result.status == BiliUploadStatus.failed.value
+    assert "太快" in (result.error or "")
+    assert transport.called("/x/web/archives") == 0
+
+
+def test_run_single_rejects_a_missing_video_without_running_anything(tmp_path):
+    transport = FakeBiliTransport()
+    runner = ScriptedRunner([])
+    result = run_single(make_context(transport, runner=runner, tmp_path=tmp_path), UploadTarget(1, "x", tmp_path / "none.mp4"), single_meta(item_title="x"))
+    assert result.status == BiliUploadStatus.failed.value
+    assert result.error == "这个视频还没有下载好，没有可以上传的文件"
+    assert "重启" in (result.advice or "")
+    assert runner.calls == []
+    assert transport.calls == []
+
+
+def test_run_single_keeps_the_raw_output_tail_for_troubleshooting(tmp_path):
+    transport = FakeBiliTransport(archives=[])
+    video = write_video(tmp_path / "a.mp4")
+    result = run_single(make_context(transport, runner=command_runner(), tmp_path=tmp_path), UploadTarget(1, TITLE, video), single_meta())
+    assert result.log_tail is not None
+    assert "APP接口投稿成功" in result.log_tail
+
+
+def test_run_single_copies_the_metadata_onto_the_result(tmp_path):
+    """结果字段与 `models.BiliUpload` 一一对应；漏拷一个就等于界面上少一列。"""
+    transport = FakeBiliTransport(archives=[])
+    video = write_video(tmp_path / "a.mp4")
+    meta = UploadMetadata(title="标题甲", desc="简介乙", tags="a,b", tid="122")
+    result = run_single(make_context(transport, runner=command_runner(), tmp_path=tmp_path), UploadTarget(7, "标题甲", video, item_id="it-7"), meta)
+    assert (result.index, result.item_id) == (7, "it-7")
+    assert (result.title, result.desc, result.tags, result.tid) == ("标题甲", "简介乙", "a,b", "122")
+    assert result.video_path == str(video)
+
+
+def test_run_single_passes_the_submit_shape_into_the_command(tmp_path):
+    """投稿命令必须走 `--submit web` 并带上封面；这里从 argv 层面确认它真的被传下去了。"""
+    transport = FakeBiliTransport(archives=[archive()])
+    video = write_video(tmp_path / "a.mp4")
+    runner = RecordingCommandRunner()
+    run_single(
+        make_context(transport, runner=runner, tmp_path=tmp_path, ffmpeg_path="ffmpeg", cover_dir=tmp_path / "covers"),
+        UploadTarget(1, TITLE, video),
+        single_meta(),
+    )
+    argv = runner.upload_argv
+    assert argv[argv.index("--submit") + 1] == "web"
+    assert argv[argv.index("--cover") + 1] == str(tmp_path / "covers" / "bili_01.jpg")
+    assert str(video) in argv
+
+
+def test_run_single_uses_the_cover_key_it_is_given(tmp_path):
+    """默认按序号命名只适用于单条：多个任务并存时 `bili_01.jpg` 会互相覆盖，
+    落库的 `cover_path` 就指向了别人的画面。"""
+    transport = FakeBiliTransport(archives=[archive()])
+    video = write_video(tmp_path / "a.mp4")
+    runner = RecordingCommandRunner()
+    run_single(
+        make_context(transport, runner=runner, tmp_path=tmp_path, ffmpeg_path="ffmpeg", cover_dir=tmp_path / "covers"),
+        UploadTarget(1, TITLE, video),
+        single_meta(),
+        cover_key="upload-abc",
+    )
+    assert runner.cover_calls[0][-1] == str(tmp_path / "covers" / "upload-abc.jpg")
+
+
+def test_run_single_can_skip_the_cover_entirely(tmp_path):
+    transport = FakeBiliTransport(archives=[archive()])
+    video = write_video(tmp_path / "a.mp4")
+    runner = RecordingCommandRunner()
+    result = run_single(
+        make_context(transport, runner=runner, tmp_path=tmp_path, ffmpeg_path="ffmpeg", cover_dir=tmp_path / "covers"),
+        UploadTarget(1, TITLE, video),
+        single_meta(),
+        make_cover=False,
+    )
+    assert result.cover_path is None
+    assert runner.cover_calls == []
+    assert "--cover" not in runner.upload_argv
+
+
+def test_run_single_uses_a_caller_supplied_cover_without_extracting_one(tmp_path):
+    transport = FakeBiliTransport(archives=[archive()])
+    video = write_video(tmp_path / "a.mp4")
+    cover = tmp_path / "given.jpg"
+    cover.write_bytes(b"\xff\xd8\xff")
+    runner = RecordingCommandRunner()
+    result = run_single(
+        make_context(transport, runner=runner, tmp_path=tmp_path, ffmpeg_path="ffmpeg", cover_dir=tmp_path / "covers"),
+        UploadTarget(1, TITLE, video),
+        single_meta(),
+        cover_path=cover,
+    )
+    assert result.cover_path == str(cover)
+    assert runner.cover_calls == []
+
+
+def test_run_single_does_not_fail_when_no_ffmpeg_is_available(tmp_path):
+    """封面是可选项：没有 ffmpeg 时少一张封面，不该让整次投稿失败。"""
+    transport = FakeBiliTransport(archives=[archive()])
+    video = write_video(tmp_path / "a.mp4")
+    result = run_single(make_context(transport, runner=command_runner(), tmp_path=tmp_path), UploadTarget(1, TITLE, video), single_meta())
+    assert result.cover_path is None
+    assert result.status == BiliUploadStatus.published.value
+
+
+# ---------------------------------------------------------------- 置顶评论这一附加动作
+def test_run_single_sends_the_comment_after_a_published_upload(tmp_path):
+    transport = FakeBiliTransport(archives=[archive()], comment_rpid=9001)
+    video = write_video(tmp_path / "a.mp4")
+    result = run_single(
+        make_context(transport, runner=command_runner(), tmp_path=tmp_path),
+        UploadTarget(1, TITLE, video),
+        single_meta(),
+        comment="自动生成的置顶评论",
+    )
+    assert result.comment == "评论已发送并置顶"
+    assert transport.called("/x/v2/reply/add") == 1
+    assert transport.called("/x/v2/reply/top") == 1
+    assert transport.comments[0]["message"] == "自动生成的置顶评论"
+
+
+def test_run_single_sends_the_comment_for_a_reviewing_upload_too(tmp_path):
+    """审核中的稿件也有 aid（评论区已经能用），所以评论照发。"""
+    transport = FakeBiliTransport(archives=[archive(state=-30)])
+    video = write_video(tmp_path / "a.mp4")
+    result = run_single(
+        make_context(transport, runner=command_runner(), tmp_path=tmp_path),
+        UploadTarget(1, TITLE, video),
+        single_meta(),
+        comment="自动生成的置顶评论",
+    )
+    assert result.status == BiliUploadStatus.reviewing.value
+    assert result.comment == "评论已发送并置顶"
+
+
+def test_run_single_skips_the_comment_when_there_is_no_aid(tmp_path):
+    """「待核对」时连 oid 都没有，发评论就无从谈起。"""
+    transport = FakeBiliTransport(archives=[])
+    video = write_video(tmp_path / "a.mp4")
+    result = run_single(
+        make_context(transport, runner=command_runner(), tmp_path=tmp_path),
+        UploadTarget(1, TITLE, video),
+        single_meta(),
+        comment="自动生成的置顶评论",
+    )
+    assert result.comment is None
+    assert transport.called("/x/v2/reply/add") == 0
+
+
+def test_run_single_skips_the_comment_when_only_aid_is_known(tmp_path):
+    """**只有 aid 没有 cid 时也不发。** 这条不是为评论本身，而是把 `episode_ready`
+    的判据（aid **与** cid 都要）钉在一个可观察的行为上。"""
+    transport = FakeBiliTransport(archives=[archive()], video={})
+    video = write_video(tmp_path / "a.mp4")
+    result = run_single(
+        make_context(transport, runner=command_runner(), tmp_path=tmp_path),
+        UploadTarget(1, TITLE, video),
+        single_meta(),
+        comment="自动生成的置顶评论",
+    )
+    assert result.aid == 111 and result.cid is None
+    assert result.episode_ready is False
+    assert transport.called("/x/v2/reply/add") == 0
+
+
+def test_run_single_does_not_send_a_comment_when_none_was_asked_for(tmp_path):
+    transport = FakeBiliTransport(archives=[archive()])
+    video = write_video(tmp_path / "a.mp4")
+    result = run_single(make_context(transport, runner=command_runner(), tmp_path=tmp_path), UploadTarget(1, TITLE, video), single_meta())
+    assert result.comment is None
+    assert transport.called("/x/v2/reply/add") == 0
+
+
+def test_run_single_does_not_fail_the_upload_when_the_comment_fails(tmp_path):
+    """评论是一条附加动作，失败只能污染自己那一格。"""
+    transport = FakeBiliTransport(archives=[archive()], comment_code=-412, comment_message="请求被拦截")
+    video = write_video(tmp_path / "a.mp4")
+    result = run_single(
+        make_context(transport, runner=command_runner(), tmp_path=tmp_path),
+        UploadTarget(1, TITLE, video),
+        single_meta(),
+        comment="自动生成的置顶评论",
+    )
+    assert result.status == BiliUploadStatus.published.value
+    assert "评论没有发出去" in (result.comment or "")
+
+
+def test_comment_marker_is_ascii_so_it_cannot_collide_with_a_chinese_comment():
+    assert COMMENT_MARKER.isascii()
+
+
+# ================================================================ reverify
+def test_reverify_only_rechecks_and_never_resubmits(tmp_path):
+    """**最容易写错、代价也最大的一个分支。** 「待核对」的稿件投稿命令已经成功过，
+    把它和失败态一起「重试」会让账号上多一条重复稿件。"""
+    transport = FakeBiliTransport(archives=[archive()])
+    runner = ScriptedRunner([])
+    result = reverify(make_context(transport, runner=runner, tmp_path=tmp_path), title=TITLE, index=3, item_id="it-3")
+    assert runner.calls == []
+    assert transport.called("/x/web/archives") == 1
+    assert result.status == BiliUploadStatus.published.value
+    assert (result.index, result.item_id) == (3, "it-3")
+
+
+def test_reverify_stays_unverified_when_the_archive_is_still_missing(tmp_path):
+    transport = FakeBiliTransport(archives=[])
+    result = reverify(make_context(transport, runner=ScriptedRunner([]), tmp_path=tmp_path), title=TITLE)
+    assert result.status == BiliUploadStatus.unverified.value
+    assert result.error == "已提交，但还没在 B站 看到它"
+
+
+def test_reverify_picks_up_the_cid_needed_for_grouping(tmp_path):
+    """从「待核对」变成「已发布」的同时要把 cid 补上，否则合集那一步还是加不进去。"""
+    transport = FakeBiliTransport(archives=[archive()])
+    result = reverify(make_context(transport, runner=ScriptedRunner([]), tmp_path=tmp_path), title=TITLE)
+    assert result.episode_ready is True
+
+
+def test_reverify_does_not_send_a_comment(tmp_path):
+    """重新核对不是重新上传，附加动作不该被顺带重放。"""
+    transport = FakeBiliTransport(archives=[archive()])
+    reverify(make_context(transport, runner=ScriptedRunner([]), tmp_path=tmp_path), title=TITLE)
+    assert transport.called("/x/v2/reply/add") == 0
+
+
+# ================================================================ 归集
+def ready(
+    index: int,
+    *,
+    aid: int | None = UNSET,
+    cid: int | None = UNSET,
+    title: str | None = None,
+    cover_url: str | None = None,
+) -> UploadResult:
+    """一条「已经拿到 aid/cid」的稿件。
+
+    `cid=None` 用来构造「只有 aid」那种进不了合集的条目 —— 所以两个参数都走 `UNSET` 哨兵，
+    不能拿 `None` 兼作「用默认值」。
+    """
+    return UploadResult(
+        index=index,
+        item_id=None,
+        status=BiliUploadStatus.published.value,
+        title=title or f"演示标题{index}",
+        aid=100 + index if aid is UNSET else aid,
+        cid=7000 + index if cid is UNSET else cid,
+        cover_url=cover_url,
+    )
+
+
+def test_group_into_season_stays_pending_and_touches_nothing_when_no_episode_is_ready(tmp_path):
+    """没有可归集的条目时**一个请求都不发** —— 否则就是在平台上留下一个空合集。"""
+    transport = FakeBiliTransport()
+    outcome = group_into_season(make_context(transport, runner=command_runner(), tmp_path=tmp_path), [ready(1, cid=None)], season_title="合集", season_desc="说明")
+    assert outcome.status == BiliSeasonStatus.pending.value
+    assert outcome.season_id is None
+    assert outcome.error == "视频还在 B站 排队审核，暂时没法加进合集"
+    assert transport.calls == []
+
+
+def test_group_into_season_creates_then_adds_and_reports_submitted(tmp_path):
+    transport = FakeBiliTransport(season_id=990011)
+    outcome = group_into_season(
+        make_context(transport, runner=command_runner(), tmp_path=tmp_path),
+        [ready(1, cover_url="https://c/1.jpg"), ready(2)],
+        season_title="合集",
+        season_desc="说明",
+    )
+    assert outcome.status == BiliSeasonStatus.grouped.value
+    assert outcome.season_id == 990011
+    assert outcome.cover_url == "https://c/1.jpg"
+    assert outcome.note == "合集已提交，B站 对合集有人工审核，通过前可能暂时看不到"
+    assert transport.called("/season/add") == 1
+    assert transport.called("/season/section/episodes/add") == 1
+    assert transport.calls[-1]["json_body"]["episodes"] == [
+        {"aid": 101, "cid": 7001, "title": "演示标题1", "charging_pay": 0},
+        {"aid": 102, "cid": 7002, "title": "演示标题2", "charging_pay": 0},
+    ]
+
+
+def test_group_into_season_reuses_an_existing_season_and_never_creates_a_second(tmp_path):
+    """重试不产生第二个同名合集 —— 用户根本不知道多了一个。"""
+    transport = FakeBiliTransport()
+    outcome = group_into_season(
+        make_context(transport, runner=command_runner(), tmp_path=tmp_path),
+        [ready(1)],
+        season_title="合集",
+        season_desc="说明",
+        existing_season_id=555,
+    )
+    assert outcome.status == BiliSeasonStatus.grouped.value
+    assert outcome.season_id == 555
+    assert transport.called("/season/add") == 0
+    assert transport.called("/season/section/episodes/add") == 1
+
+
+def test_group_into_season_reports_a_create_failure_without_a_season_id(tmp_path):
+    transport = FakeBiliTransport(season_add_error=HttpError("连接被重置"))
+    outcome = group_into_season(
+        make_context(transport, runner=command_runner(), tmp_path=tmp_path), [ready(1)], season_title="合集", season_desc="说明"
+    )
+    assert outcome.status == BiliSeasonStatus.failed.value
+    assert outcome.season_id is None
+    assert outcome.error == SEASON_CREATE_FAILED[0]
+    assert "重试归集" in (outcome.advice or "")
+    assert outcome.log_tail is not None
+
+
+def test_group_into_season_keeps_the_season_id_when_only_adding_failed(tmp_path):
+    """**这条支撑「只补加」。** 合集已经建好，重试时只要它还在，就不用再建一个。"""
+    transport = FakeBiliTransport(episodes_error=HttpError("连接被重置"))
+    outcome = group_into_season(
+        make_context(transport, runner=command_runner(), tmp_path=tmp_path), [ready(1)], season_title="合集", season_desc="说明"
+    )
+    assert outcome.status == BiliSeasonStatus.failed.value
+    assert outcome.season_id == 990011
+    assert outcome.error == SEASON_EPISODES_FAILED[0]
+    assert "不会重复建合集" in (outcome.advice or "")
+
+
+def test_group_into_season_excludes_items_missing_a_cid(tmp_path):
+    """缺 cid 的条目加进去会被平台拒；宁可少加一条，也不要整批失败。"""
+    transport = FakeBiliTransport()
+    group_into_season(
+        make_context(transport, runner=command_runner(), tmp_path=tmp_path),
+        [ready(1), ready(2, cid=None), ready(3)],
+        season_title="合集",
+        season_desc="说明",
+    )
+    tids = [item["cid"] for item in transport.calls[-1]["json_body"]["episodes"]]
+    assert tids == [7001, 7003]
+
+
+def test_group_into_season_passes_an_empty_cover_when_nothing_has_one(tmp_path):
+    transport = FakeBiliTransport()
+    outcome = group_into_season(
+        make_context(transport, runner=command_runner(), tmp_path=tmp_path), [ready(1)], season_title="合集", season_desc="说明"
+    )
+    assert outcome.cover_url is None
+    assert transport.calls[0]["form"]["cover"] == ""
+
+
+# ================================================================ 模板渲染与校验
+def test_render_collection_fills_every_placeholder_per_item(tmp_path):
+    template = MetadataTemplate(title_template="{index}. {title}", desc_template="{job} 第 {index}/{count} 集\n{source}", tags="固定", tid="122")
+    targets = [UploadTarget(1, "甲", write_video(tmp_path / "a.mp4"), source_url="https://s/1"), UploadTarget(2, "乙", write_video(tmp_path / "b.mp4"), source_url="https://s/2")]
+    metas = render_collection(template, targets, job_title="任务")
+    assert [m.title for m in metas] == ["01. 甲", "02. 乙"]
+    assert metas[0].desc == "任务 第 01/2 集\nhttps://s/1"
+    assert metas[1].desc == "任务 第 02/2 集\nhttps://s/2"
+
+
+def test_render_collection_merges_template_tags_with_the_items_own(tmp_path):
+    """只用模板标签会让合集里所有条目挂上一模一样的标签；只用派生标签又会丢掉用户写的固定标签。"""
+    template = MetadataTemplate(title_template="{title}", desc_template="{title}", tags="固定标签", tid="122")
+    targets = [UploadTarget(1, "Python 入门教程", write_video(tmp_path / "a.mp4"))]
+    metas = render_collection(template, targets, job_title="任务")
+    assert "固定标签" in metas[0].tags
+    assert "Python" in metas[0].tags
+
+
+def test_render_collection_matches_the_count_to_the_batch(tmp_path):
+    template = default_collection_template("合集")
+    targets = [UploadTarget(i, f"第{i}集", write_video(tmp_path / f"{i}.mp4")) for i in (1, 2, 3)]
+    metas = render_collection(template, targets, job_title="合集")
+    assert [meta.desc.splitlines()[0] for meta in metas] == [
+        "合集 · 第 01/3 集",
+        "合集 · 第 02/3 集",
+        "合集 · 第 03/3 集",
+    ]
+
+
+def test_validate_collection_points_at_the_offending_item(tmp_path):
+    """只报「有 N 条不合格」是不够的：用户面对几十条视频，需要知道改哪一条。"""
+    template = MetadataTemplate(title_template="{title}", desc_template="{title}", tags="标签", tid="122")
+    targets = [
+        UploadTarget(1, "正常", write_video(tmp_path / "a.mp4")),
+        UploadTarget(2, "超" * 90, write_video(tmp_path / "b.mp4")),
+    ]
+    problems = validate_collection(template, targets, job_title="任务")
+    assert len(problems) == 1
+    assert problems[0].startswith("第 2 条「" + "超" * 90 + "」：标题超出 10 个字")
+
+
+def test_validate_collection_accepts_a_clean_batch(tmp_path):
+    template = default_collection_template("合集")
+    targets = [UploadTarget(1, "第一集", write_video(tmp_path / "a.mp4"))]
+    assert validate_collection(template, targets, job_title="合集") == []
+
+
+def test_validate_collection_reports_unknown_placeholders(tmp_path):
+    template = MetadataTemplate(title_template="{title} {date}", desc_template="{title}", tags="标签", tid="122")
+    targets = [UploadTarget(1, "甲", write_video(tmp_path / "a.mp4"))]
+    problems = validate_collection(template, targets, job_title="任务")
+    assert len(problems) == 1
+    assert "{date}" in problems[0] and "占位符" in problems[0]
+
+
+# ================================================================ 整批编排
+def batch(tmp_path) -> tuple[list[UploadTarget], list[dict]]:
+    titles = ["演示标题一", "演示标题二", "演示标题三"]
+    targets = [
+        UploadTarget(index=i, title=title, video_path=write_video(tmp_path / f"v{i}.mp4"), source_url=f"https://youtu.be/{i}")
+        for i, title in enumerate(titles, start=1)
+    ]
+    archives = [archive(aid=100 + i, bvid=f"BV{i}00", title=title, state=0) for i, title in enumerate(titles, start=1)]
+    return targets, archives
+
+
+def run_batch(context, targets, *, comment=None, gap_seconds=DEFAULT_COLLECTION_GAP_SECONDS, on_upload=None) -> CollectionResult:
+    return run_collection(
+        context,
+        job_title="演示合集",
+        template=default_collection_template("演示合集"),
+        targets=targets,
+        season_title="演示合集",
+        season_desc="合集说明",
+        gap_seconds=gap_seconds,
+        comment=comment,
+        on_upload=on_upload,
+    )
+
+
+def test_run_collection_waits_between_items_but_not_after_the_last(tmp_path):
+    """条间间隔是抗 601 频控的唯一手段；最后一条之后再等只是白等。"""
+    targets, archives = batch(tmp_path)
+    sleeper = RecordingSleeper()
+    transport = FakeBiliTransport(archives=archives)
+    context = make_context(transport, runner=command_runner(), tmp_path=tmp_path, sleeper=sleeper, verify_delay=0.0)
+    run_batch(context, targets, gap_seconds=20.0)
+    assert sleeper.waits == [20.0, 20.0]
+
+
+def test_run_collection_can_run_without_any_gap(tmp_path):
+    targets, archives = batch(tmp_path)
+    sleeper = RecordingSleeper()
+    context = make_context(
+        FakeBiliTransport(archives=archives), runner=command_runner(), tmp_path=tmp_path, sleeper=sleeper, verify_delay=0.0
+    )
+    run_batch(context, targets, gap_seconds=0.0)
+    assert sleeper.waits == []
+
+
+def test_run_collection_keeps_going_after_a_single_failure(tmp_path):
+    """一只坏鸡蛋不该毁掉整篮：一条视频坏了或一次频控，后面几十条仍要发出去。"""
+    targets, archives = batch(tmp_path)
+    runner = ScriptedRunner(
+        [
+            CommandResult(0, "APP接口投稿成功", ""),
+            CommandResult(1, "error: not logged in", ""),
+            CommandResult(0, "APP接口投稿成功", ""),
+        ]
+    )
+    result = run_batch(make_context(FakeBiliTransport(archives=archives), runner=runner, tmp_path=tmp_path), targets, gap_seconds=0.0)
+    assert [item.status for item in result.uploads] == [
+        BiliUploadStatus.published.value,
+        BiliUploadStatus.failed.value,
+        BiliUploadStatus.published.value,
+    ]
+    assert len(result.uploads) == 3
+
+
+def test_run_collection_groups_only_the_ready_items(tmp_path):
+    """第 2 条登录失效 → 缺 aid/cid，只能看、不能进合集；归集 2 条而不是 3 条。"""
+    targets, archives = batch(tmp_path)
+    runner = ScriptedRunner(
+        [
+            CommandResult(0, "APP接口投稿成功", ""),
+            CommandResult(1, "error: not logged in", ""),
+            CommandResult(0, "APP接口投稿成功", ""),
+        ]
+    )
+    transport = FakeBiliTransport(archives=archives)
+    result = run_batch(make_context(transport, runner=runner, tmp_path=tmp_path), targets, gap_seconds=0.0)
+    assert result.season.status == BiliSeasonStatus.grouped.value
+    episodes = transport.calls[-1]["json_body"]["episodes"]
+    assert [item["aid"] for item in episodes] == [101, 103]
+
+
+def test_run_collection_adds_the_season_after_the_last_upload(tmp_path):
+    """归集是整批的最后一步：加条目的请求必须排在全部稿件之后。"""
+    targets, archives = batch(tmp_path)
+    transport = FakeBiliTransport(archives=archives)
+    run_batch(make_context(transport, runner=command_runner(), tmp_path=tmp_path), targets, gap_seconds=0.0)
+    assert transport.urls[-1].endswith("/season/section/episodes/add")
+    assert transport.urls[-2].endswith("/season/add")
+
+
+def test_run_collection_reports_pending_when_everything_failed(tmp_path):
+    """全军覆没时**不许**去建一个空合集。"""
+    targets, _archives = batch(tmp_path)
+    transport = FakeBiliTransport(archives=[])
+    runner = command_runner(returncode=1, stdout="no space left on device", lines=("no space left on device",))
+    result = run_batch(make_context(transport, runner=runner, tmp_path=tmp_path), targets, gap_seconds=0.0)
+    assert [item.status for item in result.uploads] == [BiliUploadStatus.failed.value] * 3
+    assert result.season.status == BiliSeasonStatus.pending.value
+    assert not any(url.endswith("/season/add") for url in transport.urls)
+
+
+def test_run_collection_notifies_after_each_item(tmp_path):
+    """逐条落账靠这个回调；缺一条就等于界面上有一条永远停在「上传中」。"""
+    targets, archives = batch(tmp_path)
+    seen: list[tuple[int, str]] = []
+    run_batch(
+        make_context(FakeBiliTransport(archives=archives), runner=command_runner(), tmp_path=tmp_path),
+        targets,
+        gap_seconds=0.0,
+        on_upload=lambda item: seen.append((item.index, item.status)),
+    )
+    assert seen == [(1, "published"), (2, "published"), (3, "published")]
+
+
+def test_run_collection_forwards_the_comment_to_every_item(tmp_path):
+    targets, archives = batch(tmp_path)
+    transport = FakeBiliTransport(archives=archives)
+    run_batch(
+        make_context(transport, runner=command_runner(), tmp_path=tmp_path),
+        targets,
+        gap_seconds=0.0,
+        comment="自动生成的置顶评论",
+    )
+    assert transport.called("/x/v2/reply/add") == 3
+    assert all(call["message"] == "自动生成的置顶评论" for call in transport.comments)
+
+
+def test_run_collection_uses_the_rendered_titles_when_verifying(tmp_path):
+    """对账匹配用的是**渲染后**的标题，不是视频文件名 —— 两者在合集里通常不同。"""
+    targets = [UploadTarget(1, "原标题", write_video(tmp_path / "a.mp4"))]
+    transport = FakeBiliTransport(archives=[archive(title="01. 原标题", state=0)])
+    template = MetadataTemplate(title_template="{index}. {title}", desc_template="{title}", tags="标签", tid="122")
+    result = run_collection(
+        make_context(transport, runner=command_runner(), tmp_path=tmp_path),
+        job_title="合集",
+        template=template,
+        targets=targets,
+        season_title="合集",
+        season_desc="说明",
+        gap_seconds=0.0,
+    )
+    assert result.uploads[0].status == BiliUploadStatus.published.value
+
+
+# ================================================================ 输出尾部
+def test_tail_text_keeps_only_the_last_lines():
+    text = "\n".join(f"line {i}" for i in range(LOG_TAIL_LINES + 30))
+    rows = tail_text(text).splitlines()
+    assert len(rows) == LOG_TAIL_LINES
+    assert rows[-1] == f"line {LOG_TAIL_LINES + 29}"
+
+
+def test_tail_text_drops_blank_lines():
+    assert tail_text("a\n\n\n   \nb") == "a\nb"
+
+
+def test_tail_text_returns_empty_for_empty_output():
+    """空输出返回空串（而不是 None），让落库侧统一按空值处理。"""
+    assert tail_text("") == ""
+    assert tail_text("   \n  ") == ""
+
+
+def test_tail_text_scrubs_credentials():
+    """日志尾部会被写进数据库并显示在界面上，凭据不能跟着进去。"""
+    text = tail_text("Cookie: SESSDATA=abcdef123456; bili_jct=deadbeef")
+    assert "abcdef123456" not in text
+    assert "deadbeef" not in text
+    assert "<redacted>" in text
+
+
+def test_prepare_cover_returns_none_without_ffmpeg_or_a_cover_dir(tmp_path):
+    video = write_video(tmp_path / "a.mp4")
+    context = make_context(FakeBiliTransport(), runner=command_runner(), tmp_path=tmp_path)
+    assert prepare_cover(context, key="k", video_path=video) is None
+
+
+def test_prepare_cover_returns_none_for_a_video_that_is_not_there(tmp_path):
+    context = make_context(
+        FakeBiliTransport(), runner=command_runner(), tmp_path=tmp_path, ffmpeg_path="ffmpeg", cover_dir=tmp_path / "covers"
+    )
+    assert prepare_cover(context, key="k", video_path=tmp_path / "none.mp4") is None
+
+
+def test_prepare_cover_writes_into_the_cover_dir_named_by_the_key(tmp_path):
+    video = write_video(tmp_path / "a.mp4")
+    context = make_context(
+        FakeBiliTransport(),
+        runner=RecordingCommandRunner(),
+        tmp_path=tmp_path,
+        ffmpeg_path="ffmpeg",
+        cover_dir=tmp_path / "covers",
+    )
+    assert prepare_cover(context, key="abc", video_path=video) == tmp_path / "covers" / "abc.jpg"
+
+
+def test_season_outcome_defaults_to_pending():
+    """`CollectionResult` 的默认赛季是「等待归集」，不是「已归集」。"""
+    assert CollectionResult().season.status == BiliSeasonStatus.pending.value
+    assert SeasonOutcome(status=BiliSeasonStatus.failed.value).season_id is None

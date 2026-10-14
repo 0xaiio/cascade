@@ -15,6 +15,11 @@ package "Frontend" {
   [HelpPopover.tsx\nnon-modal help overlay] as HelpPopover
   [SearchableLanguageSelect.tsx] as LanguageSelect
   [Toggle.tsx / StatusPill.tsx\nprimitives] as Primitives
+  [BiliIcon.tsx\nbilibili logo] as BiliIcon
+  [BiliUploadButton.tsx\njob row entry] as BiliButton
+  [BiliUploadDialog.tsx\nsingle + collection form] as BiliDialog
+  [BiliJobStatus.tsx\nbadge + detail rows] as BiliJobStatus
+  [BiliLoginSection.tsx\npreflight + login] as BiliLogin
   [api.ts\nHTTP boundary] as ApiClient
   [types.ts] as Types
   [quality.ts] as Quality
@@ -37,6 +42,8 @@ package "Backend / orchestration" {
   [job_manager.py\nqueue + workers] as Manager
   [job_read_model.py\nAPI projection] as ReadModel
   [events.py\nEventBroker (SSE)] as Broker
+  [bili_manager.py\nupload queue, single worker] as BiliManager
+  [bili_read_model.py\nbadge aggregation] as BiliReadModel
 }
 
 package "Backend / download" {
@@ -46,6 +53,16 @@ package "Backend / download" {
   [browser_cookies.py\ncookie import] as Cookies
   [system_open.py\nplayer / folder opener] as SystemOpen
   [output_paths.py\noutput discovery] as OutputPaths
+}
+
+package "Backend / bili upload" {
+  [bili_upload.py\nsingle upload flow] as BiliUpload
+  [bili_bin.py\nbiliup boundary] as BiliBin
+  [bili_api.py\nreconcile, season, reply] as BiliApi
+  [bili_auth.py\nqr login + cookie file] as BiliAuth
+  [bili_meta.py\nmetadata + limits] as BiliMeta
+  [bili_policy.py\nmessages + badges] as BiliPolicy
+  [bili_http.py\nHTTP seam] as BiliHttp
 }
 
 package "Backend / progress" {
@@ -82,6 +99,7 @@ App --> ApiClient
 App --> CookieLock
 App --> Quality
 App --> Subtitles
+App --> BiliDialog
 UrlAnalyzer --> CookieSection
 UrlAnalyzer --> CookieLock
 AnalysisPanel --> Formatting
@@ -91,8 +109,14 @@ OptionsPanel --> Primitives
 OptionsPanel --> Subtitles
 SettingsPanel --> ProxySection
 SettingsPanel --> ApiClient
+SettingsPanel --> BiliLogin
 Queue --> Formatting
 Queue --> Quality
+Queue --> BiliButton
+Queue --> BiliJobStatus
+BiliButton --> BiliIcon
+BiliDialog --> BiliIcon
+BiliLogin --> ApiClient
 ProxySection --> HelpPopover
 CookieSection --> HelpPopover
 ApiClient --> Types
@@ -111,15 +135,18 @@ Main --> CookieHealth
 Main --> Connectivity
 Main --> RuntimeEnv
 Main --> LoggingSetup
+Main --> BiliManager
 Routers --> ApiCtx
 Routers --> ApiSupport
 Routers --> JobArtifacts
 Routers --> Manager
 Routers --> Service
 Routers --> Broker
+Routers --> BiliManager
 ApiCtx --> Manager
 ApiCtx --> Service
 ApiCtx --> DB
+ApiCtx --> BiliManager
 ApiSupport --> ReadModel
 ApiSupport --> Models
 ApiSupport --> Service
@@ -149,6 +176,33 @@ ReadModel --> Models
 Service --> Formats
 Service --> Cookies
 Service --> StallGuard
+BiliManager --> BiliUpload
+BiliManager --> BiliApi
+BiliManager --> BiliAuth
+BiliManager --> BiliBin
+BiliManager --> BiliHttp
+BiliManager --> BiliMeta
+BiliManager --> BiliPolicy
+BiliManager --> BiliReadModel
+BiliManager --> Service
+BiliManager --> OutputPaths
+BiliManager --> Broker
+BiliManager --> Models
+BiliReadModel --> BiliMeta
+BiliReadModel --> BiliPolicy
+BiliReadModel --> Models
+BiliUpload --> BiliApi
+BiliUpload --> BiliBin
+BiliUpload --> BiliHttp
+BiliUpload --> BiliMeta
+BiliUpload --> BiliPolicy
+BiliUpload --> Models
+BiliBin --> BiliMeta
+BiliBin --> BiliPolicy
+BiliApi --> BiliAuth
+BiliApi --> BiliHttp
+BiliAuth --> BiliHttp
+BiliPolicy --> Models
 DB --> Models
 Broker --> Main : event stream
 @enduml

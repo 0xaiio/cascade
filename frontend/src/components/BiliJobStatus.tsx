@@ -1,0 +1,85 @@
+import { AlertTriangle, ExternalLink, RotateCcw } from "lucide-react";
+import type { BiliJobUploads, BiliUpload } from "../types";
+
+/**
+ * 任务卡片里的 B站 上传明细与「下一步」入口。
+ *
+ * 只在**有话说**的时候渲染一行：稿件的失败原因 + 服务端给的下一步，以及合集归集的结论。
+ * 没有记录、也没有任何要点开的东西时，这里什么都不显示 —— 任务卡片已经很密，不堆装饰。
+ *
+ * 两个刻意的做法：
+ *
+ * 1. **重试按钮只在「重试真的有意义」时出现**：`failed`/`rejected`（重新投稿）与
+ *    `unverified`（只重新核对，不重投）。已成功的条目不给重试按钮 —— 服务端也会把它挡成
+ *    「什么都没做」，但按钮摆在那就是在暗示用户去点。
+ * 2. **「待核对」与「失败」用不同的措辞**：前者是「我们还不知道」，后者是「这一步没成」。
+ *    把两者都说成失败，用户会去重投一条**已经投上去**的稿件。
+ */
+export function BiliJobStatus({
+  uploads,
+  onRetryUpload,
+  onRetrySeason,
+  onOpenVideoPage
+}: {
+  uploads: BiliJobUploads;
+  onRetryUpload: (uploadId: string) => void;
+  onRetrySeason: (seasonRecordId: string) => void;
+  onOpenVideoPage: (url: string) => void;
+}) {
+  const season = uploads.season;
+  const notable = uploads.uploads.filter((upload) => upload.error || upload.video_url);
+  if (!season && !notable.length) return null;
+
+  return (
+    <div className="bili-job-status">
+      {season && (
+        <div className={`bili-status-line ${season.status === "failed" ? "is-bad" : ""}`}>
+          <span className="bili-status-label">合集：{season.status_text}</span>
+          {season.error && <span className="bili-status-detail">{season.error}</span>}
+          {season.advice && <span className="bili-status-advice">{season.advice}</span>}
+          {(season.status === "failed" || season.status === "pending") && (
+            <button className="ghost-button bili-retry" type="button" onClick={() => onRetrySeason(season.id)}>
+              <RotateCcw size={15} />
+              重试归集
+            </button>
+          )}
+        </div>
+      )}
+      {notable.map((upload) => (
+        <div
+          key={upload.id}
+          className={`bili-status-line ${upload.status === "failed" || upload.status === "rejected" ? "is-bad" : ""}`}
+        >
+          <span className="bili-status-label">
+            {upload.index}. {upload.title} · {upload.status_text}
+          </span>
+          {upload.video_url && (
+            <button
+              className="bili-link"
+              type="button"
+              onClick={() => onOpenVideoPage(upload.video_url as string)}
+              aria-label={`在 B 站打开 ${upload.title}`}
+            >
+              <ExternalLink size={14} />
+              在 B 站查看
+            </button>
+          )}
+          {upload.error && <span className="bili-status-detail">{upload.error}</span>}
+          {upload.advice && <span className="bili-status-advice">{upload.advice}</span>}
+          {retryable(upload) && (
+            <button className="ghost-button bili-retry" type="button" onClick={() => onRetryUpload(upload.id)}>
+              <RotateCcw size={15} />
+              {upload.status === "unverified" ? "重新核对" : "重试"}
+            </button>
+          )}
+          {upload.status === "unverified" && <AlertTriangle size={14} className="bili-warn-icon" />}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** 哪些状态值得给一个重试按钮。**已成功的不在其中**（见组件文档第 1 条）。 */
+function retryable(upload: BiliUpload): boolean {
+  return ["failed", "rejected", "unverified"].includes(upload.status);
+}

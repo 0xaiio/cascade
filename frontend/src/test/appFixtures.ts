@@ -1,4 +1,14 @@
-﻿import type { CookieHealth, Diagnostics, Job, ProxyTestResult, Settings } from "../types";
+﻿import type {
+  BiliJobUploads,
+  BiliPrefill,
+  BiliStatus,
+  BiliUpload,
+  CookieHealth,
+  Diagnostics,
+  Job,
+  ProxyTestResult,
+  Settings
+} from "../types";
 
 export const analyzePayload = {
   url: "https://youtube.com/playlist?list=abc",
@@ -312,4 +322,190 @@ export const cookieHealthGoogleOnlyPayload: CookieHealth = {
     "这是「只导出到 .google.com」的典型症状：SID 虽然存在，但 .google.com 的 cookie 不会发给 youtube.com",
     "用 python scripts/export_cookies_via_cdp.py 重新导出（它会校验域名，拿不到就拒绝写文件）"
   ]
+};
+
+/* ------------------------------------------------------------------ B站 上传 */
+
+/**
+ * 出厂 B站 体检结论：**投稿工具在、ffmpeg 在、但没登录**。
+ *
+ * 刻意让 `ready=false`：这样绝大多数用例里设置面板的 B站 区只多出一张体检清单，
+ * 不会凭空弹出二维码或红字，既有断言不受影响。要测「已登录」的用例自己覆盖 `login`。
+ */
+export const biliStatusPayload: BiliStatus = {
+  ready: false,
+  biliup: {
+    found: true,
+    path: String.raw`C:\Users\user\AppData\Local\Microsoft\WinGet\Links\biliup.EXE`,
+    version: "biliup 0.2.4",
+    problem: null,
+    advice: null
+  },
+  ffmpeg: { found: true, path: null, version: null, problem: null, advice: null },
+  login: {
+    present: false,
+    cookie_count: 0,
+    names: [],
+    missing_required: ["SESSDATA", "bili_jct", "DedeUserID"],
+    missing_recommended: [],
+    tracked_by_git: false,
+    account: null,
+    account_checked: false
+  },
+  blockers: [
+    {
+      message: "还没有登录 B站",
+      advice: "在下面点「扫码登录」，或者导入一份已有的 cookies.json。"
+    }
+  ],
+  partitions: [
+    { tid: "122", label: "野生技术协会" },
+    { tid: "171", label: "电子竞技" }
+  ],
+  limits: { title: 80, desc: 250, tags: 200, tag_count: 10, tag_item: 20, comment: 1000 },
+  gap_seconds: 20,
+  uploads_in_flight: 0
+};
+
+/** 已登录（账号名已取到、没有 blocker）——测登录态显示与提交前置条件时用。 */
+export const biliStatusLoggedInPayload: BiliStatus = {
+  ...biliStatusPayload,
+  ready: true,
+  login: {
+    present: true,
+    cookie_count: 9,
+    names: ["SESSDATA", "bili_jct", "DedeUserID"],
+    missing_required: [],
+    missing_recommended: ["buvid3"],
+    tracked_by_git: false,
+    account: { mid: 12345, name: "长沙的 HX" },
+    account_checked: true
+  },
+  blockers: []
+};
+
+/** 单视频的预填表单。`limits` 与后端的硬限同值 —— 界面的字数上限完全来自这一份。 */
+export const biliPrefillSinglePayload: BiliPrefill = {
+  job_id: "job-format-failed",
+  job_title: "Unsupported resolution",
+  kind: "single",
+  comment: "本视频由个人工作流同步上传，欢迎在评论区交流。",
+  metadata: { title: "Unsupported resolution", desc: "简介", tags: "编程,数据库", tid: "122" },
+  template: null,
+  items: [
+    {
+      index: 1,
+      item_id: "item-format-failed",
+      source_title: "Unsupported resolution",
+      source_url: "https://youtu.be/format",
+      title: "Unsupported resolution",
+      desc: "简介",
+      tags: "编程,数据库",
+      ready: true
+    }
+  ],
+  problems: [],
+  partitions: biliStatusPayload.partitions,
+  limits: biliStatusPayload.limits,
+  make_cover: true,
+  make_comment: true,
+  season_desc: ""
+};
+
+/** 合集的预填模板。第 2 条刻意 `ready: false`，用来验证「没下载好的条目会被挡下」。 */
+export const biliPrefillCollectionPayload: BiliPrefill = {
+  job_id: "job-playlist",
+  job_title: "Playlist batch",
+  kind: "collection",
+  comment: "本视频由个人工作流同步上传，欢迎在评论区交流。",
+  metadata: null,
+  template: { title: "{job} · 第 {index}/{count} 集", desc: "{title}\n原视频：{source}", tags: "编程", tid: "122" },
+  items: [
+    {
+      index: 1,
+      item_id: "item-playlist-1",
+      source_title: "Part one",
+      source_url: "https://youtu.be/one",
+      title: "Playlist batch · 第 01/2 集",
+      desc: "Part one\n原视频：https://youtu.be/one",
+      tags: "编程,Part",
+      ready: true
+    },
+    {
+      index: 2,
+      item_id: "item-playlist-2",
+      source_title: "Part two",
+      source_url: "https://youtu.be/two",
+      title: "Playlist batch · 第 02/2 集",
+      desc: "Part two\n原视频：https://youtu.be/two",
+      tags: "编程,Part",
+      ready: false
+    }
+  ],
+  problems: [],
+  partitions: biliStatusPayload.partitions,
+  limits: biliStatusPayload.limits,
+  make_cover: true,
+  make_comment: true,
+  season_desc: "Playlist batch（共 2 个视频，由本机下载工作流自动上传）"
+};
+
+/** 一条已完成的稿件。`badge` 由后端派生，前端只映射颜色与文案。 */
+export const biliUploadPayload: BiliUpload = {
+  id: "bili-1",
+  job_id: "job-format-failed",
+  item_id: "item-format-failed",
+  index: 1,
+  title: "Unsupported resolution",
+  desc: "简介",
+  tags: "编程,数据库",
+  tid: "122",
+  tid_label: "野生技术协会",
+  status: "published",
+  status_text: "已上传",
+  badge: "uploaded",
+  badge_text: "已上传",
+  badge_tone: "ok",
+  progress: 1,
+  bvid: "BV1xx411c7mD",
+  aid: 111,
+  video_url: "https://www.bilibili.com/video/BV1xx411c7mD",
+  cover_path: null,
+  verified_state: "published",
+  verified_note: null,
+  error: null,
+  advice: null,
+  attempt: 1,
+  created_at: "2026-10-05T10:00:00Z",
+  updated_at: "2026-10-05T10:00:30Z",
+  started_at: "2026-10-05T10:00:00Z",
+  finished_at: "2026-10-05T10:00:30Z",
+  elapsed_seconds: 30
+};
+
+/** 一条失败稿件：有 `error` 与 `advice`，因此任务卡片里会渲染出明细与重试按钮。 */
+export const biliUploadFailedPayload: BiliUpload = {
+  ...biliUploadPayload,
+  id: "bili-2",
+  status: "failed",
+  status_text: "上传失败",
+  badge: "failed",
+  badge_text: "上传失败",
+  badge_tone: "bad",
+  bvid: null,
+  aid: null,
+  video_url: null,
+  verified_state: null,
+  error: "上传中断：投稿工具返回了错误（退出码 1）",
+  advice: "先确认网络与登录状态，再点「重试」。"
+};
+
+/** 任务级的 B站 记录集合（`GET /api/bilibili/uploads` 与 summary 的元素同形）。 */
+export const biliJobUploadsPayload: BiliJobUploads = {
+  job_id: "job-format-failed",
+  badge: "uploaded",
+  badge_text: "已上传",
+  badge_tone: "ok",
+  uploads: [biliUploadPayload],
+  season: null
 };

@@ -1,6 +1,15 @@
 import type {
   AnalyzeResponse,
   ApiErrorDetail,
+  BiliJobUploads,
+  BiliJobUploadsSummary,
+  BiliLoginPoll,
+  BiliMetadata,
+  BiliPrefill,
+  BiliQrcode,
+  BiliRetry,
+  BiliSeasonRetry,
+  BiliStatus,
   CookieHealth,
   CookieStatus,
   DeleteJobItemsResponse,
@@ -174,6 +183,102 @@ export function refreshRuntimeDiagnostics(): Promise<Diagnostics> {
 
 export function getDiagnostics(): Promise<Diagnostics> {
   return request<Diagnostics>("/api/diagnostics");
+}
+
+// ---------------------------------------------------------------- B站 上传
+/**
+ * B站 上传的环境体检。
+ *
+ * `probeAccount=false` 只做离线体检（不请求 B站）：没有网络时也能看出「工具装没装、登录文件在不在」。
+ */
+export function getBiliStatus(probeAccount = true): Promise<BiliStatus> {
+  return request<BiliStatus>(`/api/bilibili/status?probe_account=${probeAccount ? "true" : "false"}`);
+}
+
+/** 修复 WinGet `Links` 下那个 0 字节的 `biliup.exe` 空壳，然后返回重新体检的结论。 */
+export function repairBiliTool(): Promise<BiliStatus> {
+  return request<BiliStatus>("/api/bilibili/tools/repair", { method: "POST" });
+}
+
+/** 生成扫码登录二维码。返回 **SVG 文本**（内联渲染），不是位图。 */
+export function createBiliQrcode(): Promise<BiliQrcode> {
+  return request<BiliQrcode>("/api/bilibili/login/qrcode", { method: "POST" });
+}
+
+export function pollBiliLogin(qrcodeKey: string): Promise<BiliLoginPoll> {
+  return request<BiliLoginPoll>(`/api/bilibili/login/poll?qrcode_key=${encodeURIComponent(qrcodeKey)}`);
+}
+
+/** 导入一份已有的登录文件（`biliup` 的 LoginInfo 或 Netscape cookies.txt 都能认）。 */
+export function uploadBiliCookies(file: File): Promise<BiliStatus> {
+  const data = new FormData();
+  data.append("file", file);
+  return request<BiliStatus>("/api/bilibili/cookies", { method: "POST", body: data });
+}
+
+export function deleteBiliCookies(): Promise<BiliStatus> {
+  return request<BiliStatus>("/api/bilibili/cookies", { method: "DELETE" });
+}
+
+/** 预填上传表单：单视频给一组值，合集给「模板 + 逐条预览 + 超限定位」。 */
+export function getBiliPrefill(jobId: string, itemId?: string | null): Promise<BiliPrefill> {
+  const query = itemId ? `&item_id=${encodeURIComponent(itemId)}` : "";
+  return request<BiliPrefill>(`/api/bilibili/prefill?job_id=${encodeURIComponent(jobId)}${query}`);
+}
+
+/** 所有有 B站 记录的任务的徽标。任务中心一次拿全，避免「N 个任务 = N 个请求」。 */
+export function getBiliUploadsSummary(): Promise<BiliJobUploadsSummary> {
+  return request<BiliJobUploadsSummary>("/api/bilibili/uploads/summary");
+}
+
+export function getBiliJobUploads(jobId: string): Promise<BiliJobUploads> {
+  return request<BiliJobUploads>(`/api/bilibili/uploads?job_id=${encodeURIComponent(jobId)}`);
+}
+
+export function createBiliUpload(
+  jobId: string,
+  itemId: string | null,
+  metadata: BiliMetadata,
+  makeCover: boolean,
+  comment: string
+): Promise<BiliJobUploads> {
+  return request<BiliJobUploads>("/api/bilibili/uploads", {
+    method: "POST",
+    body: JSON.stringify({ job_id: jobId, item_id: itemId, metadata, make_cover: makeCover, comment })
+  });
+}
+
+export function createBiliCollection(
+  jobId: string,
+  template: BiliMetadata,
+  seasonTitle: string,
+  seasonDesc: string,
+  makeCover: boolean,
+  comment: string
+): Promise<BiliJobUploads> {
+  return request<BiliJobUploads>("/api/bilibili/collections", {
+    method: "POST",
+    body: JSON.stringify({
+      job_id: jobId,
+      template,
+      season_title: seasonTitle,
+      season_desc: seasonDesc,
+      make_cover: makeCover,
+      comment
+    })
+  });
+}
+
+/** 重试一条稿件。已成功的条目不会被重投（服务端保证），返回 `action` 说明实际做了什么。 */
+export function retryBiliUpload(uploadId: string): Promise<BiliRetry> {
+  return request<BiliRetry>(`/api/bilibili/uploads/${encodeURIComponent(uploadId)}/retry`, { method: "POST" });
+}
+
+/** 重试合集归集。已有合集时只补加视频，不会重复建合集。 */
+export function retryBiliSeason(seasonRecordId: string): Promise<BiliSeasonRetry> {
+  return request<BiliSeasonRetry>(`/api/bilibili/collections/${encodeURIComponent(seasonRecordId)}/group`, {
+    method: "POST"
+  });
 }
 
 function restartRequest(resolution?: string): RequestInit {

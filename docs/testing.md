@@ -12,13 +12,30 @@
 python -m compileall backend\app
 ```
 
-后端测试（当前基线：**354 passed**）：
+后端测试（当前基线：**774 passed**）：
 
 ```powershell
 python -m pytest backend\tests -q
 ```
 
-前端测试和构建（当前基线：**69 passed** + `tsc && vite build` 通过）：
+> **在 WorkBuddy 沙箱里请分块跑。** 本仓库没有 `pytest.ini`，所以 pytest 会把临时目录建在系统 Temp、收尾时再清理；
+> 沙箱的批量删除守卫是**累积计数**的（一轮命令内累计到阈值就整条拒掉），于是 774 个用例放在一个进程里跑会在中途被拦下。
+> 现象很好认：**大量 `at setup of ...` 的 error，而 `FAILED` 一个都没有** —— 那是环境问题，不是代码问题。
+>
+> 按下面的分块跑（每块 150～200 项），六块相加应恰好等于 774：
+>
+> ```powershell
+> python -m pytest backend\tests\test_bili_policy.py backend\tests\test_bili_meta.py backend\tests\test_bili_auth.py backend\tests\test_bili_bin.py backend\tests\test_bili_read_model.py -q -p no:cacheprovider --basetemp=tmp_pytest\a   # 197
+> python -m pytest backend\tests\test_bili_api.py backend\tests\test_bili_upload.py backend\tests\test_api_bilibili.py -q -p no:cacheprovider --basetemp=tmp_pytest\b                                                            # 165
+> python -m pytest backend\tests\test_bili_manager.py -q -p no:cacheprovider --basetemp=tmp_pytest\c                                                                                                                   #  58
+> python -m pytest backend\tests\test_ytdlp_service.py -q -p no:cacheprovider --basetemp=tmp_pytest\d                                                                                                                  #  73
+> python -m pytest backend\tests\test_api.py backend\tests\test_resolution_decisions.py backend\tests\test_output_paths.py backend\tests\test_safe_delete.py -q -p no:cacheprovider --basetemp=tmp_pytest\e                # 146
+> python -m pytest backend\tests\test_dev_server.py backend\tests\test_proxy.py backend\tests\test_cookie_health.py backend\tests\test_stall_guard.py backend\tests\test_error_advice.py backend\tests\test_connectivity.py backend\tests\test_download_progress.py backend\tests\test_runtime_env.py backend\tests\test_job_manager_finally.py backend\tests\test_finally_guards.py backend\tests\test_system_open.py backend\tests\test_logging_setup.py backend\tests\test_db.py backend\tests\test_paths.py backend\tests\test_transfer_stats.py backend\tests\test_progress_persist.py backend\tests\test_log_safety.py -q -p no:cacheprovider --basetemp=tmp_pytest\f   # 135
+> ```
+>
+> `--basetemp` 指向的目录**必须不存在**，否则 pytest 会先 `rmtree` 它、同样会触发守卫（`tmp_pytest\` 已在 `.gitignore` 里）。
+
+前端测试和构建（当前基线：**99 passed**，12 个文件；`tsc --noEmit` 与 `vite build` 通过）：
 
 ```powershell
 cd frontend
@@ -45,7 +62,7 @@ python scripts\check_doc_anchors.py          # 只报告，有漂移时退出码
 python scripts\check_doc_anchors.py --fix    # 能唯一确定符号的锚点直接重算
 ```
 
-它只改「标签就是符号名」的锚点；标签是文件名或散文的（例如 `[main.py](../backend/app/main.py#L117)`）会列进「待人工复核」。
+它只改「标签就是符号名」的锚点；标签是文件名或散文的（例如 `[main.py](../backend/app/main.py#L127)`）会列进「待人工复核」。
 
 首次执行前如尚未初始化文档工具，请先阅读 [文档写作与生成环境](documentation-workflow.md)。用例数会随功能变化，本文档记录的是当前基线值；改动测试后请同步更新这里。
 
@@ -98,7 +115,7 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 
 ## 后端测试范围
 
-后端测试位于 [backend/tests](../backend/tests/)（22 个 `test_*.py` + [fakes.py](../backend/tests/fakes.py)，当前 **354 passed**）：
+后端测试位于 [backend/tests](../backend/tests/)（31 个 `test_*.py` + [fakes.py](../backend/tests/fakes.py) / [bili_fakes.py](../backend/tests/bili_fakes.py)，当前 **774 passed**）：
 
 | 文件 | 重点 |
 | --- | --- |
@@ -125,12 +142,22 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 | [test_finally_guards.py](../backend/tests/test_finally_guards.py) | **守护测试**：扫源码禁止 `finally` 里出现 `return`；自带「违规能被抓到」「嵌套作用域里的 `return` 不算违规」两条自检。 |
 | [test_job_manager_finally.py](../backend/tests/test_job_manager_finally.py) | 行为层回归：条目被删除时收尾不再吞掉逃逸中的异常，崩溃的条目被判 `failed` 而不是永久停在 `running`（[008](../ai/bug-fix/008-return-in-finally-swallows-the-real-error.md)）。 |
 | [fakes.py](../backend/tests/fakes.py) | API 测试的 fake service 和辅助对象，其中 `RaisingUnselectableProbeService` 刻意让 `prepare_download` **抛异常**而不是返回 `is_selectable=False` —— 复现真实 yt-dlp 的行为，防止降级分支再次退化成死代码。 |
+| [test_bili_policy.py](../backend/tests/test_bili_policy.py) | 平台状态码 → 记录状态 → 徽标的折合（含「命令成功但查不到」必须落到待核对）、错误输出 → （结论 + 下一步）的分类，以及**每一档徽标都有配色与文案**（漏一档会让界面渲染 `undefined`）。 |
+| [test_bili_meta.py](../backend/tests/test_bili_meta.py) | 模板渲染**不用 `str.format`**（用户标题里的大括号必须原样保留）、未知占位符不静默吞掉、标签派生与收敛、分区词表、硬限逐项（标题/简介/标签总长/标签个数/单标签/评论）与**超限只报错不截断**。 |
+| [test_bili_auth.py](../backend/tests/test_bili_auth.py) | 登录文件四形态兼容、**凭据摘要只回名字与计数（不含值、不含前缀）**、是否被 git 跟踪、扫码挑战与轮询状态映射。 |
+| [test_bili_bin.py](../backend/tests/test_bili_bin.py) | 投稿工具探测：**0 字节空壳与「没装」必须分开**（`is_pe` 校验 PE 头）、三级查找优先级、空壳识别与修复；命令组装**必须含 `--submit web`**；进度解析单调不回退；`run_command` 超时会 kill 并写超时标记、回调抛异常不影响上传；抽封面四种降级。 |
+| [test_bili_api.py](../backend/tests/test_bili_api.py) | B站 客户端的请求形状与错误边界：member/web referer 与 `Content-Type`、`BiliApiError` 与 `HttpError` 不混用、对账的前缀匹配**两侧都归一空白**与退避次数、建合集（`csrf` 在 form）/ 归集（`csrf` 在 **query**、body 用 **camelCase**）、发并置顶评论的幂等（重复码 `12051` 后换时间序重找、只置顶失败时保住 `rpid`）。 |
+| [test_bili_upload.py](../backend/tests/test_bili_upload.py) | 单次上传的领域逻辑：状态折合、封面优先级、**对账查不到时是「待核对」不是「失败」且不重投**、日志尾部清洗凭据、评论（无 `aid` 或**只有 `aid` 没有 `cid`** 都不发、评论失败不污染稿件状态）、模板批量渲染与逐条校验、整批编排（条间等间隔、单条失败不中断、只归集已发布的、全军覆没时不建空合集）。 |
+| [test_bili_read_model.py](../backend/tests/test_bili_read_model.py) | 「多条记录 → 一档徽标」的**19 行真值表**参数化：8 成功 2 在跑 → 上传中、归集算在途、归集失败不等于全成功、全部待核对不报成功、被拒算失败；连同任务级/条目级投影、孤儿记录排最后、汇总按 job 排序。 |
+| [test_bili_manager.py](../backend/tests/test_bili_manager.py) | 队列与编排：重投复用同一行并作废旧 `bvid`/`aid`、五种前置条件各自报错、重试三分支（已发布→什么都不做 / 在途→什么都不做 / 待核对→**只重新核对且不发命令** / 失败→重新投稿）、重启收敛（`uploading` 与 `queued` 都折成可重试失败、幂等）、worker 崩溃可读且不带走 worker、体检（含 0 字节空壳与「没装」分开）、投稿间隔。 |
+| [test_api_bilibili.py](../backend/tests/test_api_bilibili.py) | 路由层：真 `BiliManager` + `TestClient` + 按数据库状态等完成（**不用队列空作完成信号**：worker 一 `get()` 走队列就空了，那时它还在跑）。覆盖体检 / 扫码（只有 `confirmed` 才落盘、`%2C` 解码）/ 导入清除 / 预填（单视频与合集、404、422）/ 读回 / 单视频与合集投稿（400 超限定位于第几条、409 列出未下载的、404）/ 重试与重试归集。 |
+| [bili_fakes.py](../backend/tests/bili_fakes.py) | B站 测试的共享替身：`FakeBiliTransport`（覆盖 10 个端点、记录 `calls`/`comments`/`topped`、未知 URL 直接断言失败）、`StubTransport`、脚本化 runner/sleeper、`write_video()`。**`UNSET` 哨兵**是必须的：用 `None` 兼作「没传参数」时，`account=None`（未登录）与 `video=None`（查不到稿件）都会被当成「用默认值」，那两条用例根本测不到目标分支、只会绿着过去。 |
 
 默认自动测试不依赖真实 YouTube 下载，避免网络、地区、cookies 和 YouTube 风控导致不稳定。
 
 ## 前端测试范围
 
-前端组件测试是对 `App` 的**集成测试**，按功能面拆成 `frontend/src/*.test.tsx` 多个文件：解析链接与下载选项、cookies 导入与校验、设置面板与代理检测、任务中心（控制/删除/展开、本地文件操作与链接、进度与详情呈现各一个）、清晰度降级、自检信息、帮助浮层、版面与文案不变式，以及只读样式源文的 `styles.test.ts`。
+前端组件测试是对 `App` 的**集成测试**，按功能面拆成 `frontend/src/*.test.tsx` 多个文件：解析链接与下载选项、cookies 导入与校验、设置面板与代理检测、任务中心（控制/删除/展开、本地文件操作与链接、进度与详情呈现各一个）、清晰度降级、自检信息、帮助浮层、**B站 上传（`bili-upload.test.tsx`，30 例）**、版面与文案不变式，以及只读样式源文的 `styles.test.ts`。当前 **12 个文件 / 99 passed**。
 
 跨文件共享的东西只有三处，都在 [frontend/src/test](../frontend/src/test/)：测试台 [appHarness.ts](../frontend/src/test/appHarness.ts)（后端 `fetch` 替身与前后置钩子）、夹具 [appFixtures.ts](../frontend/src/test/appFixtures.ts)、样式源文解析 [cssRules.ts](../frontend/src/test/cssRules.ts)。
 
@@ -152,6 +179,10 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 - cookies 校验：联网校验、离线体检、以及「域名不对，等于没配」与「google.com-only」两档结论的解释文案。
 - 辅助说明浮层：四个入口（获取方式 / 结论解读 / 常用端口 / 排查顺序）默认收起，悬停或点击可读，`Esc`、点击空白处、右上角 × 都能关闭，展开状态写入 `localStorage` 并在刷新后恢复。
 - 字幕语言标签：选中几种就**逐个列出**几种语言代码（不许改成「已选 N 项」式的 JS 侧截断 —— 标签太长时正确的解法是让它换行，见 [ai/ui/003](../ai/ui/003-language-trigger-label-overflows-the-page.md)）。
+- B站 上传入口：视频没下载好时按钮**禁用并给出原因**（单视频与合集两种措辞）、点开后用该任务的 `job_id`/`item_id` 去预填（合集传 `item_id=null`）、上传中禁用、徽标文案与配色完全照搬服务端给的值（前端不自己判「算不算已上传」）。
+- B站 上传表单：字段与**硬限数字**都来自 `prefill.limits`（前端不写死常量，否则会出现「界面说没超、提交回来 400」）；超限**只报错不截断**（输入框里仍是用户输入的完整内容）；提交的请求体就是用户在表单里填的；被拒（409）时表单**不关闭**、错误留在表单里；合集显示逐条预览且改模板即时重算、未就绪的条目按序号点名并挡住提交。
+- B站 稿件明细：失败给「重试」、待核对给「**重新核对**」（措辞必须分开，否则用户会去重投一条已经投上去的稿件）、已发布的条目**不给重试按钮**只给「在 B 站查看」、合集归集失败单独给「重试归集」。页顶「跑完了」的提示**只在徽标真的变化且落到终态时**才播报（首次拉到状态与没变化时都不能播报）。
+- B站 设置区：三项体检各自的措辞与下一步；**0 字节空壳**要显示成不通过并给出「修复」按钮（`found=true` 不等于能用）；登录文件只报数量、不显示值**也不列名字**；被 git 跟踪单独红字；半截登录文件报出缺哪几项；扫码二维码内联渲染、`confirmed` 之前不刷新体检、`scanned` 继续等待。
 - 样式源文不变式（**jsdom 不做布局，这是布局类缺陷唯一能进单测的部分**）：文件上传控件（`.file-button`）的基类不得声明纵向外边距与宽度（[ai/ui/001](../ai/ui/001-cookie-buttons-not-on-the-same-baseline.md)）；右栏（`.side-column`）必须声明 `overflow-wrap: anywhere`，且全表不得出现 `overflow-wrap: normal`（[ai/ui/002](../ai/ui/002-side-column-overflow-breaks-the-page.md)）；语言选择器标签（`.select-trigger span`）必须允许换行，且不得声明 `overflow:` 或 `text-overflow:`（「藏起来」不等于「放得下」，[ai/ui/003](../ai/ui/003-language-trigger-label-overflows-the-page.md)）。「两个按钮是否共线」「标签是否真的折了行」只能靠真实浏览器量，见 [ai/ui](../ai/ui/README.md)。
 
 ## 手动验收
@@ -185,6 +216,15 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 25. 把窗口宽度依次改成 1280 / 1366 / 1440 / 1520 / 1600，**页面底部不应出现横向滚动条**，右栏（下载选项 / 设置）应完整落在视口内。右栏是固定 390px 的网格轨道，里面任何一个「不能断行的长 token」（自检回显的 Windows 路径最典型）都会把整页撑宽 —— 这一条曾漏到 ≤1600px 时溢出 44px，见 [ai/ui/002](../ai/ui/002-side-column-overflow-breaks-the-page.md)。
 26. 解析一个有较多字幕轨道的视频，在「字幕语言」里多勾几种（12 种即可稳定复现）：标签应**就地折成多行**，选择器随之变高，页面**不得**出现横向滚动条，且标签里的语言代码**一个都不能少**（不允许被裁成省略号）。标签是 `已选 N 项：en, zh-Hans, …`、N 无上界，它曾经被 `white-space: nowrap` 锁成一行 → 不是被裁而是把整页顶宽，见 [ai/ui/003](../ai/ui/003-language-trigger-label-overflows-the-page.md)。
 
+修改 B站 上传时，另需：
+
+27. 设置面板的「B站 上传」区先看一次体检：没装投稿工具时，条目必须显示**为什么不行 + 该怎么做**（要么一条 `winget install …` 命令，要么一个按钮），只报「没找到」不算通过。用 `where.exe biliup` 确认本机的那个 `biliup.exe` **不是 0 字节**（`Get-Item … | Select Length`）；若是 0 字节，界面应显示成**不通过**并给出「修复」按钮（`found=true` 不代表能用）。
+28. 点「扫码登录」：二维码应是**内联 SVG** 且大小正常（服务端返回的 SVG 单位是**毫米**，前端必须显式覆盖宽高，否则会跟着宿主字号变形）。用手机扫码后先只扫不确认，状态应停在「已扫码，请在手机上确认」且**不刷新**体检；在手机上确认后才变成已登录并显示账号名。
+29. 用「导入 cookies.json」导入一份有效的登录文件：界面应只显示「登录文件里有 N 项凭据（只显示数量，不显示内容）」与账号名 —— **不出现任何凭据值、掩码前缀或名字列表**。故意把该文件纳入 git（`git add -f`）后重新体检，应出现一条红字说明它与 `git rm --cached` 的处理方式。
+30. 下载完一个单视频后点「上传到 B站」：表单的标题/分区/标签/简介应已预填，「N/80」这类计数的上限来自服务端。把标题改到超过 80 字，应就地报「标题超出 N 个字」、提交按钮变灰，且**输入框里仍是完整内容**（不截断）。提交后页顶出现「已开始上传《…》，跑完这里会变成「已上传」。」，任务行的按钮变成「上传中」。
+31. 等上传跑完再看那条记录：**确认按钮文案与徽标一致**（「已上传」/「待核对」/「上传失败」三档的措辞不同）。「待核对」必须给的是「重新核对」而不是「重试」，并且点它**不会**再向 B站 投一次稿（可在 `data/logs/app.log` 里确认没有第二次 `biliup` 调用）；「已上传」的条目不给任何重试按钮。去 B站 创作中心确认稿件列表里真的有了这条稿件。
+32. 用一个 2 条以上、**全部下载完**的 playlist 任务点「上传到 B站」：应打开合集表单（标题写的是「把整个合集上传到 B 站」），带占位符说明与逐条预览表；改模板标题后预览表**当场重算**。故意留一条没下载好，该行应标注「还没下载好」、底部按序号点名、提交按钮变灰。全部就绪后提交：应按模板逐条投稿，全部确认发布后自动归集，最终合集行显示「已提交归集（B站 需人工审核）」。若归集失败，任务卡片上应出现「重试归集」，重试**不会**重复建合集（B站 创作中心的合集列表里只有一条）。
+
 ## 高风险回归点
 
 - YouTube 页面或媒体流变化导致 `yt-dlp` 解析或下载参数失效。
@@ -194,13 +234,22 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 - 720p 自动降级底线失效。
 - 单视频失败原因被任务级聚合错误覆盖。
 - `throttledratelimit` 被重新默认打开，导致「每约 5 秒中断并重新 extract」的性能回退，见 [PLAN.md](../ai/perf/PLAN.md) §3.1。
-- 停滞看门狗的文案被改动后误命中 [is_media_stream_blocked_error](../backend/app/ytdlp_service.py#L670)，把停滞误分类成媒体流阻塞。
+- 停滞看门狗的文案被改动后误命中 [is_media_stream_blocked_error](../backend/app/ytdlp_service.py#L677)，把停滞误分类成媒体流阻塞。
 - aria2c 多连接在默认配置下被启用，推高 403 率。
 - Cookies 导入暴露敏感信息或擅自关闭浏览器。
 - JS 运行时探测退化成「只看文件是否存在」：那样「检测到 node 却解不出 n challenge」会重新变成不可诊断的状态。
 - 宿主环境变量净化被扩大化：只应摘掉会强加载外部脚本的 `NODE_OPTIONS`，而不是顺手清掉用户的其它环境变量。
 - 日志重新退回「只往 stderr 打」：`data/logs/app.log` 消失会让用户失去唯一的取证手段。
 - 「先试输入框里的地址」重新变成「先保存再试」：一个填错的端口会被落盘。
+- **把「命令返回码 0」当成「已发布」**：B站 的稿件列表有延迟，不看对账就会把一次未确认的投稿报成成功，用户便永远不会去核对。
+- **把「待核对」显示成失败**（或共用一个重试按钮）：用户会去重投一条已经投上去的稿件，平台上出现重复稿件。
+- **重试一条 `unverified` 的记录时真的重投**：正确行为是只重读平台列表、一条命令都不发。
+- **`biliup` 探测退化成「文件存在即可用」**：WinGet 的 0 字节空壳会被当成装好了，用户按报错字面重装也修不好；空壳与「没装」必须分开报。
+- **体检结论文案丢掉「下一步」**：只报「没找到投稿工具」等于把问题丢回给用户，这是本功能的验收口径。
+- **B站 凭据被回显**：API 或界面一旦输出凭据的值（哪怕是掩码前缀），它就会出现在截图与 bug 报告里。
+- **上传前不校验硬限、或超限时静默截断**：前者跑到一半才失败，后者让用户以为发出去的是完整内容。
+- **把合集归集失败当成整批失败**：稿件其实已经发布了，正确做法是让合集记录单独可重试，且重试不重复建合集。
+- **投稿间隔被去掉或并发上传**：会触发平台侧的账号级频控，且硬刷会把临时限流升级成账号风险。
 - README 与 `docs/` 重复，导致后续维护分叉。
 
 ## 文档验收

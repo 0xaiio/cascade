@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { Folder, Settings as SettingsIcon } from "lucide-react";
+import { BiliLoginSection } from "./BiliLoginSection";
 import { HelpPopover } from "./HelpPopover";
 import { ProxyPortsPopover, ProxySection } from "./ProxySection";
 import { selectDownloadDirectory, updateSettings } from "../api";
 import type { Settings } from "../types";
 
 /**
- * 设置面板：下载目录、并发、单视频并发下载数（aria2c）、代理（含连通性检测）、保存状态回显。
+ * 设置面板：下载目录、并发、单视频并发下载数（aria2c）、代理（含连通性检测）、B站 上传、保存状态回显。
  *
  * 面板持有一份 `draft`（输入过程中不落库），**失焦即保存**（`onBlur`），保存成功由
  * `onSettingsChange` 把权威值回灌。因此「先试后改」在输入框上是安全的：没失焦就不发请求。
@@ -20,6 +21,9 @@ import type { Settings } from "../types";
  *   （`YTDL_ARIA2C_ENABLED`，见 [config.py](../../../backend/app/config.py#L61)），而且
  *   `default_aria2c` 是 profile 链里的**第二个**（`default` 失败后才轮到它），
  *   所以「启用」不等于「每次下载都走」。这两条都写在说明浮层里，别从界面文案里删掉。
+ *
+ * B站 区（`BiliLoginSection`）是**自包含**的：它只管登录与体检，失败经 `onError` 走页顶提示条 ——
+ * 它自己的面板里已经有体检清单，再在面板里堆一条红字只会更乱。
  */
 
 /** 挂在这一项旁：它到底管什么、以及 aria2c 怎么查怎么开。 */
@@ -62,7 +66,16 @@ function Aria2cHelpPopover() {
   );
 }
 
-export function SettingsPanel({ settings, onSettingsChange }: { settings: Settings; onSettingsChange: (settings: Settings) => void }) {
+export function SettingsPanel({
+  settings,
+  onSettingsChange,
+  onError
+}: {
+  settings: Settings;
+  onSettingsChange: (settings: Settings) => void;
+  /** B站 区的失败提示。这里只负责上报，显示交给页面顶部的公共提示条（与其它错误同一个出口）。 */
+  onError: (message: string) => void;
+}) {
   const [draft, setDraft] = useState(settings);
   const [saveMessage, setSaveMessage] = useState("");
 
@@ -203,6 +216,7 @@ export function SettingsPanel({ settings, onSettingsChange }: { settings: Settin
         onDraftProxyChange={(value) => setDraft({ ...draft, proxy: value })}
         onSettingsChange={onSettingsChange}
       />
+      <BiliLoginSection onError={onError} />
       {saveMessage && <span className="settings-save-status">{saveMessage}</span>}
     </section>
   );

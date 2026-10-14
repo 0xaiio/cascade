@@ -1,6 +1,6 @@
 # YouTube Downloader
 
-YouTube Downloader 是一个本机单用户下载控制台：FastAPI 后端负责调用 `yt-dlp`、维护 SQLite 任务状态和推送下载进度，React/Vite 前端提供链接解析、下载选项和任务中心。
+YouTube Downloader 是一个本机单用户下载控制台：FastAPI 后端负责调用 `yt-dlp`、维护 SQLite 任务状态和推送下载进度，React/Vite 前端提供链接解析、下载选项和任务中心。下载完成后可以在任务行上把视频**上传到哔哩哔哩（B站）**：单视频走一张可改的预填表单，合集按模板批量生成投稿信息后逐个上传，并自动归入同一个合集。
 
 请只下载你拥有权利或已获得许可的内容。本项目不实现 DRM 绕过，也不面向公网部署或多用户权限场景。
 
@@ -52,8 +52,8 @@ init 脚本底层调用的就是 `python -m app`，其进阶参数（`--port` / 
 | 文档 | 用途 |
 | --- | --- |
 | [文档总入口](docs/index.md) | 按读者角色选择阅读路径。 |
-| [用户手册](docs/user-manual.md) | 启动入口、下载操作、代理与网络、cookies、自检与日志。 |
-| [排障手册](docs/troubleshooting.md) | 按「你看到的那句话」查该点哪里：代理、cookies、JS 运行时、端口占用、页面没变化与日志阅读。 |
+| [用户手册](docs/user-manual.md) | 启动入口、下载操作、代理与网络、cookies、上传到 B站、自检与日志。 |
+| [排障手册](docs/troubleshooting.md) | 按「你看到的那句话」查该点哪里：代理、cookies、JS 运行时、B站 上传、端口占用、页面没变化与日志阅读。 |
 | [需求分析](docs/requirements.md) | 项目目标、功能需求、非功能需求和边界。 |
 | [架构设计](docs/architecture.md) | 前后端、SQLite、yt-dlp、ffmpeg、SSE 和外部依赖关系。 |
 | [设计文档](docs/design.md) | 模块职责与依赖分层、运行时并发模型、关键数据流、扩展点和已知限制。 |
@@ -61,7 +61,7 @@ init 脚本底层调用的就是 `python -m app`，其进阶参数（`--port` / 
 | [开发文档](docs/development.md) | 环境准备、依赖安装、配置项、目录结构和运行命令。 |
 | [文档写作环境](docs/documentation-workflow.md) | 初始化文档工具、渲染 UML、检查本地链接和生成产物。 |
 | [API 文档](docs/api.md) | HTTP endpoint、请求响应模型、任务状态和诊断字段；配套机器可读规范见 [openapi.yaml](docs/openapi.yaml)。 |
-| [技术文档](docs/technical.md) | 清晰度/格式选择、降级策略、cookies、PO token 和稳定下载策略。 |
+| [技术文档](docs/technical.md) | 清晰度/格式选择、降级策略、cookies、PO token、稳定下载策略与 B站 投稿技术要点。 |
 | [实现文档](docs/implementation.md) | 核心模块职责、任务调度、进度聚合、读模型和数据库补列。 |
 | [测试文档](docs/testing.md) | 自动测试、手动验收和回归重点。 |
 | [维护文档](docs/maintenance.md) | 文档同步规则、变更 checklist 和排障流程。 |

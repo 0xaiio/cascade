@@ -194,6 +194,11 @@ export interface ApiErrorDetail {
   code?: string;
   browser?: string | null;
   message?: string;
+  /**
+   * 「下一步该怎么办」。B站 上传的前置条件失败（409）会带上它 ——
+   * 只报结论不给动作的提示在验收口径里算未完成，所以界面必须把它显示出来。
+   */
+  advice?: string | null;
   raw_detail?: string | null;
 }
 
@@ -203,4 +208,186 @@ export interface ResolutionFallback {
   reason: string | null;
   restart_resolution: string | null;
   message: string;
+}
+
+/** B站 上传的界面状态档位（后端派生，前端只映射颜色）。 */
+export type BiliBadge = "none" | "uploading" | "uploaded" | "unverified" | "partial" | "failed";
+export type BiliBadgeTone = "idle" | "busy" | "ok" | "warn" | "bad";
+
+/**
+ * 「结论 + 下一步」。本功能所有缺项/失败提示都是这个形状 ——
+ * 只报结论不给动作的提示在验收口径里算未完成。
+ */
+export interface BiliAdvice {
+  message: string;
+  advice: string;
+}
+
+export interface BiliPartition {
+  tid: string;
+  label: string;
+}
+
+export interface BiliAccount {
+  mid: number | null;
+  name: string;
+}
+
+export interface BiliTool {
+  found: boolean;
+  path: string | null;
+  version: string | null;
+  problem: string | null;
+  advice: string | null;
+}
+
+export interface BiliLogin {
+  present: boolean;
+  cookie_count: number;
+  names: string[];
+  missing_required: string[];
+  missing_recommended: string[];
+  tracked_by_git: boolean;
+  account: BiliAccount | null;
+  account_checked: boolean;
+}
+
+export interface BiliStatus {
+  ready: boolean;
+  biliup: BiliTool;
+  ffmpeg: BiliTool;
+  login: BiliLogin;
+  blockers: BiliAdvice[];
+  partitions: BiliPartition[];
+  limits: BiliLimits;
+  gap_seconds: number;
+  uploads_in_flight: number;
+}
+
+export interface BiliQrcode {
+  qrcode_key: string;
+  url: string;
+  svg: string | null;
+  note: string | null;
+  expires_in: number;
+}
+
+export interface BiliLoginPoll {
+  state: string;
+  message: string;
+  logged_in: boolean;
+  account: BiliAccount | null;
+}
+
+export interface BiliMetadata {
+  title: string;
+  desc: string;
+  tags: string;
+  tid: string;
+}
+
+export interface BiliLimits {
+  title: number;
+  desc: number;
+  tags: number;
+  tag_count: number;
+  tag_item: number;
+  comment: number;
+}
+
+export interface BiliPrefillItem {
+  index: number;
+  item_id: string | null;
+  source_title: string;
+  source_url: string;
+  title: string;
+  desc: string;
+  tags: string;
+  ready: boolean;
+}
+
+export interface BiliPrefill {
+  job_id: string;
+  job_title: string;
+  kind: "single" | "collection";
+  comment: string;
+  metadata: BiliMetadata | null;
+  template: BiliMetadata | null;
+  items: BiliPrefillItem[];
+  problems: string[];
+  partitions: BiliPartition[];
+  limits: BiliLimits;
+  make_cover: boolean;
+  make_comment: boolean;
+  /** 合集简介的默认值（单视频恒为空）。界面没有这个输入框，提交时原样回传。 */
+  season_desc: string;
+}
+
+export interface BiliUpload {
+  id: string;
+  job_id: string;
+  item_id: string | null;
+  index: number;
+  title: string;
+  desc: string;
+  tags: string;
+  tid: string;
+  tid_label: string;
+  status: string;
+  status_text: string;
+  badge: BiliBadge;
+  badge_text: string;
+  badge_tone: BiliBadgeTone;
+  progress: number;
+  bvid: string | null;
+  aid: number | null;
+  video_url: string | null;
+  cover_path: string | null;
+  verified_state: string | null;
+  verified_note: string | null;
+  error: string | null;
+  advice: string | null;
+  attempt: number;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  elapsed_seconds: number;
+}
+
+export interface BiliSeason {
+  id: string;
+  job_id: string;
+  title: string;
+  desc: string;
+  season_id: number | null;
+  status: string;
+  status_text: string;
+  upload_ids: string[];
+  error: string | null;
+  advice: string | null;
+}
+
+export interface BiliJobUploads {
+  job_id: string;
+  badge: BiliBadge;
+  badge_text: string;
+  badge_tone: BiliBadgeTone;
+  uploads: BiliUpload[];
+  season: BiliSeason | null;
+}
+
+export interface BiliJobUploadsSummary {
+  jobs: BiliJobUploads[];
+}
+
+export interface BiliRetry {
+  action: "reupload" | "reverify" | "none";
+  message: string;
+  upload: BiliUpload | null;
+}
+
+export interface BiliSeasonRetry {
+  message: string;
+  season: BiliSeason;
 }

@@ -1,6 +1,6 @@
 ﻿import { useEffect, useState } from "react";
 import { Check, ChevronDown, Copy, ExternalLink, FileX2, FolderOpen, Gauge, Pause, Play, RotateCcw, Trash2 } from "lucide-react";
-import type { Job, JobBatchAction, ResolutionFallback } from "../types";
+import type { BiliJobUploads, BiliUpload, Job, JobBatchAction, ResolutionFallback } from "../types";
 import {
   formatBytesPerSecond,
   formatClock,
@@ -10,19 +10,29 @@ import {
   formatPercent
 } from "../formatting";
 import { resolutionFallbackRestartLabel } from "../quality";
+import { BiliJobStatus } from "./BiliJobStatus";
+import { BiliUploadButton } from "./BiliUploadButton";
 
 type MaybePromise = void | Promise<void>;
 
+/** 没有 B站 记录时的默认形态：按钮自己会把它显示成「上传」。 */
+const IDLE_BADGE = { badge: "none", badgeText: "", badgeTone: "idle" } as const;
+
 export function JobQueue({
+  biliUploads,
   jobs,
   selectedJobIds,
   onBatchAction,
+  onBiliRetrySeason,
+  onBiliRetryUpload,
+  onBiliUpload,
   onCopyLink,
   onDelete,
   onDeleteItems,
   onOpenFolder,
   onOpenItemFolder,
   onOpenSourcePage,
+  onOpenVideoPage,
   onPause,
   onPlay,
   onPlayItem,
@@ -30,15 +40,22 @@ export function JobQueue({
   onRestartItem,
   onToggleJobSelection
 }: {
+  /** 有 B站 记录的任务的徽标（缺省 = 未上传）。**由后端派生**，前端只渲染。 */
+  biliUploads: Record<string, BiliJobUploads>;
   jobs: Job[];
   selectedJobIds: Set<string>;
   onBatchAction: (action: JobBatchAction, deleteFiles?: boolean) => void;
+  onBiliRetrySeason: (seasonRecordId: string) => void;
+  onBiliRetryUpload: (uploadId: string) => void;
+  /** `itemId` 为空 = 上传整个任务（单视频任务 / 合集流程）。 */
+  onBiliUpload: (jobId: string, itemId: string | null) => void;
   onCopyLink: (sourceUrl: string) => Promise<void>;
   onDelete: (jobId: string, deleteFiles?: boolean) => void;
   onDeleteItems: (jobId: string, itemIds: string[], deleteFiles?: boolean) => void;
   onOpenFolder: (jobId: string) => MaybePromise;
   onOpenItemFolder: (jobId: string, itemId: string) => MaybePromise;
   onOpenSourcePage: (sourceUrl: string) => void;
+  onOpenVideoPage: (url: string) => void;
   onPause: (jobId: string) => void;
   onPlay: (jobId: string) => MaybePromise;
   onPlayItem: (jobId: string, itemId: string) => MaybePromise;
@@ -155,6 +172,20 @@ export function JobQueue({
             ? resolutionFallbackRestartLabel(job.resolution_fallback, "job")
             : undefined;
           const jobLocalActionKey = `job:${job.id}`;
+          const jobBili = biliUploads[job.id] ?? null;
+          const biliBusy = jobBili?.badge === "uploading";
+          // 合集与单视频的分流只看条目数，与下载侧 `isPlaylist` 用同一个判据 ——
+          // 两处用不同判据时会出现「下载当合集、上传当单视频」这种自相矛盾的行为。
+          const jobVideoReady = isPlaylist
+            ? job.items.length > 0 && job.items.every((item) => Boolean(item.output_path))
+            : Boolean(primaryItem?.output_path);
+          const biliDisabledReason = biliBusy
+            ? "正在上传中，等这批跑完"
+            : !jobVideoReady
+              ? isPlaylist
+                ? "还有视频没下载好"
+                : "视频还没下载好"
+              : null;
           return (
           <article key={job.id} className="job-card">
             <div className="job-row">
@@ -174,6 +205,14 @@ export function JobQueue({
                 </p>
               </div>
               <div className="job-actions">
+                <BiliUploadButton
+                  badge={jobBili?.badge ?? IDLE_BADGE.badge}
+                  badgeText={jobBili?.badge_text || IDLE_BADGE.badgeText}
+                  badgeTone={jobBili?.badge_tone ?? IDLE_BADGE.badgeTone}
+                  subject={title}
+                  disabledReason={biliDisabledReason}
+                  onClick={() => onBiliUpload(job.id, isPlaylist ? null : primaryItem?.id ?? null)}
+                />
                 {isPlaylist && (
                   <button
                     className={`icon-button expand-button ${isExpanded ? "is-expanded" : "is-collapsed"}`}
@@ -289,6 +328,14 @@ export function JobQueue({
             <div className="progress-bar">
               <span style={{ width: `${Math.max(0, Math.min(100, job.progress))}%` }} />
             </div>
+            {jobBili && (
+              <BiliJobStatus
+                uploads={jobBili}
+                onRetryUpload={onBiliRetryUpload}
+                onRetrySeason={onBiliRetrySeason}
+                onOpenVideoPage={onOpenVideoPage}
+              />
+            )}
             {!isPlaylist && job.resolution_fallback && (
               <ResolutionFallbackNotice
                 fallback={job.resolution_fallback}
@@ -336,6 +383,8 @@ export function JobQueue({
                   const itemLocalActionKey = `item:${item.id}`;
                   const isItemCopied = copiedKey === itemCopyKey;
                   const canOpenItemFolder = Boolean(item.output_path || job.download_dir);
+                  const itemBili = jobBili?.uploads.find((upload) => upload.item_id === item.id) ?? null;
+                  const itemBiliBusy = itemBili?.badge === "uploading" || jobBili?.badge === "uploading";
                   return (
                   <div key={item.id} className="job-item-detail">
                     <div className="item-row">
@@ -350,6 +399,17 @@ export function JobQueue({
                       </label>
                       <div className="item-actions">
                         {item.error && !item.resolution_fallback && <span className="item-error">{item.error}</span>}
+                        <BiliUploadButton
+                          badge={itemBili?.badge ?? IDLE_BADGE.badge}
+                          badgeText={itemBili?.badge_text || IDLE_BADGE.badgeText}
+                          badgeTone={itemBili?.badge_tone ?? IDLE_BADGE.badgeTone}
+                          subject={item.title}
+                          compact
+                          disabledReason={
+                            itemBiliBusy ? "正在上传中" : item.output_path ? null : "视频还没下载好"
+                          }
+                          onClick={() => onBiliUpload(job.id, item.id)}
+                        />
                         <button
                           className="icon-button item-action-button"
                           type="button"

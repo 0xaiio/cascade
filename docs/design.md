@@ -20,9 +20,9 @@
 
 | 模块 | 层 | 职责 | 不负责 |
 | --- | --- | --- | --- |
-| [main.py](../backend/app/main.py#L39) | L0 入口 | **只做装配**：建 `ApiContext`、挂载 `routers/` 下的 `APIRouter`、静态资源托管、lifespan 启停。 | 不声明路由（路由在 `routers/`），不写业务规则，不做状态转换，不构造 yt-dlp 参数。 |
-| [routers/](../backend/app/routers/__init__.py#L21) | L0 入口 | 按资源分模块声明 HTTP 路由（`diagnostics` / `cookies` / `analyze` / `jobs` / `job_files` / `settings` / `events`）：取参、调辅助、定状态码。 | 不做状态转换，不直接调用 yt-dlp，不写领域规则（产物定位见 `job_artifacts`，设置与错误映射见 `api_support`）。 |
-| [api_context.py](../backend/app/api_context.py#L27) | L0 入口 | 请求级依赖容器 `ApiContext`（`frozen` dataclass）+ `get_context` / `get_session` 依赖别名。 | 不装配依赖（装配在 `main.py`），不写业务规则。 |
+| [main.py](../backend/app/main.py#L40) | L0 入口 | **只做装配**：建 `ApiContext`、挂载 `routers/` 下的 `APIRouter`、静态资源托管、lifespan 启停。 | 不声明路由（路由在 `routers/`），不写业务规则，不做状态转换，不构造 yt-dlp 参数。 |
+| [routers/](../backend/app/routers/__init__.py#L21) | L0 入口 | 按资源分模块声明 HTTP 路由（`diagnostics` / `cookies` / `analyze` / `jobs` / `job_files` / `settings` / `events` / `bilibili`）：取参、调辅助、定状态码。 | 不做状态转换，不直接调用 yt-dlp，不写领域规则（产物定位见 `job_artifacts`，设置与错误映射见 `api_support`）。 |
+| [api_context.py](../backend/app/api_context.py#L28) | L0 入口 | 请求级依赖容器 `ApiContext`（`frozen` dataclass）+ `get_context` / `get_session` 依赖别名。 | 不装配依赖（装配在 `main.py`），不写业务规则。 |
 | [api_support.py](../backend/app/api_support.py#L26) | L0 入口 | 路由支撑：任务/条目定位与 404、设置读写与响应构造、cookies 元数据提取、目录选择。 | 不声明路由，不做状态转换。 |
 | [job_artifacts.py](../backend/app/job_artifacts.py#L29) | L0 入口 | 产物**定位**（一条候选链）与本机**打开**（播放 / 打开所在目录）。 | 不删文件（删除带白名单校验，属 `job_manager`），不决定用什么播放器（属 `system_open`）。 |
 | [__main__.py](../backend/app/__main__.py#L64) | L0 入口 | 本地启动入口：解析命令行、启动前做端口预检并识别占用者、交给 uvicorn。 | 不装配应用（那是 `main.py`），不写业务规则。 |
@@ -32,6 +32,8 @@
 | [job_manager.py](../backend/app/job_manager.py#L43) | L2 编排 | 队列、worker、并发、暂停/重启/删除、进度 hook、错误分类、终态收敛、事件发布。 | 不直接调用 yt-dlp（经 `YtDlpService`），不解析 yt-dlp 内部结构（经 formats 工具），**不做降级判定**（判定在 `resolution_decisions`）。 |
 | [job_read_model.py](../backend/app/job_read_model.py#L12) | L2 编排 | 把表投影成 API 读模型：聚合分辨率/格式、`elapsed_seconds`、降级消息。 | 不写库、不改状态。 |
 | [events.py](../backend/app/events.py#L7) | L2 编排 | 进程内 SSE 扇出（每个订阅者一个队列）。 | 不持久化事件（持久化在 `job_manager`）。 |
+| [bili_manager.py](../backend/app/bili_manager.py#L281) | L2 编排 | B站 上传的队列与编排：单 worker 串行、投稿间隔（抗账号级频控）、状态写库与收敛、重启后把中断记录折成可重试失败、环境体检、事件发布。 | 不直接调 `biliup`（经 `bili_upload`），不解析 B站 内部结构（经 `bili_api`），不算界面徽标（经 `bili_read_model`）。 |
+| [bili_read_model.py](../backend/app/bili_read_model.py#L60) | L2 编排 | 把 `bili_upload` / `bili_season` 投影成 API 读模型；**「多条记录 → 一档徽标」的聚合规则**只在这里定义。 | 不写库、不改状态；`elapsed_seconds` 复用 `job_read_model`（见下方「同层横向依赖」）。 |
 | [ytdlp_service.py](../backend/app/ytdlp_service.py#L88) | L3 领域 | yt-dlp 边界：元数据、预检测、参数构建、profile 重试链、错误分类、依赖诊断。 | 不碰数据库，不决定任务状态。 |
 | [ytdlp_formats.py](../backend/app/ytdlp_formats.py#L9) | L3 领域 | 格式选择器、分辨率/大小/codec 提取、降级候选计算。 | 不导入 yt-dlp。 |
 | [stall_guard.py](../backend/app/stall_guard.py#L32) | L3 领域 | 纯函数式停滞判定与 `DownloadStalled`。 | 不写库、不发布事件。 |
@@ -49,10 +51,17 @@
 | [dev_server.py](../backend/app/dev_server.py#L44) | L5 纯工具 | 端口可用性探测、向后找可用端口、`netstat` / `tasklist` 输出的解析。 | 不启动服务、不改配置；拿不到占用者信息时返回 `None` 而不是猜一个名字。 |
 | [output_paths.py](../backend/app/output_paths.py#L13) | L3 领域 | 输出文件、中间文件与 sidecar 的候选路径解析与发现。 | 不删除文件（删除由 `job_manager` 在受限根目录内执行）。 |
 | [safe_delete.py](../backend/app/safe_delete.py#L22) | L3 领域 | 删除产物的**路径安全判定**：允许范围（`DeleteScope`）、某路径是否可删、任务目录是否可收走。纯函数，可单测。 | 不删任何东西（`unlink` / `rmdir` 由 `job_manager` 执行），不枚举候选（枚举在 `output_paths`）。 |
+| [bili_upload.py](../backend/app/bili_upload.py#L297) | L3 领域 | **单次上传的领域逻辑**：编排 `bili_bin` + `bili_api` + `bili_meta`，产出「已发布/审核中/待核对/失败」的结论与下一步。含模板批量渲染与逐条校验。纯函数式，可整链离线单测。 | 不写库、不发事件、不做队列；不重试、不改状态。 |
+| [bili_bin.py](../backend/app/bili_bin.py#L263) | L3 领域 | 投稿工具边界：`biliup` 探测（含 WinGet 0 字节空壳识别与修复）、命令组装、子进程执行、进度解析、ffmpeg 抽封面。 | 不写库、不发 B站 请求、不生成元数据。 |
+| [bili_api.py](../backend/app/bili_api.py#L111) | L3 领域 | B站 会员态客户端：稿件对账、稿件详情（cid/封面）、创建合集、归集稿件、列出合集、发并置顶评论。全部经可注入 `transport`。 | 不调 `biliup`、不读库、不决定「该不该归集」。 |
+| [bili_auth.py](../backend/app/bili_auth.py#L48) | L3 领域 | 扫码登录（生成二维码 / 轮询状态）、登录文件读写（四形态兼容）、**凭据摘要（只回传名字与计数，无值、无前缀）**、是否被 git 跟踪。 | 不发 B站 业务请求、不写库。 |
+| [bili_meta.py](../backend/app/bili_meta.py#L148) | L3 领域 | 投稿元数据：模板占位符渲染（显式替换，不用 `str.format`）、标签派生与收敛、分区小词表、平台硬限校验。 | 超限只报错不截断；不计长度之外的事，不读库、不发请求。 |
+| [bili_policy.py](../backend/app/bili_policy.py#L38) | L3 领域 | B站 上传的**文案与分类常量**：平台状态码→人话、记录状态→人话、错误输出→（结论 + 下一步）、徽标档位与配色。 | 不做判定（判定在 `bili_upload` / `bili_manager` / `bili_read_model`）。 |
 | [system_open.py](../backend/app/system_open.py#L23) | L3 领域 | 选择可解码播放器、打开目录、窗口置前。 | 不校验文件是否存在（调用方先解析路径）。 |
 | [db.py](../backend/app/db.py#L27) | L4 基础设施 | engine 创建、SQLite pragma、补列、WAL checkpoint、session 依赖。 | 不知道业务表语义。 |
 | [logging_setup.py](../backend/app/logging_setup.py#L48) | L4 基础设施 | 配置 root/uvicorn logger，落盘 `data/logs/app.log` 并轮转。 | 不决定打什么日志，不解析业务语义。 |
-| [paths.py](../backend/app/paths.py#L7) / [log_safety.py](../backend/app/log_safety.py#L11) | L5 纯工具 | 文件名安全化、日志敏感信息清洗。 | 无项目内依赖，可单独测试。 |
+| [bili_http.py](../backend/app/bili_http.py#L66) | L4 基础设施 | B站 请求的 HTTP 接缝：标准库 `urllib` 实现、**强制直连（清空 ProxyHandler）**、4xx/5xx 也带回正文与 `Set-Cookie`。 | 不知道任何端点的语义（端点与参数在 `bili_api` / `bili_auth`）。 |
+| [paths.py](../backend/app/paths.py#L7) / [log_safety.py](../backend/app/log_safety.py#L15) | L5 纯工具 | 文件名安全化、日志敏感信息清洗。 | 无项目内依赖，可单独测试。 |
 
 ## 前端组件边界
 
@@ -66,12 +75,17 @@
 | [AnalysisPanel.tsx](../frontend/src/components/AnalysisPanel.tsx#L12) | 解析结果：缩略图/标题/时长、playlist 条目勾选表、单视频汇总行。 | 不持有选中集合（状态归 `App`，提交要用同一份）。 |
 | [DownloadOptionsPanel.tsx](../frontend/src/components/DownloadOptionsPanel.tsx#L19) | 下载选项：模式、清晰度、字幕语言/来源/格式、开关项、限速与重试、提交按钮。 | 不持有状态：所有值来自 `options`，改动经 `onOptionChange` 回到 `App`。 |
 | [SearchableLanguageSelect.tsx](../frontend/src/components/SearchableLanguageSelect.tsx#L16) | 可搜索的字幕语言多选。标签里 join 的是**语言代码**，项数无上界 —— 不许 `nowrap`，见 [ai/ui/003](../ai/ui/003-language-trigger-label-overflows-the-page.md)。 | 不拉取可用语言（由 `App` 从解析结果里汇总）。 |
-| [SettingsPanel.tsx](../frontend/src/components/SettingsPanel.tsx#L64) | 设置：下载目录、并发、单视频并发下载数（aria2c）、代理（含连通性检测）。持有一份 `draft`，**失焦即保存**；单视频并发下载数旁挂一个说明浮层（`Aria2cHelpPopover`）。 | 不解析代理来源（后端回传 `proxy_source`），不决定代理语义（留空=自动、`direct`=直连由后端定义）；也不判断「aria2c 此刻是否真的在用」——那由后端的 profile 链决定，界面只解释怎么启用。 |
+| [SettingsPanel.tsx](../frontend/src/components/SettingsPanel.tsx#L69) | 设置：下载目录、并发、单视频并发下载数（aria2c）、代理（含连通性检测）。持有一份 `draft`，**失焦即保存**；单视频并发下载数旁挂一个说明浮层（`Aria2cHelpPopover`）。 | 不解析代理来源（后端回传 `proxy_source`），不决定代理语义（留空=自动、`direct`=直连由后端定义）；也不判断「aria2c 此刻是否真的在用」——那由后端的 profile 链决定，界面只解释怎么启用。 |
 | [Toggle.tsx](../frontend/src/components/Toggle.tsx#L4) / [StatusPill.tsx](../frontend/src/components/StatusPill.tsx#L4) | 基础件：勾选行、顶栏状态点。 | 不含业务判断（`ok === undefined` 一律按警告渲染）。 |
 | [CookieSection.tsx](../frontend/src/components/CookieSection.tsx#L121) | cookies 状态、校验按钮与结论展示；两个说明浮层（[获取方式](../frontend/src/components/CookieSection.tsx#L53)、[结论解读](../frontend/src/components/CookieSection.tsx#L96)）就近挂在这里。 | 不决定用哪份 cookies（后端决定），不构造请求体。 |
 | [ProxySection.tsx](../frontend/src/components/ProxySection.tsx#L140) | 代理检测结果展示与「真的发一次请求」的入口；[常用端口](../frontend/src/components/ProxySection.tsx#L75)与[排查顺序](../frontend/src/components/ProxySection.tsx#L112)两个说明浮层。 | 不解析代理来源（后端回传 `proxy_source`），不保存设置（保存由 `SettingsPanel` 触发）。 |
 | [HelpPopover.tsx](../frontend/src/components/HelpPopover.tsx#L42) | **通用非模态说明浮层**：定位、钉住、关闭、记忆，以及窄屏抽屉形态。所有辅助说明共用它。 | 不含任何业务文案（文案由调用方以 children 传入）。 |
-| [JobQueue.tsx](../frontend/src/components/JobQueue.tsx#L16) | 任务中心展示与本地文件操作入口。 | 不直接访问本机文件系统（一律走后端受控打开/删除接口）。 |
+| [JobQueue.tsx](../frontend/src/components/JobQueue.tsx#L21) | 任务中心展示与本地文件操作入口。 | 不直接访问本机文件系统（一律走后端受控打开/删除接口）。 |
+| [BiliIcon.tsx](../frontend/src/components/BiliIcon.tsx#L12) | B站 图标：圆角机身 + 两根天线 + 两只眼睛的**手绘** SVG，描边走 `currentColor` 由调用方决定颜色。 | 不含任何布局与文案；品牌色只落在这个图标上，不扩散成按钮配色。 |
+| [BiliUploadButton.tsx](../frontend/src/components/BiliUploadButton.tsx#L18) | 任务行/条目行上的上传入口：**图标 + 一句人话**。`idle` 档显示动作词（「上传到 B站」），其余档原样显示后端徽标文案 —— 前端不自己造一套状态文案，两处必然会漂移。 | 不请求、不判断能不能传（`disabledReason` 由 `App` 给），不决定上传什么。 |
+| [BiliUploadDialog.tsx](../frontend/src/components/BiliUploadDialog.tsx#L26) | 上传表单模态框，**单视频与合集共用**：单视频填的就是最终内容，合集填的是模板（`{index}` `{title}` `{count}` `{job}` 占位符）并带一张逐条预览表。硬限数字来自 `prefill.limits`，超限只报错不截断，未就绪的条目先标出来。 | 不渲染模板（渲染在后端 `bili_meta`，前端只显示服务端给的结果），不校验硬限（只显示 `12/80`），不发请求（`onSubmit` 归 `App`）。 |
+| [BiliJobStatus.tsx](../frontend/src/components/BiliJobStatus.tsx#L18) | 任务卡片里的上传明细与「下一步」：失败原因 + 服务端给的 advice、合集归集结论、重试入口。**只在有话说时渲染一行**。 | 不决定重试动作（后端按终态三选一），不给已成功的条目放重试按钮。 |
+| [BiliLoginSection.tsx](../frontend/src/components/BiliLoginSection.tsx#L28) | 设置面板里的 B站 区：环境体检、扫码登录（含轮询，1.5s）、导入登录文件、修复投稿工具。**凭据一个字符都不显示**（只给「已保存 N 项 / 缺 SESSDATA」的摘要与账号名）。 | 不显示 cookies 值或掩码前缀；「登录文件被 git 跟踪」单独红字，不由本组件自动修复。 |
 | [subtitles.ts](../frontend/src/subtitles.ts#L12) | 字幕文案与来源归一：`formatSubtitleInfo`（那行「字幕：来源 X · 格式 Y」）、`effectiveSubtitleSourceForAnalysis`（提交前把「两者都要」收敛成该视频真有的那一类）。 | 不做请求、不读存储。 |
 | [cookieLock.ts](../frontend/src/cookieLock.ts#L20) | 把后端 `browser_locked` 错误映射成界面状态（含 `pendingAnalyzeUrl`，用于「关闭 Edge 并导入」后自动补一次解析）。判据是 `detail.code`，不是文案。 | 不渲染界面（渲染在 `UrlAnalyzer`）。 |
 
@@ -96,7 +110,7 @@ PlantUML 源文件：[module-dependencies.puml](diagrams/module-dependencies.pum
 2. **L3 不得反向依赖 L2 或 L0**。典型反例：让 `ytdlp_service` 去更新 `JobItem` 状态。正确做法是把结果返回给 `job_manager`，由编排层决定状态。
 3. **L1 保持纯净**：`schemas.py` 不导入 yt-dlp，`config.py` 不导入数据库层。这样 API 契约可以脱离运行时被单独审阅、测试和生成文档。
 4. 新能力优先落到 L3 的单一模块（例如"判断是否需要合并音视频"属于 `ytdlp_formats.requires_ffmpeg`），只有需要"在多个模块之间做决定"时才上移到 L2。
-5. 同一层内部的横向依赖要显式说明理由。当前存在的横向依赖：`job_manager` → `ytdlp_formats`（复用降级计算）与 `job_read_model` → `output_paths`（复用路径发现），两者都是复用纯函数，不构成循环。L0 内部另有一组单向横向依赖：`routers/*` → `api_support` / `job_artifacts` / `api_context`，方向固定（路由是叶子，支撑模块不反向导入任何路由），因此不会成环。
+5. 同一层内部的横向依赖要显式说明理由。当前存在的横向依赖：`job_manager` → `ytdlp_formats`（复用降级计算）、`job_read_model` → `output_paths`（复用路径发现）、`bili_read_model` → `job_read_model`（复用 `elapsed_seconds`）、`bili_upload` → `bili_bin` / `bili_api` / `bili_auth` / `bili_meta` / `bili_policy`（单次上传的编排，全部是复用而非成环），都是复用纯函数，不构成循环。L0 内部另有一组单向横向依赖：`routers/*` → `api_support` / `job_artifacts` / `api_context`，方向固定（路由是叶子，支撑模块不反向导入任何路由），因此不会成环。
 6. **组合根只做装配**：`create_app` 里出现业务分支即为越界 —— 判断「这段代码该放哪」的判据是"它需不需要一个 `Request`"，需要就进 `routers/`，只是一段被多个路由复用的逻辑就进 `api_support.py` / `job_artifacts.py`。
 
 ## 运行时并发模型
@@ -127,11 +141,11 @@ PlantUML 源文件：[download-data-flow.puml](diagrams/download-data-flow.puml)
 
 ### 解析链接
 
-`POST /api/analyze` → `YtDlpService.extract_metadata()`（`extract_flat="in_playlist"`，带 cookies）→ `AnalyzeResponse`。若 yt-dlp 抛出的错误同时命中 cookies 提示词，则自动导入浏览器 cookies 后**重试一次**，见 [_extract_metadata_with_cookies](../backend/app/main.py#L120)。
+`POST /api/analyze` → `YtDlpService.extract_metadata()`（`extract_flat="in_playlist"`，带 cookies）→ `AnalyzeResponse`。若 yt-dlp 抛出的错误同时命中 cookies 提示词，则自动导入浏览器 cookies 后**重试一次**，见 [extract_metadata_with_cookies](../backend/app/api_support.py#L87)。
 
 ### 建任务与入队
 
-`POST /api/jobs` → 解析 → 选条目（单视频合成 1 条 `VideoEntry`）→ 写 `Job` + N 个 `JobItem` → `enqueue()` 把 queued item id 放进队列。playlist 任务会额外在下载根目录下按安全化标题创建子目录，见 [_job_download_dir](../backend/app/main.py#L644)。
+`POST /api/jobs` → 解析 → 选条目（单视频合成 1 条 `VideoEntry`）→ 写 `Job` + N 个 `JobItem` → `enqueue()` 把 queued item id 放进队列。playlist 任务会额外在下载根目录下按安全化标题创建子目录，见 [job_download_dir](../backend/app/api_support.py#L79)。
 
 ### 下载与进度
 
@@ -145,6 +159,19 @@ worker 领取 item → 声明式预检测（`prepare_download`，命中则不再
 
 删除统一走 `JobManager`：先删数据库记录与关联 `JobEvent`，再按需删除文件。文件删除只在"下载根目录"或"该任务下载目录"之内执行，并对 `output_path`、合并后的最终文件与 sidecar 分别枚举候选，见 [_delete_output_files](../backend/app/job_manager.py#L351)。删除 playlist 的最后一个子项时父任务一并删除。
 
+### 上传到 B站
+
+上传是一条**独立于下载的**链路，两者只通过「下载好的文件」相接：下载链路不认识 B站，上传链路不触发下载。它由 `BiliManager` 的**单 worker** 串行驱动（不是 `JobManager` 的那组并发 worker），因为平台限的是账号而不是本地并发。
+
+单视频：`GET /api/bilibili/prefill` 预填表单 → `POST /api/bilibili/uploads` 落一行 `queued` 的 `BiliUpload` 并入队 → worker 依次做「抽帧封面（可选）→ `biliup` 投稿 → 回读稿件列表对账 → 发并置顶评论（可选）」→ 状态收敛为 `published` / `reviewing` / `unverified` / `rejected` / `failed` → SSE 通知，前端按 `GET /api/bilibili/uploads` 或 `/summary` 重拉读模型。
+
+合集：`POST /api/bilibili/collections` 先用模板逐条渲染出每条的元数据（`bili_meta.render`）并**在入队前**跑一遍硬限校验（超限则 400 指出第几条，避免一批跑到一半才死）→ 逐条走与单视频相同的投稿路径 → 全部确认 `published` 后，再单独走一次归集：`season/add` 建合集 → `season/section/episodes/add` 逐条补进 `sectionId`。归集是**另一次平台调用、另一张表**（`BiliSeason`），失败不影响已发布的稿件，可单点重试。
+
+两条与平台语义直接相关的约束：
+
+- **命令返回码 0 不等于已发布**。`biliup` 退出后必须用账号的稿件列表回读对账（按标题前缀匹配，两侧都做空白归一），对不上就是 `unverified`（「待核对」，不是失败）——两者措辞必须分开，否则用户会去重投一条**已经投上去**的稿件。
+- **重试动作由终态决定，而不是由按钮决定**：`failed` / `rejected` → 重新投稿（复用同一行，`attempt` 自增）；`unverified` → **只**重读平台列表，绝不重投；已发布或在途 → 什么都不做。判定只在 [BiliManager](../backend/app/bili_manager.py#L281) 里做，界面只负责把这个结论显示出来。
+
 ## 状态机与一致性
 
 `Job` 与 `JobItem` 共用 `JobStatus` 六态，但驱动者不同：
@@ -155,15 +182,24 @@ worker 领取 item → 声明式预检测（`prepare_download`，命中则不再
 
 并发一致性依赖三点：单条 `JobItem` 只会被一个 worker 认领（`_item_claim_lock` + 状态校验）；worker 线程各自持有 session 并独立 commit；读模型只读不写，避免与写入路径争抢状态。
 
+B站 上传有**自己的两套状态**，与 `JobStatus` 无关：
+
+- `BiliUpload.status`（8 态）：`queued` → `uploading` → 三选一分支 —— `submitted`（命令成功、还没对账）→ `published` / `reviewing` / `rejected`（平台稿件状态码折合）；命令失败或对账查不到则落到 `unverified`（待核对）或 `failed`。`unverified` **不是失败**：它表达「我们还不知道」，所以它的重试只重读平台，不重投。
+- `BiliSeason.status`（4 态）：`pending` → `grouping` → `grouped` / `failed`。`grouped` 的文案是「已提交归集（B站 需人工审核）」——平台侧还有一个看不见的人工审核环节，界面不能承诺「合集已上线」。
+
+界面上的那**一档徽标**（`none` / `uploading` / `uploaded` / `unverified` / `partial` / `failed`）不落库，由 [derive_badge](../backend/app/bili_read_model.py#L60) 从「这个任务的全部记录 + 合集记录」现场算出来 —— 多条记录的聚合规则只有这一处，前端不参与。重启后的一致性靠 [resume_interrupted](../backend/app/bili_manager.py#L323)：进程退出时停在 `uploading` 的记录（含 `queued`）一律折成**可重试的失败**，而不是永远停在「上传中」。
+
 ## 持久化设计
 
 | 决策 | 内容 | 理由 |
 | --- | --- | --- |
 | WAL + `busy_timeout=5000` + `synchronous=NORMAL` | 每个连接建立时下发 pragma，见 [_configure_sqlite_connection](../backend/app/db.py#L14)。 | 多 worker 并发写入时"等待"而不是直接 `database is locked`；被其他进程锁住时只跳过 pragma，不让应用起不来。 |
 | 追加式补列 | [_ensure_columns](../backend/app/db.py#L43) 用 `PRAGMA table_info` + `ALTER TABLE ADD COLUMN`。 | 兼容旧库，无需迁移框架。**只支持追加**，不支持删除/改名/改类型。 |
-| WAL checkpoint | lifespan 启动与停止各执行一次 `wal_checkpoint(TRUNCATE)`，见 [checkpoint_wal](../backend/app/db.py#L72)。 | 避免进程被强杀后 `-wal` 侧车无界增长，也避免每次读都回放 WAL。失败只记日志。 |
+| WAL checkpoint | lifespan 启动与停止各执行一次 `wal_checkpoint(TRUNCATE)`，见 [checkpoint_wal](../backend/app/db.py#L82)。 | 避免进程被强杀后 `-wal` 侧车无界增长，也避免每次读都回放 WAL。失败只记日志。 |
 | 进度写入节流 | `ProgressPersistGate`：首次、终态、间隔 ≥250ms 或进度跳变 ≥0.5% 才写。 | 5 路并行时避免把每个 chunk 回调都变成一次事务。 |
 | 进度聚合 | `DownloadProgressAggregator` 按子流分别累计已下载字节，分母取"各子流已知总和的较大者"并以下限钳制。 | 字幕/chunk/分离音视频都会各自回调；不能让小文件或当前 chunk 的 100% 冒充整体完成，也不能把已下载字节归零。 |
+| B站 上传两张表 | `bili_upload`（一条稿件一行）与 `bili_season`（一个任务的合集一行）。前者存投稿入参（标题/简介/标签/分区/视频路径/是否做封面/评论）+ 结果（`bvid`/`aid`/`cid`/`verified_state`/`progress`/`attempt`/`log_tail`），后者存 `season_id` 与归集状态。 | **入参也落库**：投稿是异步的，worker 必须能在用户关掉页面之后照着重投；只存结果会让重试变成「拿当前表单再猜一次」。`attempt` 让重投复用同一行，界面不出现重复条目。 |
+| B站 凭据不入库 | 登录态只以文件形式放 `data/bilibili/cookies.json`（gitignored），API 只回传名字与计数。 | 凭据落库会被 `GET` 读模型、备份与 SQL 转储带出去；文件形态还能直接被 `biliup` 复用，不必在两层之间搬运凭据。 |
 
 ## 错误分类与可观测性
 
@@ -171,12 +207,12 @@ worker 领取 item → 声明式预检测（`prepare_download`，命中则不再
 
 | 分类 | 判定依据 | 处理 |
 | --- | --- | --- |
-| cookies 缺失/需登录 | 错误链中出现 cookies 提示词 + 登录/bot 关键词，见 [is_cookie_required_error](../backend/app/ytdlp_service.py#L768)。 | 刷新浏览器 cookies 后重试一次；仍失败则给出两条可操作建议。 |
-| 媒体流阻断 | 403/`forbidden` 或连接重置族关键词，见 [is_media_stream_blocked_error](../backend/app/ytdlp_service.py#L670)。 | 在同清晰度下换 profile 重试；终态文案前置 cookies 状态，并给出降清晰度重启建议。 |
-| 目标格式不可用（**预检阶段**） | 错误文本含 `requested format is not available`，由 [prepare_download](../backend/app/ytdlp_service.py#L380) 抛出。 | 归一成 `is_selectable=False`，按原因分类后**真的**用降级清晰度重新预检并下载。 |
+| cookies 缺失/需登录 | 错误链中出现 cookies 提示词 + 登录/bot 关键词，见 [is_cookie_required_error](../backend/app/ytdlp_service.py#L775)。 | 刷新浏览器 cookies 后重试一次；仍失败则给出两条可操作建议。 |
+| 媒体流阻断 | 403/`forbidden` 或连接重置族关键词，见 [is_media_stream_blocked_error](../backend/app/ytdlp_service.py#L677)。 | 在同清晰度下换 profile 重试；终态文案前置 cookies 状态，并给出降清晰度重启建议。 |
+| 目标格式不可用（**预检阶段**） | 错误文本含 `requested format is not available`，由 [prepare_download](../backend/app/ytdlp_service.py#L387) 抛出。 | 归一成 `is_selectable=False`，按原因分类后**真的**用降级清晰度重新预检并下载。 |
 | 目标格式不可用（**下载阶段**） | 同上，但出现在预检通过之后（两次请求之间格式列表变了）。 | 标注 `requested_resolution_unselectable` 并把错误替换成降级说明；按 [架构文档](architecture.md) 的约定，**不**自动重下。 |
 | 停滞 | 看门狗判定字节峰值超时未刷新。 | 直接失败，不换 profile、不重试。 |
-| 其他 | 兜底。 | 透传清洗后的错误文本，见 [readable_error_message](../backend/app/ytdlp_service.py#L744)。 |
+| 其他 | 兜底。 | 透传清洗后的错误文本，见 [readable_error_message](../backend/app/ytdlp_service.py#L751)。 |
 
 可观测性由三处构成：任务中心读模型（进度/速度/大小/实际分辨率/格式/错误）、`/api/diagnostics`（依赖与稳定性参数，且不回显 token 原文）、以及 `JobEvent` 表（事件审计，可与 SSE 推送交叉核对）。
 
@@ -199,5 +235,9 @@ worker 领取 item → 声明式预检测（`prepare_download`，命中则不再
 5. **profile 链是串行且昂贵的**：每个 profile 都是一次完整 extract，失败路径的耗时按 profile 数累加；`DownloadStalled` 与 `DownloadCancelled` 已跳过链路，其余错误仍会逐级重试。
 6. **`notify_on_complete` 未接线**：请求模型接受该字段但下载链路不消费，属于历史遗留字段。
 7. **`data/` 下的旧库可能存在大量历史 item**：影响验收统计，也说明缺少归档/清理策略。
+8. **B站 上传依赖两个外部前提，缺一不可**：本机的 `biliup` 工具，以及一份有效的登录文件。两者都不在仓库里，也无法由应用代装/代登（登录必须用户拿手机扫）。因此「能跑通」的前提是环境已备好，界面只能把缺什么说清楚并给出下一步。
+9. **合集归集依赖平台的「集合」接口，且有人工审核**：`season/add` 与 `season/section/episodes/add` 是页面接口而非稳定开放 API，平台改动会让归集失败（此时稿件仍已发布，可单独重试）。`grouped` 只表示「已提交归集」，不代表已上线。
+10. **投稿成功与否靠标题前缀回读对账**：平台没有提供「按本地标识查投稿」的接口，只能用最近稿件列表 + 标题前缀匹配。**改名后即无法对账**，这类记录会停在 `unverified` 并需要人工去创作中心确认。前缀匹配因此只取前若干字符并两侧空白归一。
+11. **账号级频控无法本地消解**：单 worker + 投稿间隔只能降低触发概率，不能保证不触发；触发后正确处理是等几分钟原样重投（平台报 `601`），改参数硬刷会把临时限流升级成账号风险。这一点已写进错误文案，不做自动重试。
 
 以上限制的共同验证方式是 [测试文档](testing.md) 的自动测试与离线基准；涉及真实网络的验收必须以真实的 cookies 与连通性为前提，不能用手工观察替代。

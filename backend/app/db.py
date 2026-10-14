@@ -41,6 +41,12 @@ def init_db(engine: Engine) -> None:
 
 
 def _ensure_columns(engine: Engine) -> None:
+    """追加式补列。**只登记「表已经存在之后才加上的列」** —— 新表由 `create_all` 建全，
+    在这里再抄一遍等于把列定义变成两处真相。
+
+    `bili_upload.create /*` 这两列属于前一种：`bili_upload` 表本身是随 B站 上传功能一起建的，
+    但「是否生成封面」与「置顶评论文案」是在它建出来之后才补上的。
+    """
     additions = {
         "job": {
             "speed": "FLOAT",
@@ -59,6 +65,10 @@ def _ensure_columns(engine: Engine) -> None:
             "requested_resolution": "TEXT",
             "fallback_resolution": "TEXT",
             "fallback_reason": "TEXT",
+        },
+        "bili_upload": {
+            "make_cover": "BOOLEAN DEFAULT 1",
+            "comment": "TEXT DEFAULT ''",
         },
     }
     with engine.begin() as connection:

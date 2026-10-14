@@ -5,6 +5,7 @@ skinparam shadowing false
 start
 :uvicorn starts FastAPI;\nPRAGMA wal_checkpoint(TRUNCATE);
 :JobManager.start() creates one worker\ntask per configured concurrency;
+:BiliManager.start() creates ONE upload worker\n(resume_interrupted folds in-flight rows\ninto retryable failures);
 fork
   :React UI sends HTTP request;
   :FastAPI validates schema in the event loop;
@@ -18,12 +19,18 @@ fork
       :Requeue item (continuedl keeps the .part file);
     endif
   else (job action)
-    :Create, pause, restart, delete, play, or open folder;
+    :Create, pause, restart, delete, play, or open folder;\nOr: enqueue a Bilibili upload / season grouping;
   endif
 fork again
   :EventSource stays connected;
   :JobManager publishes + persists JobEvent;
   :UI refreshes GET /api/jobs;
+fork again
+  :Bili worker dequeues one BiliUpload id;
+  :Run biliup in a thread (upload + cover frame);
+  :Reconcile the platform archive list by title;
+  :Write published / unverified / failed + advice;
+  :Create or reuse a season, then add episodes;
 end fork
 
 if (queued item exists?) then (yes)
@@ -50,5 +57,10 @@ note right
 Each download runs in a worker thread,
 so its progress hook uses its own
 Session and commits on that thread.
+Downloads and Bilibili uploads are two
+separate queues: the platform throttles the
+account, not the local concurrency, so the
+upload worker stays single-threaded and
+serial.
 end note
 @enduml
