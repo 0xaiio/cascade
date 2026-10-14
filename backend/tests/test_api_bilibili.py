@@ -23,6 +23,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
+from app.bili_auth import TvToken, write_cookie_file
 from app.bili_bin import is_pe
 from app.bili_manager import BiliManager
 from app.config import AppSettings
@@ -35,14 +36,15 @@ from bili_fakes import FakeBiliTransport, RecordingSleeper, command_runner
 from fakes import FakeYtDlpService
 
 GOOD_JAR = {"SESSDATA": "sess", "bili_jct": "jct", "DedeUserID": "42"}
+# 一份完整的登录态 = cookies + 投稿令牌。只写 cookies 的文件 biliup 会**拒绝开工**
+# （它启动时先拿令牌去校验），所以夹具默认带上令牌，缺令牌是单独一条要构造的分支。
+TV_TOKEN = TvToken(
+    access_token="tv-access-token", refresh_token="tv-refresh-token", expires_in=15552000, mid=42
+)
 
 
-def write_login(settings: AppSettings, jar: dict[str, str] = GOOD_JAR) -> None:
-    settings.bili_cookie_path.parent.mkdir(parents=True, exist_ok=True)
-    settings.bili_cookie_path.write_text(
-        json.dumps({"cookie_info": {"cookies": [{"name": k, "value": v} for k, v in jar.items()]}}),
-        encoding="utf-8",
-    )
+def write_login(settings: AppSettings, jar: dict[str, str] = GOOD_JAR, token: TvToken | None = TV_TOKEN) -> None:
+    write_cookie_file(settings.bili_cookie_path, jar, 42, token)
 
 
 def make_settings(tmp_path: Path, *, biliup: Path | None = None) -> AppSettings:

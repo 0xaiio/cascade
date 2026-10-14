@@ -27,8 +27,8 @@ PlantUML 源文件：[system-context.puml](diagrams/system-context.puml)。
 | 代理与连通性自检 | 解析代理来源（显式 > 系统 > 环境变量）并**真的发一次请求**验证连通；cookies 体检则把离线格式检查与 `LOGGED_IN` 探针合成一个结论。 | [proxy.py](../backend/app/proxy.py#L169)、[connectivity.py](../backend/app/connectivity.py#L73)、[cookie_health.py](../backend/app/cookie_health.py#L234) |
 | 错误翻译与自检留痕 | 把异常链翻译成「诊断 / 原因 / 建议」三段可执行结论；启动时摘除会打坏 JS 运行时的宿主环境变量并留痕。 | [error_advice.py](../backend/app/error_advice.py#L116)、[runtime_env.py](../backend/app/runtime_env.py#L58) |
 | 本机打开器 | 选择可解码播放器打开视频、打开输出目录。 | [system_open.py](../backend/app/system_open.py#L23) |
-| B站 上传编排 | 单 worker 串行投稿、投稿间隔、状态写库与重启收敛、环境体检、事件发布。与下载链路**完全解耦**：独立账号、独立登录文件、独立队列。 | [BiliManager](../backend/app/bili_manager.py#L281) |
-| B站 领域与边界 | 单次投稿的领域逻辑（对账后定结论）、`biliup` 子进程边界、B站 会员态客户端、扫码登录与凭据摘要、元数据与硬限、文案常量。 | [bili_upload.py](../backend/app/bili_upload.py#L297)、[bili_bin.py](../backend/app/bili_bin.py#L263)、[bili_api.py](../backend/app/bili_api.py#L111)、[bili_auth.py](../backend/app/bili_auth.py#L48)、[bili_meta.py](../backend/app/bili_meta.py#L148)、[bili_policy.py](../backend/app/bili_policy.py#L38) |
+| B站 上传编排 | 单 worker 串行投稿、投稿间隔、状态写库与重启收敛、环境体检、事件发布。与下载链路**完全解耦**：独立账号、独立登录文件、独立队列。 | [BiliManager](../backend/app/bili_manager.py#L297) |
+| B站 领域与边界 | 单次投稿的领域逻辑（对账后定结论）、`biliup` 子进程边界、B站 会员态客户端、扫码登录与凭据摘要、元数据与硬限、文案常量。 | [bili_upload.py](../backend/app/bili_upload.py#L297)、[bili_bin.py](../backend/app/bili_bin.py#L267)、[bili_api.py](../backend/app/bili_api.py#L111)、[bili_auth.py](../backend/app/bili_auth.py#L75)、[bili_meta.py](../backend/app/bili_meta.py#L148)、[bili_policy.py](../backend/app/bili_policy.py#L38) |
 
 ## 组件关系
 
@@ -91,7 +91,7 @@ B站 上传有**自己的两套状态**，与 `JobStatus` 无关：
 - 稿件 [BiliUploadStatus](../backend/app/models.py#L89)：`queued` → `uploading` → `submitted`（命令成功、待对账）→ `published` / `reviewing` / `rejected`（按平台状态码折合）；命令失败落 `failed`，对账查不到落 `unverified`（待核对）。**`unverified` 不是失败的变体**：它表达「我们还不知道」，所以它的重试只重读平台、绝不重投。
 - 合集 [BiliSeasonStatus](../backend/app/models.py#L107)：`pending` → `grouping` → `grouped` / `failed`。`grouped` 只表示「已提交归集」——B站 对合集还有一道人工审核。
 
-进程重启后，停在 `uploading` 的记录（含 `queued`）一律折成**可重试的失败**，而不是永远停在「上传中」，见 [resume_interrupted](../backend/app/bili_manager.py#L323)。
+进程重启后，停在 `uploading` 的记录（含 `queued`）一律折成**可重试的失败**，而不是永远停在「上传中」，见 [resume_interrupted](../backend/app/bili_manager.py#L339)。
 
 ## 数据模型
 

@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -224,6 +225,39 @@ def test_run_single_marks_failed_and_skips_verification_when_the_command_fails(t
     assert result.status == BiliUploadStatus.failed.value
     assert "太快" in (result.error or "")
     assert transport.called("/x/web/archives") == 0
+
+
+def test_run_single_writes_the_raw_output_into_the_log_on_failure(tmp_path, caplog):
+    """失败时原始输出必须进**日志文件**，不能只留在库里的 `log_tail`。
+
+    用户的下一步动作就是照我们给的失败建议去翻 app.log；过去那里只有我们自己那一行
+    「bili 投稿未成功」，biliup 的原文一行都没有 —— 照做的人一定扑空。
+    这条用例同时钉住那个可 grep 的前缀（建议文案里写的就是它）。
+    """
+    transport = FakeBiliTransport(archives=[])
+    video = write_video(tmp_path / "a.mp4")
+    raw = 'Error: {"code":-400,"data":null,"message":"请求错误","ttl":1}'
+    runner = command_runner(returncode=1, stdout=raw, lines=(raw, "start pre_upload"))
+    with caplog.at_level(logging.WARNING, logger="app.bili_upload"):
+        result = run_single(
+            make_context(transport, runner=runner, tmp_path=tmp_path), UploadTarget(1, TITLE, video), single_meta()
+        )
+    assert result.status == BiliUploadStatus.failed.value
+    logged = [record.getMessage() for record in caplog.records if record.name == "app.bili_upload"]
+    assert any(message.startswith("biliup 输出 | ") and "请求错误" in message for message in logged), logged
+
+
+def test_run_single_never_logs_the_raw_output_of_a_successful_upload(tmp_path, caplog):
+    """成功时不必把整段输出刷进日志 —— 那会把排障用的那几行淹掉。"""
+    transport = FakeBiliTransport(archives=[archive()])
+    video = write_video(tmp_path / "a.mp4")
+    with caplog.at_level(logging.WARNING, logger="app.bili_upload"):
+        run_single(
+            make_context(transport, runner=command_runner(), tmp_path=tmp_path),
+            UploadTarget(1, TITLE, video),
+            single_meta(),
+        )
+    assert not [r for r in caplog.records if "biliup 输出" in r.getMessage()]
 
 
 def test_run_single_rejects_a_missing_video_without_running_anything(tmp_path):

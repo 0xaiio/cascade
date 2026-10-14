@@ -32,7 +32,7 @@
 | [job_manager.py](../backend/app/job_manager.py#L43) | L2 编排 | 队列、worker、并发、暂停/重启/删除、进度 hook、错误分类、终态收敛、事件发布。 | 不直接调用 yt-dlp（经 `YtDlpService`），不解析 yt-dlp 内部结构（经 formats 工具），**不做降级判定**（判定在 `resolution_decisions`）。 |
 | [job_read_model.py](../backend/app/job_read_model.py#L12) | L2 编排 | 把表投影成 API 读模型：聚合分辨率/格式、`elapsed_seconds`、降级消息。 | 不写库、不改状态。 |
 | [events.py](../backend/app/events.py#L7) | L2 编排 | 进程内 SSE 扇出（每个订阅者一个队列）。 | 不持久化事件（持久化在 `job_manager`）。 |
-| [bili_manager.py](../backend/app/bili_manager.py#L281) | L2 编排 | B站 上传的队列与编排：单 worker 串行、投稿间隔（抗账号级频控）、状态写库与收敛、重启后把中断记录折成可重试失败、环境体检、事件发布。 | 不直接调 `biliup`（经 `bili_upload`），不解析 B站 内部结构（经 `bili_api`），不算界面徽标（经 `bili_read_model`）。 |
+| [bili_manager.py](../backend/app/bili_manager.py#L297) | L2 编排 | B站 上传的队列与编排：单 worker 串行、投稿间隔（抗账号级频控）、状态写库与收敛、重启后把中断记录折成可重试失败、环境体检、事件发布。 | 不直接调 `biliup`（经 `bili_upload`），不解析 B站 内部结构（经 `bili_api`），不算界面徽标（经 `bili_read_model`）。 |
 | [bili_read_model.py](../backend/app/bili_read_model.py#L60) | L2 编排 | 把 `bili_upload` / `bili_season` 投影成 API 读模型；**「多条记录 → 一档徽标」的聚合规则**只在这里定义。 | 不写库、不改状态；`elapsed_seconds` 复用 `job_read_model`（见下方「同层横向依赖」）。 |
 | [ytdlp_service.py](../backend/app/ytdlp_service.py#L88) | L3 领域 | yt-dlp 边界：元数据、预检测、参数构建、profile 重试链、错误分类、依赖诊断。 | 不碰数据库，不决定任务状态。 |
 | [ytdlp_formats.py](../backend/app/ytdlp_formats.py#L9) | L3 领域 | 格式选择器、分辨率/大小/codec 提取、降级候选计算。 | 不导入 yt-dlp。 |
@@ -52,16 +52,16 @@
 | [output_paths.py](../backend/app/output_paths.py#L13) | L3 领域 | 输出文件、中间文件与 sidecar 的候选路径解析与发现。 | 不删除文件（删除由 `job_manager` 在受限根目录内执行）。 |
 | [safe_delete.py](../backend/app/safe_delete.py#L22) | L3 领域 | 删除产物的**路径安全判定**：允许范围（`DeleteScope`）、某路径是否可删、任务目录是否可收走。纯函数，可单测。 | 不删任何东西（`unlink` / `rmdir` 由 `job_manager` 执行），不枚举候选（枚举在 `output_paths`）。 |
 | [bili_upload.py](../backend/app/bili_upload.py#L297) | L3 领域 | **单次上传的领域逻辑**：编排 `bili_bin` + `bili_api` + `bili_meta`，产出「已发布/审核中/待核对/失败」的结论与下一步。含模板批量渲染与逐条校验。纯函数式，可整链离线单测。 | 不写库、不发事件、不做队列；不重试、不改状态。 |
-| [bili_bin.py](../backend/app/bili_bin.py#L263) | L3 领域 | 投稿工具边界：`biliup` 探测（含 WinGet 0 字节空壳识别与修复）、命令组装、子进程执行、进度解析、ffmpeg 抽封面。 | 不写库、不发 B站 请求、不生成元数据。 |
+| [bili_bin.py](../backend/app/bili_bin.py#L267) | L3 领域 | 投稿工具边界：`biliup` 探测（含 WinGet 0 字节空壳识别与修复）、命令组装、子进程执行、进度解析、ffmpeg 抽封面。 | 不写库、不发 B站 请求、不生成元数据。 |
 | [bili_api.py](../backend/app/bili_api.py#L111) | L3 领域 | B站 会员态客户端：稿件对账、稿件详情（cid/封面）、创建合集、归集稿件、列出合集、发并置顶评论。全部经可注入 `transport`。 | 不调 `biliup`、不读库、不决定「该不该归集」。 |
-| [bili_auth.py](../backend/app/bili_auth.py#L48) | L3 领域 | 扫码登录（生成二维码 / 轮询状态）、登录文件读写（四形态兼容）、**凭据摘要（只回传名字与计数，无值、无前缀）**、是否被 git 跟踪。 | 不发 B站 业务请求、不写库。 |
+| [bili_auth.py](../backend/app/bili_auth.py#L75) | L3 领域 | 扫码登录（生成二维码 / 轮询状态）、**TV 端三步换投稿令牌**、登录文件读写（四形态兼容）、**凭据摘要（只回传名字与计数，无值、无前缀）**、是否被 git 跟踪。 | 不发 B站 业务请求、不写库。 |
 | [bili_meta.py](../backend/app/bili_meta.py#L148) | L3 领域 | 投稿元数据：模板占位符渲染（显式替换，不用 `str.format`）、标签派生与收敛、分区小词表、平台硬限校验。 | 超限只报错不截断；不计长度之外的事，不读库、不发请求。 |
 | [bili_policy.py](../backend/app/bili_policy.py#L38) | L3 领域 | B站 上传的**文案与分类常量**：平台状态码→人话、记录状态→人话、错误输出→（结论 + 下一步）、徽标档位与配色。 | 不做判定（判定在 `bili_upload` / `bili_manager` / `bili_read_model`）。 |
 | [system_open.py](../backend/app/system_open.py#L23) | L3 领域 | 选择可解码播放器、打开目录、窗口置前。 | 不校验文件是否存在（调用方先解析路径）。 |
 | [db.py](../backend/app/db.py#L27) | L4 基础设施 | engine 创建、SQLite pragma、补列、WAL checkpoint、session 依赖。 | 不知道业务表语义。 |
 | [logging_setup.py](../backend/app/logging_setup.py#L48) | L4 基础设施 | 配置 root/uvicorn logger，落盘 `data/logs/app.log` 并轮转。 | 不决定打什么日志，不解析业务语义。 |
 | [bili_http.py](../backend/app/bili_http.py#L66) | L4 基础设施 | B站 请求的 HTTP 接缝：标准库 `urllib` 实现、**强制直连（清空 ProxyHandler）**、4xx/5xx 也带回正文与 `Set-Cookie`。 | 不知道任何端点的语义（端点与参数在 `bili_api` / `bili_auth`）。 |
-| [paths.py](../backend/app/paths.py#L7) / [log_safety.py](../backend/app/log_safety.py#L15) | L5 纯工具 | 文件名安全化、日志敏感信息清洗。 | 无项目内依赖，可单独测试。 |
+| [paths.py](../backend/app/paths.py#L7) / [log_safety.py](../backend/app/log_safety.py#L20) | L5 纯工具 | 文件名安全化、日志敏感信息清洗。 | 无项目内依赖，可单独测试。 |
 
 ## 前端组件边界
 
@@ -170,7 +170,7 @@ worker 领取 item → 声明式预检测（`prepare_download`，命中则不再
 两条与平台语义直接相关的约束：
 
 - **命令返回码 0 不等于已发布**。`biliup` 退出后必须用账号的稿件列表回读对账（按标题前缀匹配，两侧都做空白归一），对不上就是 `unverified`（「待核对」，不是失败）——两者措辞必须分开，否则用户会去重投一条**已经投上去**的稿件。
-- **重试动作由终态决定，而不是由按钮决定**：`failed` / `rejected` → 重新投稿（复用同一行，`attempt` 自增）；`unverified` → **只**重读平台列表，绝不重投；已发布或在途 → 什么都不做。判定只在 [BiliManager](../backend/app/bili_manager.py#L281) 里做，界面只负责把这个结论显示出来。
+- **重试动作由终态决定，而不是由按钮决定**：`failed` / `rejected` → 重新投稿（复用同一行，`attempt` 自增）；`unverified` → **只**重读平台列表，绝不重投；已发布或在途 → 什么都不做。判定只在 [BiliManager](../backend/app/bili_manager.py#L297) 里做，界面只负责把这个结论显示出来。
 
 ## 状态机与一致性
 
@@ -187,7 +187,7 @@ B站 上传有**自己的两套状态**，与 `JobStatus` 无关：
 - `BiliUpload.status`（8 态）：`queued` → `uploading` → 三选一分支 —— `submitted`（命令成功、还没对账）→ `published` / `reviewing` / `rejected`（平台稿件状态码折合）；命令失败或对账查不到则落到 `unverified`（待核对）或 `failed`。`unverified` **不是失败**：它表达「我们还不知道」，所以它的重试只重读平台，不重投。
 - `BiliSeason.status`（4 态）：`pending` → `grouping` → `grouped` / `failed`。`grouped` 的文案是「已提交归集（B站 需人工审核）」——平台侧还有一个看不见的人工审核环节，界面不能承诺「合集已上线」。
 
-界面上的那**一档徽标**（`none` / `uploading` / `uploaded` / `unverified` / `partial` / `failed`）不落库，由 [derive_badge](../backend/app/bili_read_model.py#L60) 从「这个任务的全部记录 + 合集记录」现场算出来 —— 多条记录的聚合规则只有这一处，前端不参与。重启后的一致性靠 [resume_interrupted](../backend/app/bili_manager.py#L323)：进程退出时停在 `uploading` 的记录（含 `queued`）一律折成**可重试的失败**，而不是永远停在「上传中」。
+界面上的那**一档徽标**（`none` / `uploading` / `uploaded` / `unverified` / `partial` / `failed`）不落库，由 [derive_badge](../backend/app/bili_read_model.py#L60) 从「这个任务的全部记录 + 合集记录」现场算出来 —— 多条记录的聚合规则只有这一处，前端不参与。重启后的一致性靠 [resume_interrupted](../backend/app/bili_manager.py#L339)：进程退出时停在 `uploading` 的记录（含 `queued`）一律折成**可重试的失败**，而不是永远停在「上传中」。
 
 ## 持久化设计
 

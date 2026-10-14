@@ -109,11 +109,13 @@ async def bili_login_poll(ctx: ContextDep, qrcode_key: str = Query(min_length=1)
         return BiliLoginPollRead(state=result.state, message=result.message)
 
     mid = int(result.jar["DedeUserID"]) if str(result.jar.get("DedeUserID", "")).isdigit() else None
-    await asyncio.to_thread(manager.save_login, result.jar, mid)
+    warning = await asyncio.to_thread(manager.save_login, result.jar, mid)
     account = await asyncio.to_thread(manager.account)
     return BiliLoginPollRead(
         state="confirmed",
-        message=result.message,
+        # 换不到令牌要说出来：那次登录对「读稿件状态」够用，对「投稿」不够用，
+        # 而两者在界面上只差一个词，事后用户根本分不清哪一步没成。
+        message=result.message if not warning else f"{result.message}，但没能取到投稿要用的登录令牌：{warning}",
         logged_in=account is not None,
         account=account,
     )
@@ -133,6 +135,10 @@ async def bili_import_cookies(ctx: ContextDep, file: UploadFile = File(...)) -> 
     path.write_bytes(content)
     # 换了登录态，之前那次扫码会话就作废了。
     manager.reset_login_session()
+    # 顺手补齐投稿令牌。只导入一份 cookies 的文件在 biliup 眼里是**不能投稿**的 —— 它缺的正是
+    # 那次「用 cookies 换 TV 令牌」的交换。放在这里而不是让用户去按某个按钮：导入一份能用的
+    # 登录文件本来就该是一次动作。文件已经有令牌、或者读不出内容时它什么都不做。
+    await asyncio.to_thread(manager.ensure_upload_token)
     return await manager.health()
 
 

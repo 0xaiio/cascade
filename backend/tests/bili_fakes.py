@@ -135,6 +135,13 @@ class FakeBiliTransport:
         poll_code: int | str = 86101,
         poll_url: str = "",
         poll_error: Exception | None = None,
+        tv_access_token: str = "tv-access-token",
+        tv_refresh_token: str = "tv-refresh-token",
+        tv_poll_codes: list[int] | None = None,
+        tv_auth_code_error: Exception | None = None,
+        tv_confirm_error: Exception | None = None,
+        tv_confirm_code: int = 0,
+        tv_confirm_message: str = "ok",
     ) -> None:
         self.archives = [dict(DEFAULT_ARCHIVE)] if archives is UNSET else list(archives or [])
         # 稿件列表有平台侧延迟。`archives_ok_after=N` 让**前 N 次**读取失败、之后成功，
@@ -166,6 +173,16 @@ class FakeBiliTransport:
         self.poll_code = poll_code
         self.poll_url = poll_url
         self.poll_error = poll_error
+        # 投稿令牌交换（`bili_auth.exchange_tv_token`）。默认一次到位；
+        # `tv_poll_codes` 用来构造「前几拍还没确认」的那条分支。
+        self.tv_access_token = tv_access_token
+        self.tv_refresh_token = tv_refresh_token
+        self.tv_poll_codes = list(tv_poll_codes) if tv_poll_codes is not None else [0]
+        self.tv_polls = 0
+        self.tv_auth_code_error = tv_auth_code_error
+        self.tv_confirm_error = tv_confirm_error
+        self.tv_confirm_code = tv_confirm_code
+        self.tv_confirm_message = tv_confirm_message
         # 每一次调用都记下来：断言「该调的调了、不该调的没调」全靠它。
         self.calls: list[dict[str, Any]] = []
         self.comments: list[dict[str, Any]] = []
@@ -209,6 +226,45 @@ class FakeBiliTransport:
             if self.poll_error is not None:
                 raise self.poll_error
             return self._json({"code": 0, "data": {"code": self.poll_code, "url": self.poll_url}})
+        if url.endswith("/x/passport-tv-login/qrcode/auth_code"):
+            if self.tv_auth_code_error is not None:
+                raise self.tv_auth_code_error
+            return self._json(
+                {
+                    "code": 0,
+                    "data": {"auth_code": "tv-auth-code", "url": "https://passport.bilibili.com/confirm?x=1"},
+                }
+            )
+        if url.endswith("/x/passport-tv-login/h5/qrcode/confirm"):
+            if self.tv_confirm_error is not None:
+                raise self.tv_confirm_error
+            return self._json(
+                {"code": self.tv_confirm_code, "message": self.tv_confirm_message, "data": {"gourl": ""}}
+            )
+        if url.endswith("/x/passport-tv-login/qrcode/poll"):
+            index = min(self.tv_polls, len(self.tv_poll_codes) - 1)
+            code = self.tv_poll_codes[index]
+            self.tv_polls += 1
+            if code != 0:
+                return self._json({"code": code, "message": "二维码尚未确认", "data": None})
+            return self._json(
+                {
+                    "code": 0,
+                    "data": {
+                        "cookie_info": {
+                            "cookies": [{"name": "SESSDATA", "value": "sess-value"}],
+                            "domains": [".bilibili.com"],
+                        },
+                        "sso": [],
+                        "token_info": {
+                            "access_token": self.tv_access_token,
+                            "refresh_token": self.tv_refresh_token,
+                            "expires_in": 15552000,
+                            "mid": 42,
+                        },
+                    },
+                }
+            )
         if url.endswith("/x/web-interface/nav"):
             if self.account is None:
                 return self._json({"code": 0, "data": {"isLogin": False}})

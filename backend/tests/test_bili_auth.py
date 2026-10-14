@@ -15,17 +15,26 @@ from pathlib import Path
 import pytest
 
 from app.bili_auth import (
+    TV_APPKEY,
+    TV_AUTH_CODE_URL,
+    TV_CONFIRM_URL,
+    TV_POLL_NOT_CONFIRMED,
+    TV_POLL_URL,
     POLL_MESSAGE,
     POLL_STATE_BY_CODE,
     REQUIRED_COOKIES,
     BiliLoginSession,
+    TvToken,
+    app_sign,
     build_login_info,
     cookie_header,
     cookie_summary,
     delete_cookie_file,
+    exchange_tv_token,
     is_cookie_tracked_by_git,
     load_cookie_jar,
     missing_required_cookies,
+    read_login_token,
     write_cookie_file,
 )
 from app.bili_http import HttpError, HttpResult
@@ -126,12 +135,55 @@ def test_build_login_info_omits_empty_values():
     assert names == ["SESSDATA"]
 
 
-def test_build_login_info_shape_is_the_one_biliup_reads():
-    info = build_login_info({"SESSDATA": SECRET}, mid=42, refresh_token="rt")
-    assert info["token_info"]["mid"] == 42
-    assert info["token_info"]["refresh_token"] == "rt"
+def test_build_login_info_carries_the_upload_token():
+    """令牌必须写进去，且 `platform` 只能是 BiliTV。
+
+    这两条都不是「顺手填」：缺令牌时 biliup 会在发出任何投稿请求之前退出（空 access_token 打
+    `oauth2/info` 得到 `-400 请求错误`）；`platform` 错了则令牌到期后 biliup 的 `renew` 会
+    原样返回、静默不续期，一个月后突然开始投稿失败。
+    """
+    token = TvToken(access_token="at", refresh_token="rt", expires_in=15552000, mid=7)
+    info = build_login_info({"SESSDATA": SECRET}, mid=42, token=token)
+    assert info["token_info"] == {
+        "access_token": "at",
+        "expires_in": 15552000,
+        "mid": 7,
+        "refresh_token": "rt",
+    }
+    assert info["platform"] == "BiliTV"
     assert ".bilibili.com" in info["cookie_info"]["domains"]
     assert info["sso"] == []
+
+
+def test_build_login_info_without_a_token_produces_a_file_biliup_will_reject():
+    """没有令牌时写出的就是那个「看着正常、其实投不了稿」的文件 —— 这件事要显式钉住，
+    因为界面上的三项体检曾经对它一路放绿。"""
+    info = build_login_info({"SESSDATA": SECRET}, mid=42)
+    assert info["token_info"]["access_token"] == ""
+    assert "platform" not in info
+
+
+def test_read_login_token_only_reports_presence(tmp_path):
+    path = tmp_path / "cookies.json"
+    assert read_login_token(path).has_access_token is False  # 文件不存在
+    path.write_text("not json", encoding="utf-8")
+    assert read_login_token(path).has_access_token is False
+    path.write_text("{}", encoding="utf-8")
+    assert read_login_token(path).has_access_token is False
+    write_cookie_file(path, {"SESSDATA": SECRET}, 42)
+    assert read_login_token(path).has_access_token is False
+    write_cookie_file(
+        path,
+        {"SESSDATA": SECRET},
+        42,
+        TvToken(access_token="ACCESS-LEAK", refresh_token="REFRESH-LEAK", expires_in=1, mid=7),
+    )
+    state = read_login_token(path)
+    assert state.has_access_token and state.has_refresh_token
+    assert state.mid == 7 and state.platform == "BiliTV"
+    # 摘要里**不能出现值**：这个对象会被体检直接投影给界面。
+    # （注意断言要拿具体的值比，别拿 `"at"` 这种两字母 —— 它会撞上 `platform` 里的 `at`。）
+    assert "ACCESS-LEAK" not in repr(state) and "REFRESH-LEAK" not in repr(state)
 
 
 def test_delete_cookie_file_reports_whether_it_did_anything(tmp_path):
@@ -330,3 +382,171 @@ def test_every_poll_state_has_a_message():
     """
     for state in (*POLL_STATE_BY_CODE.values(), "unknown"):
         assert POLL_MESSAGE.get(state, "").strip(), state
+
+
+# ---------------------------------------------------------------- 投稿令牌交换
+class TvTransport:
+    """只认识令牌交换那三个端点。每个端点都能被改成失败，用来走完分支。"""
+
+    def __init__(
+        self,
+        *,
+        auth_code="tv-auth-code",
+        auth_payload=None,
+        confirm_payload=None,
+        poll_codes=(0,),
+        token=None,
+        error=None,
+    ) -> None:
+        self.auth_code = auth_code
+        self.auth_payload = auth_payload
+        self.confirm_payload = (
+            confirm_payload if confirm_payload is not None else {"code": 0, "message": "OK", "data": {"gourl": ""}}
+        )
+        self.poll_codes = list(poll_codes)
+        self.token = token or {
+            "access_token": "at-value",
+            "refresh_token": "rt-value",
+            "expires_in": 15552000,
+            "mid": 42,
+        }
+        self.error = error
+        self.polls = 0
+        self.calls: list[dict] = []
+
+    def request(self, method, url, *, params=None, headers=None, form=None, json_body=None, timeout=20.0):
+        self.calls.append({"method": method, "url": url, "headers": headers or {}, "form": form or {}})
+        if self.error is not None:
+            raise self.error
+        if url == TV_CONFIRM_URL:
+            return HttpResult(200, json.dumps(self.confirm_payload))
+        if url == TV_POLL_URL:
+            index = min(self.polls, len(self.poll_codes) - 1)
+            code = self.poll_codes[index]
+            self.polls += 1
+            if code != 0:
+                return HttpResult(200, json.dumps({"code": code, "message": "未确认"}))
+            return HttpResult(
+                200,
+                json.dumps(
+                    {
+                        "code": 0,
+                        "data": {
+                            "cookie_info": {"cookies": [{"name": "SESSDATA", "value": "s"}], "domains": []},
+                            "sso": [],
+                            "token_info": self.token,
+                        },
+                    }
+                ),
+            )
+        payload = self.auth_payload
+        if payload is None:
+            payload = {"code": 0, "message": "OK", "data": {"auth_code": self.auth_code, "url": "u"}}
+        return HttpResult(200, json.dumps(payload))
+
+    def form_for(self, url: str) -> dict:
+        return next(call["form"] for call in self.calls if call["url"] == url)
+
+    def headers_for(self, url: str) -> dict:
+        return next(call["headers"] for call in self.calls if call["url"] == url)
+
+
+def test_app_sign_matches_the_frozen_biliup_value():
+    """签名算法必须逐字节等于 biliup 的。
+
+    签名不对时 B站 回的是**同一个** `-400 请求错误` —— 「我算错了」会被伪装成「你的凭据坏了」，
+    排查方向直接跑偏。所以这里钉一个算好的字面值，而不是在测试里把实现再抄一遍。
+    """
+    frozen = {"appkey": TV_APPKEY, "local_id": "0", "ts": 1700000000}
+    assert app_sign(frozen) == "ebb086c9f52ae7393619a89bdc320e45"
+
+
+def test_app_sign_sorts_keys_alphabetically():
+    assert app_sign({"b": "2", "a": "1"}) == app_sign({"a": "1", "b": "2"})
+
+
+def test_exchange_tv_token_returns_a_real_token():
+    transport = TvTransport()
+    token = exchange_tv_token(transport, {"SESSDATA": "s", "bili_jct": "j"}, sleeper=lambda _s: None)
+    assert token.access_token == "at-value"
+    assert token.refresh_token == "rt-value"
+    assert token.expires_in == 15552000
+    assert token.mid == 42
+
+
+def test_exchange_tv_token_confirms_with_the_users_own_cookies():
+    """确认这一步是用用户已有的 cookies 替他点的 —— 少了这个 Cookie 头，B站 会说没权限。"""
+    transport = TvTransport()
+    exchange_tv_token(transport, {"SESSDATA": "s", "bili_jct": "j"}, sleeper=lambda _s: None)
+    headers = transport.headers_for(TV_CONFIRM_URL)
+    assert headers["Cookie"] == "SESSDATA=s; bili_jct=j"
+    assert transport.form_for(TV_CONFIRM_URL)["csrf"] == "j"
+
+
+def test_exchange_tv_token_drops_the_junk_picked_up_from_the_callback_url():
+    """扫码时从回调 URL 上顺手捡来的 `gourl` / `sid` **不是 cookie**（那是查询参数的名字）。
+    一起发过去只是给对方一个「这个客户端行为很奇怪」的信号。"""
+    transport = TvTransport()
+    jar = {"SESSDATA": "s", "bili_jct": "j", "gourl": "https://x", "sid": "abc", "first_domain": ".bilibili.com"}
+    exchange_tv_token(transport, jar, sleeper=lambda _s: None)
+    assert transport.headers_for(TV_CONFIRM_URL)["Cookie"] == "SESSDATA=s; bili_jct=j"
+
+
+def test_exchange_tv_token_signs_the_appkey_rounds_but_not_the_confirmation():
+    """两组参数风格**相反**，这一点很容易写错：
+
+    - 申请二维码与轮询走 appkey 签名（`sign` 在表单里）；
+    - h5 确认走的是**用户自己的 csrf**（`csrf` 在表单里、`Cookie` 在头上），**没有 sign**。
+    """
+    transport = TvTransport()
+    exchange_tv_token(transport, {"SESSDATA": "s", "bili_jct": "j"}, sleeper=lambda _s: None)
+    signed = {call["url"] for call in transport.calls if call["form"].get("sign")}
+    assert TV_AUTH_CODE_URL in signed and TV_POLL_URL in signed
+    assert TV_CONFIRM_URL not in signed
+
+
+def test_exchange_tv_token_retries_while_the_platform_says_not_confirmed():
+    """自动确认刚发出去时可能赶上「还没确认」这一拍 —— 这一拍不该被判成失败。"""
+    slept: list[float] = []
+    transport = TvTransport(poll_codes=(TV_POLL_NOT_CONFIRMED, TV_POLL_NOT_CONFIRMED, 0))
+    token = exchange_tv_token(transport, {"SESSDATA": "s", "bili_jct": "j"}, sleeper=slept.append)
+    assert token.access_token == "at-value"
+    assert transport.polls == 3
+    assert len(slept) == 2
+
+
+def test_exchange_tv_token_gives_up_after_the_attempt_limit():
+    transport = TvTransport(poll_codes=(TV_POLL_NOT_CONFIRMED,))
+    with pytest.raises(HttpError, match="还没被确认"):
+        exchange_tv_token(transport, {"SESSDATA": "s", "bili_jct": "j"}, sleeper=lambda _s: None)
+
+
+def test_exchange_tv_token_fails_fast_on_an_unexpected_poll_code():
+    """其它码是确定性拒绝，重试只是白等 —— 必须立刻把码报出来。"""
+    transport = TvTransport(poll_codes=(-400,))
+    with pytest.raises(HttpError, match="code=-400"):
+        exchange_tv_token(transport, {"SESSDATA": "s", "bili_jct": "j"}, sleeper=lambda _s: None)
+
+
+def test_exchange_tv_token_reports_a_refused_confirmation():
+    transport = TvTransport(confirm_payload={"code": -400, "message": "请求错误", "data": None})
+    with pytest.raises(HttpError, match="拒绝了用当前登录换投稿令牌"):
+        exchange_tv_token(transport, {"SESSDATA": "s", "bili_jct": "j"}, sleeper=lambda _s: None)
+
+
+def test_exchange_tv_token_reports_a_missing_auth_code():
+    transport = TvTransport(auth_payload={"code": 0, "message": "OK", "data": {}})
+    with pytest.raises(HttpError, match="没能签发投稿用的二维码"):
+        exchange_tv_token(transport, {"SESSDATA": "s", "bili_jct": "j"}, sleeper=lambda _s: None)
+
+
+@pytest.mark.parametrize("jar", [{}, {"SESSDATA": "s"}, {"bili_jct": "j"}])
+def test_exchange_tv_token_needs_both_web_cookies(jar):
+    with pytest.raises(HttpError, match="SESSDATA 或 bili_jct"):
+        exchange_tv_token(TvTransport(), jar, sleeper=lambda _s: None)
+
+
+def test_exchange_tv_token_reports_a_token_less_response():
+    transport = TvTransport(token={"access_token": "", "refresh_token": "", "expires_in": 0, "mid": 1})
+    with pytest.raises(HttpError, match="没有 access_token"):
+        exchange_tv_token(transport, {"SESSDATA": "s", "bili_jct": "j"}, sleeper=lambda _s: None)

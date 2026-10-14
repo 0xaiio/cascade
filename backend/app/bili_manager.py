@@ -34,11 +34,14 @@ from sqlmodel import Session, select
 from .bili_api import fetch_account
 from .bili_auth import (
     BiliLoginSession,
+    TvToken,
     cookie_summary,
     delete_cookie_file,
+    exchange_tv_token,
     is_cookie_tracked_by_git,
     load_cookie_jar,
     missing_required_cookies,
+    read_login_token,
     write_cookie_file,
 )
 from .bili_bin import (
@@ -67,6 +70,7 @@ from .bili_policy import (
     MISSING_COOKIE,
     MISSING_COOKIE_FIELDS,
     MISSING_FFMPEG,
+    MISSING_UPLOAD_TOKEN,
     MISSING_VIDEO,
     NOT_LOGGED_IN,
 )
@@ -90,6 +94,7 @@ from .bili_upload import (
 )
 from .config import REPO_ROOT, AppSettings
 from .events import EventBroker
+from .log_safety import sanitize_log_message
 from .models import (
     BiliSeason,
     BiliSeasonStatus,
@@ -151,6 +156,17 @@ def _new_id() -> str:
 
 def _advice(pair: tuple[str, str]) -> BiliAdvice:
     return BiliAdvice(message=pair[0], advice=pair[1])
+
+
+def _log_biliup_line(line: str) -> None:
+    """biliup 的一行原始输出 → 日志。
+
+    过一遍脱敏再落：工具会打印什么不在我们控制之内，而这条通道最终会进用户会分享的日志文件。
+    空行与进度条的转义串（每帧都在变）不落，否则日志会被刷成噪声。
+    """
+    text = sanitize_log_message(line)
+    if text.strip():
+        logger.debug("biliup 运行 | %s", text)
 
 
 # ================================================================ 健康检查
@@ -359,9 +375,38 @@ class BiliManager:
             self._login = BiliLoginSession(self.transport)
         return self._login
 
-    def save_login(self, jar: dict[str, str], mid: int | None, refresh_token: str = "") -> None:
-        write_cookie_file(self.settings.bili_cookie_path, jar, mid, refresh_token)
+    def save_login(self, jar: dict[str, str], mid: int | None = None) -> str | None:
+        """落盘登录态，并**顺手把投稿令牌换回来**。返回值是「没换成时的原因」，成功即 `None`。
+
+        只写 cookies 是**不完整**的登录：`biliup` 每次启动都先拿 `token_info.access_token` 去
+        `oauth2/info` 校验一次，没有令牌它连一个请求都不会发出去，而报错还是那个泛用的
+        `-400 请求错误`（实测过，见 ai/bug-fix 对应记录）。所以「登录」的完成判据是
+        **拿到令牌**，不是「文件里出现了 SESSDATA」。
+        """
+        token: TvToken | None = None
+        warning: str | None = None
+        try:
+            token = exchange_tv_token(self.transport, jar, sleeper=self.sleeper)
+        except Exception as exc:  # noqa: BLE001 - 换不到令牌也要把 cookies 留住：读接口还需要它
+            warning = sanitize_log_message(exc)
+            logger.warning("bili 换取投稿令牌失败：%s", warning)
+        write_cookie_file(self.settings.bili_cookie_path, jar, mid, token)
         self._login = None
+        return warning
+
+    def ensure_upload_token(self) -> str | None:
+        """给一份**已经落盘**的登录文件补上投稿令牌（「导入已有 cookies.json」走这里）。
+
+        已经有令牌就原样返回 —— 不重复换：换一次会作废上一次的令牌，等于把同时在用的另一个
+        客户端顶掉线。读不出内容时也不动那个文件（一张我们读不懂的文件更不该被我们清空）。
+        """
+        state = read_login_token(self.settings.bili_cookie_path)
+        if state.has_access_token:
+            return None
+        jar = self.current_jar()
+        if not jar:
+            return None
+        return self.save_login(jar, state.mid)
 
     def reset_login_session(self) -> None:
         """丢掉进行中的扫码会话。
@@ -410,6 +455,12 @@ class BiliManager:
             blockers.append(_advice(MISSING_COOKIE_FIELDS))
         if login.tracked_by_git:
             blockers.append(_advice(COOKIE_TRACKED_BY_GIT))
+        if login.present and not login.missing_required and not read_login_token(
+            self.settings.bili_cookie_path
+        ).has_access_token:
+            # 凭据齐、账号也认得，但**没有投稿令牌**。这一档过去是「静默通过」的：
+            # 面板三项全绿，一投稿就必失败，而失败原因（-400）在本地读不出来。
+            blockers.append(_advice(MISSING_UPLOAD_TOKEN))
         if login.account_checked and login.account is None:
             # 凭据齐全但平台说没登录 —— 这是「过期」，与「没有凭据」是两回事。
             blockers.append(_advice(NOT_LOGGED_IN))
@@ -642,6 +693,17 @@ class BiliManager:
                 MISSING_COOKIE_FIELDS[1],
                 code="missing_cookie_fields",
             )
+        self._require_upload_token()
+
+    def _require_upload_token(self) -> None:
+        """令牌是**硬前置**，必须在提交前拦下来。
+
+        没有它时 biliup 会照常启动、照常打印，然后立刻退出，报一个泛用的 `-400 请求错误` ——
+        用户看到的是「投稿失败，而且没能识别出具体原因」，而真实原因（缺令牌）在本地没法从
+        那个错误码里读出来。拦在提交前，至少能把话说清楚。
+        """
+        if not read_login_token(self.settings.bili_cookie_path).has_access_token:
+            raise BiliPreconditionError(*MISSING_UPLOAD_TOKEN, code="missing_upload_token")
 
     async def _enqueue(self, upload_id: str) -> None:
         await self.start()
@@ -830,6 +892,7 @@ class BiliManager:
                 MISSING_COOKIE_FIELDS[1],
                 code="missing_cookie_fields",
             )
+        self._require_upload_token()
         return UploadContext(
             biliup_exe=exe,
             cookie_path=self.settings.bili_cookie_path,
@@ -840,6 +903,9 @@ class BiliManager:
             runner=self.runner,
             sleeper=self.sleeper,
             on_progress=on_progress,
+            # 把 biliup 的每一行透到日志（DEBUG）。失败时的那几行会由 `bili_upload` 用 WARNING
+            # 再打一遍带前缀的副本 —— 那条路径不依赖日志级别，用户照失败建议去搜就一定搜得到。
+            on_log=_log_biliup_line,
         )
 
     def _respect_gap(self) -> None:

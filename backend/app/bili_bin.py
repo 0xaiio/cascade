@@ -155,8 +155,12 @@ def build_upload_argv(
 ) -> list[str]:
     """组装投稿命令。
 
-    `--submit web` 是**必须的**：cookie 文件登录拿不到 `token_info.access_token`，
-    而默认的 `client` 提交接口需要它。arXiv 项目的实测结论（见 01-requirements.md F6）。
+    `--submit` 仍然照传（值域是 `client|app|web`），但要清楚一件事：**在 0.2.4 里它不起作用**。
+    上游 `uploader.rs` 的 `match submit` 两个分支都调 `submit_by_app`（web 分支被注释掉了，
+    旁边留着一句「说不定会适配 web 呢」），而且 `biliup.exe` 里根本没有 `x/vu/web/add` 这个串
+    —— 只找得到 `x/vu/app/add`。所以实际提交永远走 App 接口。
+    早先这里写着「`--submit web` 是必须的，因为 cookie 登录拿不到 access_token」，**那两句都不对**：
+    真正拦住投稿的不是提交接口，是 `login_by_cookies` 在开工前那次令牌校验（见 `bili_auth`）。
     """
     argv: list[str] = [
         exe,

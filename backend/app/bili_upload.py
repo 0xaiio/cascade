@@ -345,6 +345,11 @@ def run_single(
         logger.warning(
             "bili 投稿未成功：index=%s rc=%s 结论=%s", target.index, command.returncode, conclusion
         )
+        # 原始输出必须进日志。此前它只落在库里的 `log_tail`（要经 API 才看得到），而失败建议
+        # 却是让用户去翻 app.log —— 于是照做的人什么都找不到。逐行打、带固定前缀，
+        # `grep "biliup 输出"` 就能把一次失败的全部上下文捞出来。
+        for row in (result.log_tail or "").splitlines():
+            logger.warning("biliup 输出 | %s", row)
         return _reject(result, (conclusion, advice))
 
     result.status = BiliUploadStatus.submitted.value

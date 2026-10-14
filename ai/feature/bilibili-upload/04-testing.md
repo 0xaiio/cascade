@@ -7,19 +7,27 @@
 
 | 层 | 文件 | 用例数 |
 | --- | --- | --- |
-| 纯工具（文案/状态折合） | `backend/tests/test_bili_policy.py` | 25 |
+| 纯工具（文案/状态折合） | `backend/tests/test_bili_policy.py` | 28 |
 | 纯工具（模板/标签/硬限） | `backend/tests/test_bili_meta.py` | 44 |
-| 基础设施（HTTP 接缝、扫码会话） | `backend/tests/test_bili_auth.py` | 39 |
+| 基础设施（HTTP 接缝、扫码会话） | `backend/tests/test_bili_auth.py` | 56 |
 | 基础设施（`biliup` 探测/命令/进度/执行） | `backend/tests/test_bili_bin.py` | 42 |
 | 领域（会员态接口） | `backend/tests/test_bili_api.py` | 63 |
-| 领域（单次上传编排） | `backend/tests/test_bili_upload.py` | 63 |
-| 编排（队列/落账/收敛/预填） | `backend/tests/test_bili_manager.py` | 58 |
+| 领域（单次上传编排） | `backend/tests/test_bili_upload.py` | 65 |
+| 编排（队列/落账/收敛/预填） | `backend/tests/test_bili_manager.py` | 64 |
 | 编排（读模型与徽标聚合） | `backend/tests/test_bili_read_model.py` | 47 |
 | 入口（13 个 operation 的状态码） | `backend/tests/test_api_bilibili.py` | 39 |
 | 共享替身 | `backend/tests/bili_fakes.py` | — |
-| **合计** | **9 个文件** | **420** |
+| **合计** | **9 个文件** | **448** |
 
-后端既有 **354** 项（22 个文件）保持全绿；前端 **69** 项（11 个文件）保持全绿。
+数字取自 `pytest --collect-only`（逐文件），与 `backend/tests` 全集 **804** 减去既有 **356** 相符。
+缺陷 [`011`](../../bug-fix/011-biliup-refuses-a-token-less-cookie-file.md) 修复后本表由 420 更新为 448：
+`test_bili_auth.py` **+17**（TV 三步令牌交换、签名冻结值、`build_login_info`/`read_login_token`）、
+`test_bili_manager.py` **+6**（投稿令牌前置条件与体检档）、`test_bili_policy.py` **+3**（`-400`/`61000` 分类）、
+`test_bili_upload.py` **+2**（失败原文进日志）。
+
+本功能合入前后端既有 **354** 项（22 个文件）保持全绿、前端 **69** 项（11 个文件）保持全绿；
+两处随后各自增长（011 给 `test_log_safety.py` 加了 2 项，本功能给前端加了 `bili-upload.test.tsx`），
+现状见 [docs/testing.md](../../../docs/testing.md) 的基线数字。
 跑法见 §5。
 
 ## 2. 覆盖策略：把「离线可测」当成设计约束
@@ -75,13 +83,21 @@
 
 ### 4.1 真实账号上的端到端
 
-一条都没有。`biliup` 与 B站 的所有调用都被替身换掉了 —— 这是为了让 420 个用例能在 1 分钟级跑完，
+一条都没有。`biliup` 与 B站 的所有调用都被替身换掉了 —— 这是为了让 448 个用例能在 1 分钟级跑完，
 代价是**「我们的请求形状与平台真实要求一致」没有被自动验证**。为此做了两件补偿：
 
 - 所有端点与参数名都取自 `bilibili-API-collect` 的实测记录，不是猜的
   （尤其 `episodes` / `sectionId` 是 camelCase，文档表格里那对下划线命名是笔误）；
-- `ai/feature/bilibili-upload/01-requirements.md` 的「技术事实」一节记录了每条结论的来源，
-  其中 `upload` 返回 0 ≠ 已发布、`--submit web` 必需、601 频控这三条来自 arXiv 项目的实测。
+- `ai/feature/bilibili-upload/01-requirements.md` 的「技术事实」一节记录了每条结论的来源。
+  其中三条来自 arXiv 项目的实测：`upload` 返回 0 ≠ 已发布（**必须对账**）、601 是账号侧频控、
+  封面 URL 由 `cover/up` 返回。另外两条在本功能上线后被**推翻**并改掉：
+  F6「cookie 登录必须走 `--submit web`」是错的（F6′），真正卡住投稿的是启动时那次令牌校验（F6″）。
+
+> **这套替身有一个系统性盲区，已经在真实投稿上付过代价**：替身只验证「我们发出的请求长什么样」，
+> 不验证「`biliup` 拿到我们的文件后会怎么反应」。011 那个缺陷（cookie 文件缺投稿令牌 → `biliup`
+> 一个请求都不发就退出）在 448 个用例里全程绿灯 —— 因为替身从来不会「拒绝」我们。
+> 教训：`biliup` 自己的**输入契约**（cookie 文件必须带哪些字段）也要当成待测契约，
+> 用冻结的字面值把签名与文件形状钉住，而不是只测我们这一侧的组装。
 
 **首次真实投稿必须手工验收**（见 §6）。
 
@@ -115,10 +131,10 @@ npx tsc --noEmit
 
 ### 5.1 本机沙箱：全量一次跑不完
 
-**把 774 个用例放在一个 pytest 进程里跑，会在第 50 次「删除」时被沙箱的批量删除守卫拦下**
-（`SAFE_DELETE_BULK_CONFIRM_REQUIRED`）。第一个 error 是守卫的 `SystemExit: 1`，
+**把全部用例放在一个 pytest 进程里跑（011 合入后共 804 项），会在第 50 次「删除」时被沙箱的
+批量删除守卫拦下**（`SAFE_DELETE_BULK_CONFIRM_REQUIRED`）。第一个 error 是守卫的 `SystemExit: 1`，
 之后整个进程被"毒化" —— 后续每个 `tmp_path` 夹具都在 setup 阶段报 `AssertionError`。
-实测结果：`644 passed, 130 errors`，**0 个 `FAILED`**，报错文件全是既有测试
+实测结果（当时全集 774 项）：`644 passed, 130 errors`，**0 个 `FAILED`**，报错文件全是既有测试
 （`test_ytdlp_service` / `test_output_paths` / `test_safe_delete` …），与本次改动无关。
 
 **判据：先看有没有 `FAILED`。** 全是「at setup of」+ `SAFE_DELETE` 一律是环境问题，不是代码问题。

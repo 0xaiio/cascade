@@ -25,6 +25,7 @@ import pytest
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.bili_bin import CommandResult, is_pe
+from app.bili_auth import TvToken, read_login_token, write_cookie_file
 from app.bili_http import HttpError
 from app.bili_manager import (
     CRASHED_UPLOAD_ERROR,
@@ -48,6 +49,15 @@ from app.models import (
 from bili_fakes import FakeBiliTransport, RecordingSleeper, command_runner
 
 TITLE = "演示标题"
+TEST_MID = 42
+# 一份「登录是完整的」令牌。**默认带上它**：只写 cookies 的文件在 biliup 眼里是不能投稿的
+# （它启动时先拿这个令牌去校验），所以「没有令牌」是一条要专门构造出来的分支，不是常态。
+TV_TOKEN = TvToken(
+    access_token="tv-access-token",
+    refresh_token="tv-refresh-token",
+    expires_in=15552000,
+    mid=TEST_MID,
+)
 
 
 # ---------------------------------------------------------------- 夹具
@@ -89,17 +99,9 @@ class Harness:
         )
         self.write_login()
 
-    def write_login(self, jar: dict[str, str] | None = None) -> None:
-        payload = {
-            "cookie_info": {
-                "cookies": [
-                    {"name": name, "value": value}
-                    for name, value in (jar or {"SESSDATA": "sess", "bili_jct": "jct", "DedeUserID": "42"}).items()
-                ]
-            }
-        }
-        self.settings.bili_cookie_path.parent.mkdir(parents=True, exist_ok=True)
-        self.settings.bili_cookie_path.write_text(json.dumps(payload), encoding="utf-8")
+    def write_login(self, jar: dict[str, str] | None = None, *, token: TvToken | None = TV_TOKEN) -> None:
+        values = jar if jar is not None else {"SESSDATA": "sess", "bili_jct": "jct", "DedeUserID": "42"}
+        write_cookie_file(self.settings.bili_cookie_path, values, TEST_MID, token)
 
     # -- 数据 --------------------------------------------------------------
     def seed_job(self, job_id: str, title: str, count: int) -> list[dict]:
@@ -836,10 +838,94 @@ async def test_clear_login_removes_the_file_and_reports_whether_it_did(tmp_path)
 
 
 async def test_save_login_writes_a_jar_that_can_be_read_back(tmp_path):
+    """登录的完成判据是**拿到令牌**，不只是「文件里有了 cookies」。
+
+    只写 cookies 的文件 biliup 会在开工前拒收（空 access_token 打 `oauth2/info` 得到
+    `-400 请求错误`），所以这里连令牌一起断言。
+    """
     harness = make_harness(tmp_path)
-    harness.manager.save_login({"SESSDATA": "new", "bili_jct": "new-jct"}, 42, "refresh")
+    warning = harness.manager.save_login({"SESSDATA": "new", "bili_jct": "new-jct"}, 42)
+    assert warning is None
     jar = harness.manager.current_jar()
     assert jar["SESSDATA"] == "new" and jar["bili_jct"] == "new-jct"
+    assert read_login_token(harness.settings.bili_cookie_path).has_access_token is True
+    await harness.manager.stop()
+
+
+async def test_save_login_keeps_the_cookies_when_the_token_exchange_fails(tmp_path):
+    """换不到令牌也要把 cookies 留住：读稿件状态、查合集都只用 cookies。
+
+    返回的 warning 会被登录接口拼进提示 —— 「登录成功」这四个字在投稿不通的时候是假消息。
+    """
+    transport = FakeBiliTransport(tv_confirm_code=-400, tv_confirm_message="请求错误")
+    harness = make_harness(tmp_path, transport=transport)
+    warning = harness.manager.save_login({"SESSDATA": "s", "bili_jct": "j"}, 42)
+    assert warning and "请求错误" in warning
+    assert harness.manager.current_jar()["SESSDATA"] == "s"
+    assert read_login_token(harness.settings.bili_cookie_path).has_access_token is False
+    await harness.manager.stop()
+
+
+async def test_ensure_upload_token_does_not_re_exchange_when_one_is_present(tmp_path):
+    """已经有令牌就不许再换：换一次会作废上一次的，等于把同时在用的另一个客户端顶掉线。"""
+    harness = make_harness(tmp_path)
+    assert harness.manager.ensure_upload_token() is None
+    assert harness.transport.called("/x/passport-tv-login/qrcode/auth_code") == 0
+    await harness.manager.stop()
+
+
+async def test_ensure_upload_token_fills_in_a_cookie_only_file(tmp_path):
+    """「导入一份 cookies.json」之后必须补上令牌 —— 那份文件在 biliup 眼里本来是不能投稿的。"""
+    harness = make_harness(tmp_path)
+    harness.write_login(token=None)
+    assert read_login_token(harness.settings.bili_cookie_path).has_access_token is False
+    assert harness.manager.ensure_upload_token() is None
+    assert read_login_token(harness.settings.bili_cookie_path).has_access_token is True
+    assert harness.transport.called("/x/passport-tv-login/qrcode/auth_code") == 1
+    # 再调一次不该再换。
+    assert harness.manager.ensure_upload_token() is None
+    assert harness.transport.called("/x/passport-tv-login/qrcode/auth_code") == 1
+    await harness.manager.stop()
+
+
+async def test_ensure_upload_token_leaves_an_unreadable_file_alone(tmp_path):
+    """读不出内容就不动它。一张我们读不懂的文件也不该被我们清空。"""
+    harness = make_harness(tmp_path)
+    harness.settings.bili_cookie_path.write_text("这不是 JSON", encoding="utf-8")
+    assert harness.manager.ensure_upload_token() is None
+    assert harness.settings.bili_cookie_path.read_text(encoding="utf-8") == "这不是 JSON"
+    await harness.manager.stop()
+
+
+async def test_submit_single_refuses_without_an_upload_token(tmp_path):
+    """没有令牌时 biliup 会在发出任何投稿请求之前退出，报的还是泛用的 `-400 请求错误`
+
+    —— 那正是「投稿失败但查不出原因」的来源。拦在提交前，至少能把话说清楚。
+    """
+    harness = make_harness(tmp_path)
+    items = harness.seed_job("job1", "任务", 1)
+    harness.write_login(token=None)
+    with pytest.raises(BiliPreconditionError) as excinfo:
+        await harness.manager.submit_single(
+            job_id="job1", item_id=items[0]["id"], meta=harness.meta(), video_path=Path(items[0]["path"]), make_cover=False, comment=""
+        )
+    assert excinfo.value.code == "missing_upload_token"
+    assert "重新登录" in excinfo.value.advice
+    await harness.manager.stop()
+
+
+async def test_health_reports_a_missing_upload_token_as_a_blocker(tmp_path):
+    """这一档过去是**静默通过**的：面板三项全绿，一投稿必失败。
+
+    漏掉它的代价不是「少一条提示」，而是用户拿着一个全绿的面板去查一个查不出来的错。
+    """
+    harness = make_harness(tmp_path)
+    harness.write_login(token=None)
+    status = await harness.manager.health()
+    assert status.ready is False
+    assert any("登录令牌" in blocker.message for blocker in status.blockers)
+    # 凭据本身是齐的 —— 缺的是令牌，不要误导用户去重新导入 cookies。
+    assert status.login.present is True and not status.login.missing_required
     await harness.manager.stop()
 
 

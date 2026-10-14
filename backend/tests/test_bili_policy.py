@@ -180,6 +180,37 @@ def test_classify_failure_matches_each_known_pattern(output, expected_message):
     assert classify_failure(output)[0] == expected_message
 
 
+def test_classify_failure_recognizes_the_raw_error_that_started_this():
+    """**真实投稿撞过的那一行**，逐字抄下来当夹具。
+
+    biliup 只打印这一行就退出（`-400 请求错误`），当时被折成「没能识别出具体原因」，
+    用户拿着这句话无处可查 —— 这就是把最贵的一次失败变成一条分类用例的原因。
+    """
+    raw = 'Error: {"code":-400,"data":null,"message":"请求错误","ttl":1}'
+    message, advice = classify_failure(raw)
+    assert message != "投稿没有成功，而且没能识别出具体原因"
+    assert "-400" in message
+    # 头号成因是凭据，下一步必须指向「看凭据 / 重新登录」，而不是一句泛泛的「重试」。
+    assert "凭据" in advice or "登录" in advice
+
+
+def test_classify_failure_recognizes_an_expired_app_token():
+    """`61000 登录状态异常` 比它后面那条泛用的「未登录」更准确，顺序不能倒。"""
+    message, _advice = classify_failure('{"code":61000,"message":"登录状态异常"}')
+    assert message == "B站 说这次登录状态异常，投稿凭据已经失效"
+    assert message != NOT_LOGGED_IN[0]
+
+
+def test_unknown_failure_advice_points_at_something_that_exists():
+    """这条建议以前写的是「去 app.log 搜索 BILI 看原始报错」，而那时的日志里**根本没有**
+    biliup 的输出（`on_log` 没有调用方）—— 一条指错地方的建议比没有建议更糟。
+
+    判据：建议里必须给出一个能被 grep 到的字面前缀，且那个前缀正是我们真的会写进日志的。
+    """
+    assert "biliup 输出" in UNKNOWN_FAILURE_ADVICE
+    assert "data/logs/app.log" in UNKNOWN_FAILURE_ADVICE
+
+
 def test_classify_failure_is_case_insensitive():
     assert classify_failure("No Space Left On Device")[0] == classify_failure("no space left")[0]
 

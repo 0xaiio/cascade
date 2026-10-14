@@ -13,7 +13,7 @@
 | `backend/app/bili_policy.py` | L5 纯工具 | 文案表、状态折合、失败分类 | 不含任何判定逻辑 |
 | `backend/app/bili_meta.py` | L5 纯工具 | 模板渲染、标签派生、平台硬限校验 | 不碰进程、不碰网络 |
 | `backend/app/bili_http.py` | L4 基础设施 | 唯一 HTTP 接缝（`Transport` 协议 + 标准库实现） | 不含业务码判断 |
-| `backend/app/bili_auth.py` | L3 领域 | 扫码登录会话、cookie 读写与摘要 | 不落盘策略（由 manager 决定） |
+| `backend/app/bili_auth.py` | L3 领域 | 扫码登录会话、**TV 端三步令牌交换**、cookie 文件读写与摘要 | 不落盘策略（由 manager 决定） |
 | `backend/app/bili_api.py` | L3 领域 | 会员态接口：对账、稿件详情、合集、置顶评论 | 不实现上传封面（见 §5.2） |
 | `backend/app/bili_bin.py` | L4 基础设施 | `biliup` 探测/命令组装/执行、ffmpeg 抽帧 | 不判断「投稿成功没成功」 |
 | `backend/app/bili_upload.py` | L3 领域 | 单次上传的领域逻辑（纯函数式） | **不写库、不发事件、不读全局配置** |
@@ -100,14 +100,23 @@
 
 ### 4.2 投稿流程（单条）
 
+「校验前置条件」这一格里最容易漏掉的是**投稿令牌**：`biliup` 的 `login_by_cookies` 在发第一个
+投稿请求之前会**无条件**拿 `token_info.access_token` 去 `oauth2/info` 验一次，验不过就以 `Err` 退出，
+**一个字节都不会发出去**。所以前置条件里有一条是「cookie 文件里必须有 access_token」，
+体检也会把它单列成一档阻塞项（详见 [011](../../bug-fix/011-biliup-refuses-a-token-less-cookie-file.md)）。
+
 ```
-校验前置条件 → 落一行 queued → 入队
-  worker: 置 uploading → （可选）抽封面 → 跑 biliup --submit web
-    ├─ 命令失败 → 按输出分类成（结论, 下一步）→ failed（**不查对账**）
+校验前置条件（含投稿令牌）→ 落一行 queued → 入队
+  worker: 置 uploading → （可选）抽封面 → 跑 biliup upload（`--submit` 照传但不起作用，见 01 的 F6′）
+    ├─ 命令失败 → 原文按 `biliup 输出` 前缀逐行写进 app.log
+    │            → 按输出分类成（结论, 下一步）→ failed（**不查对账**）
     └─ 命令成功 → 对账（标题前缀匹配 + 退避重试）
          ├─ 查不到 → unverified（带「重新核对」的下一步）
          └─ 查到 → 取 aid/bvid/状态 → 若 status ∈ {published, reviewing} 且 aid+cid 齐 → 发并置顶评论
 ```
+
+失败时把原文写进日志是 011 的修复项之一：原先 `UploadContext.on_log` 定义了、也调了，
+但**全仓库没有调用方**，于是失败提示让人去 `app.log` 搜 `BILI` 时，那里根本没有 `biliup` 的原话。
 
 ### 4.3 合集流程
 

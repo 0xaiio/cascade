@@ -22,7 +22,10 @@
 | F3 | `biliup-rs 0.2.4` 的 `upload` 支持 `--submit {client,app,web}`、`--tid/--title/--desc/--tag/--cover/--copyright/--dtime/--limit/--line/--extra-fields`。 | `biliup upload --help` 实测。 |
 | F4 | `biliup-rs 0.2.4` **不支持合集（season)归集**：二进制内 `season_id` 字符串 0 命中，`--help` 无任何 season 选项。 | 二进制字符串扫描 + `--help` 实测。 |
 | F5 | winget 源只有 `ForgQi.biliup-rs 0.2.4` 与 `ForgQi.biliup-app 0.6.7`；继任仓库 `biliup/biliup` 的 CLI（含 `season add`）**没有 winget 包**。 | `winget search biliup` 实测。 |
-| F6 | cookie 文件登录必须走 `--submit web`（默认的 `client` 需要 `token_info.access_token`）；arXiv 实测日志显示客户端接口失效后自动降级到 APP 接口并成功。 | arXiv `_bili_upload_exec3.log`。 |
+| F6 | ~~cookie 文件登录必须走 `--submit web`~~ **这条结论是错的，已由 F6′ 取代。** | 原出处：arXiv `_bili_upload_exec3.log`。 |
+| F6′ | `--submit` 在 0.2.4 里**不起作用**：上游 `uploader.rs` 的 `match submit` 两个分支都调 `submit_by_app`（web 分支被注释），且 `biliup.exe` 里没有 `x/vu/web/add` 这个串（只有 `x/vu/app/add`）。 | `python -c "print(b'x/vu/web/add' in open(EXE,'rb').read())"` → `False`；上游源码。 |
+| F6″ | **cookie 文件登录的真正门槛是启动时那次令牌校验**：`login_by_cookies` 无条件先调 `oauth2/info?access_key=<token_info.access_token>`；`access_token` 为空串时 B站 返回 `{"code":-400,"message":"请求错误"}`，biliup 随即以 `Err` 退出，**一个投稿请求都不会发出**。所以登录必须一路拿到令牌。 | 源码 `credential.rs::validate_tokens` + 直接探测该端点：空串 → `-400`，非空假值 → `61000 登录状态异常`。完整证据见 [011](../../bug-fix/011-biliup-refuses-a-token-less-cookie-file.md)。 |
+| F6‴ | 拿令牌的自动化路径是 **TV 端三步交换**（`passport-tv-login/qrcode/auth_code` → `h5/qrcode/confirm`（带用户自己的 SESSDATA+bili_jct）→ `qrcode/poll`），返回 `token_info{access_token, refresh_token, expires_in=15552000, mid}`。 | 复刻 biliup 的 `credential.rs::login_by_web_cookies`；本机实测换到 32 位令牌，`expires_in=15552000`（180 天）。 |
 | F7 | **`upload` 返回码 0 ≠ 已发布**，必须用 `GET https://member.bilibili.com/x/web/archives?pn=1&ps=20` 对账读回。 | arXiv 脚本 `cmd_verify` 与实测日志。 |
 | F8 | `code 601 您上传视频过快` 是**账号侧临时频控**，不是脚本 bug；正确处置是等几分钟原样重投，不能改参数硬刷。 | arXiv 实测日志与 SKILL.md 已知坑。 |
 | F9 | 创建合集 `POST https://member.bilibili.com/x2/creative/web/season/add`（form-urlencoded：`title/desc/cover/season_price/csrf`）返回 `data` = season_id；**该操作有人工审核**，合集状态会先处于审核中。 | bilibili-API-collect `docs/creativecenter/season.md`。 |

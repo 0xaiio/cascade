@@ -12,25 +12,25 @@
 python -m compileall backend\app
 ```
 
-后端测试（当前基线：**774 passed**）：
+后端测试（当前基线：**804 passed**）：
 
 ```powershell
 python -m pytest backend\tests -q
 ```
 
 > **在 WorkBuddy 沙箱里请分块跑。** 本仓库没有 `pytest.ini`，所以 pytest 会把临时目录建在系统 Temp、收尾时再清理；
-> 沙箱的批量删除守卫是**累积计数**的（一轮命令内累计到阈值就整条拒掉），于是 774 个用例放在一个进程里跑会在中途被拦下。
+> 沙箱的批量删除守卫是**累积计数**的（一轮命令内累计到阈值就整条拒掉），于是 804 个用例放在一个进程里跑会在中途被拦下。
 > 现象很好认：**大量 `at setup of ...` 的 error，而 `FAILED` 一个都没有** —— 那是环境问题，不是代码问题。
 >
-> 按下面的分块跑（每块 150～200 项），六块相加应恰好等于 774：
+> 按下面的分块跑（实测每块 60～230 项都能跑通），六块相加应恰好等于 804：
 >
 > ```powershell
-> python -m pytest backend\tests\test_bili_policy.py backend\tests\test_bili_meta.py backend\tests\test_bili_auth.py backend\tests\test_bili_bin.py backend\tests\test_bili_read_model.py -q -p no:cacheprovider --basetemp=tmp_pytest\a   # 197
-> python -m pytest backend\tests\test_bili_api.py backend\tests\test_bili_upload.py backend\tests\test_api_bilibili.py -q -p no:cacheprovider --basetemp=tmp_pytest\b                                                            # 165
-> python -m pytest backend\tests\test_bili_manager.py -q -p no:cacheprovider --basetemp=tmp_pytest\c                                                                                                                   #  58
+> python -m pytest backend\tests\test_bili_policy.py backend\tests\test_bili_meta.py backend\tests\test_bili_auth.py backend\tests\test_bili_bin.py backend\tests\test_bili_read_model.py -q -p no:cacheprovider --basetemp=tmp_pytest\a   # 217
+> python -m pytest backend\tests\test_bili_api.py backend\tests\test_bili_upload.py backend\tests\test_api_bilibili.py -q -p no:cacheprovider --basetemp=tmp_pytest\b                                                            # 167
+> python -m pytest backend\tests\test_bili_manager.py -q -p no:cacheprovider --basetemp=tmp_pytest\c                                                                                                                   #  64
 > python -m pytest backend\tests\test_ytdlp_service.py -q -p no:cacheprovider --basetemp=tmp_pytest\d                                                                                                                  #  73
 > python -m pytest backend\tests\test_api.py backend\tests\test_resolution_decisions.py backend\tests\test_output_paths.py backend\tests\test_safe_delete.py -q -p no:cacheprovider --basetemp=tmp_pytest\e                # 146
-> python -m pytest backend\tests\test_dev_server.py backend\tests\test_proxy.py backend\tests\test_cookie_health.py backend\tests\test_stall_guard.py backend\tests\test_error_advice.py backend\tests\test_connectivity.py backend\tests\test_download_progress.py backend\tests\test_runtime_env.py backend\tests\test_job_manager_finally.py backend\tests\test_finally_guards.py backend\tests\test_system_open.py backend\tests\test_logging_setup.py backend\tests\test_db.py backend\tests\test_paths.py backend\tests\test_transfer_stats.py backend\tests\test_progress_persist.py backend\tests\test_log_safety.py -q -p no:cacheprovider --basetemp=tmp_pytest\f   # 135
+> python -m pytest backend\tests\test_dev_server.py backend\tests\test_proxy.py backend\tests\test_cookie_health.py backend\tests\test_stall_guard.py backend\tests\test_error_advice.py backend\tests\test_connectivity.py backend\tests\test_download_progress.py backend\tests\test_runtime_env.py backend\tests\test_job_manager_finally.py backend\tests\test_finally_guards.py backend\tests\test_system_open.py backend\tests\test_logging_setup.py backend\tests\test_db.py backend\tests\test_paths.py backend\tests\test_transfer_stats.py backend\tests\test_progress_persist.py backend\tests\test_log_safety.py -q -p no:cacheprovider --basetemp=tmp_pytest\f   # 137
 > ```
 >
 > `--basetemp` 指向的目录**必须不存在**，否则 pytest 会先 `rmtree` 它、同样会触发守卫（`tmp_pytest\` 已在 `.gitignore` 里）。
@@ -115,7 +115,7 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 
 ## 后端测试范围
 
-后端测试位于 [backend/tests](../backend/tests/)（31 个 `test_*.py` + [fakes.py](../backend/tests/fakes.py) / [bili_fakes.py](../backend/tests/bili_fakes.py)，当前 **774 passed**）：
+后端测试位于 [backend/tests](../backend/tests/)（31 个 `test_*.py` + [fakes.py](../backend/tests/fakes.py) / [bili_fakes.py](../backend/tests/bili_fakes.py)，当前 **804 passed**）：
 
 | 文件 | 重点 |
 | --- | --- |
@@ -127,7 +127,7 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 | [test_transfer_stats.py](../backend/tests/test_transfer_stats.py) | 平均速度计算。 |
 | [test_stall_guard.py](../backend/tests/test_stall_guard.py) | 停滞看门狗：字节推进不触发、零增长超时触发、节流振荡（峰值不刷新）触发、合并格式的流切换不被误判。 |
 | [test_paths.py](../backend/tests/test_paths.py) | 安全路径名。 |
-| [test_log_safety.py](../backend/tests/test_log_safety.py) | 日志敏感信息清洗。 |
+| [test_log_safety.py](../backend/tests/test_log_safety.py) | 日志敏感信息清洗：`name=value` 与 JSON 的 `"name":"value"` 两种形态都要盖到，且**不误伤**同一行里的正常字段。 |
 | [test_logging_setup.py](../backend/tests/test_logging_setup.py) | 日志落盘：文件被创建、格式含时间/级别/模块、重复调用不叠加 handler、只读目录降级不抛异常、uvicorn logger 也被接上。 |
 | [test_runtime_env.py](../backend/tests/test_runtime_env.py) | 宿主环境净化：只摘命中强加载开关的 `NODE_OPTIONS`、其它值原样保留、返回值可用于留痕、幂等。 |
 | [test_error_advice.py](../backend/tests/test_error_advice.py) | 异常翻译层：JS challenge / cookies / 代理 / 媒体流四类分类顺序、异常链展开不因环状引用死循环、无法归类时返回 `None` 而不硬凑。 |
@@ -144,14 +144,14 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 | [fakes.py](../backend/tests/fakes.py) | API 测试的 fake service 和辅助对象，其中 `RaisingUnselectableProbeService` 刻意让 `prepare_download` **抛异常**而不是返回 `is_selectable=False` —— 复现真实 yt-dlp 的行为，防止降级分支再次退化成死代码。 |
 | [test_bili_policy.py](../backend/tests/test_bili_policy.py) | 平台状态码 → 记录状态 → 徽标的折合（含「命令成功但查不到」必须落到待核对）、错误输出 → （结论 + 下一步）的分类，以及**每一档徽标都有配色与文案**（漏一档会让界面渲染 `undefined`）。 |
 | [test_bili_meta.py](../backend/tests/test_bili_meta.py) | 模板渲染**不用 `str.format`**（用户标题里的大括号必须原样保留）、未知占位符不静默吞掉、标签派生与收敛、分区词表、硬限逐项（标题/简介/标签总长/标签个数/单标签/评论）与**超限只报错不截断**。 |
-| [test_bili_auth.py](../backend/tests/test_bili_auth.py) | 登录文件四形态兼容、**凭据摘要只回名字与计数（不含值、不含前缀）**、是否被 git 跟踪、扫码挑战与轮询状态映射。 |
-| [test_bili_bin.py](../backend/tests/test_bili_bin.py) | 投稿工具探测：**0 字节空壳与「没装」必须分开**（`is_pe` 校验 PE 头）、三级查找优先级、空壳识别与修复；命令组装**必须含 `--submit web`**；进度解析单调不回退；`run_command` 超时会 kill 并写超时标记、回调抛异常不影响上传；抽封面四种降级。 |
+| [test_bili_auth.py](../backend/tests/test_bili_auth.py) | 登录文件四形态兼容、**凭据摘要只回名字与计数（不含值、不含前缀）**、是否被 git 跟踪、扫码挑战与轮询状态映射；**投稿令牌交换**（签名字面值冻结 —— 签名错会被 B站 伪装成「凭据坏了」、两组参数风格相反（appkey 轮次签名 / h5 确认走用户的 `csrf`）、`86039` 重试但其它码立刻报出来、`Cookie` 头只带两项不夹带回调 URL 上的查询参数名）、令牌摘要只回布尔与长度。 |
+| [test_bili_bin.py](../backend/tests/test_bili_bin.py) | 投稿工具探测：**0 字节空壳与「没装」必须分开**（`is_pe` 校验 PE 头）、三级查找优先级、空壳识别与修复；命令组装含 `--submit`（**注意它在本版并不起作用**，实际提交走 App 接口，见 [011](../ai/bug-fix/011-biliup-refuses-a-token-less-cookie-file.md)）；进度解析单调不回退；`run_command` 超时会 kill 并写超时标记、回调抛异常不影响上传；抽封面四种降级。 |
 | [test_bili_api.py](../backend/tests/test_bili_api.py) | B站 客户端的请求形状与错误边界：member/web referer 与 `Content-Type`、`BiliApiError` 与 `HttpError` 不混用、对账的前缀匹配**两侧都归一空白**与退避次数、建合集（`csrf` 在 form）/ 归集（`csrf` 在 **query**、body 用 **camelCase**）、发并置顶评论的幂等（重复码 `12051` 后换时间序重找、只置顶失败时保住 `rpid`）。 |
-| [test_bili_upload.py](../backend/tests/test_bili_upload.py) | 单次上传的领域逻辑：状态折合、封面优先级、**对账查不到时是「待核对」不是「失败」且不重投**、日志尾部清洗凭据、评论（无 `aid` 或**只有 `aid` 没有 `cid`** 都不发、评论失败不污染稿件状态）、模板批量渲染与逐条校验、整批编排（条间等间隔、单条失败不中断、只归集已发布的、全军覆没时不建空合集）。 |
+| [test_bili_upload.py](../backend/tests/test_bili_upload.py) | 单次上传的领域逻辑：状态折合、封面优先级、**失败时把 biliup 的原始输出按固定前缀逐行进日志、成功时不刷屏**（`caplog`）、**对账查不到时是「待核对」不是「失败」且不重投**、日志尾部清洗凭据、评论（无 `aid` 或**只有 `aid` 没有 `cid`** 都不发、评论失败不污染稿件状态）、模板批量渲染与逐条校验、整批编排（条间等间隔、单条失败不中断、只归集已发布的、全军覆没时不建空合集）。 |
 | [test_bili_read_model.py](../backend/tests/test_bili_read_model.py) | 「多条记录 → 一档徽标」的**19 行真值表**参数化：8 成功 2 在跑 → 上传中、归集算在途、归集失败不等于全成功、全部待核对不报成功、被拒算失败；连同任务级/条目级投影、孤儿记录排最后、汇总按 job 排序。 |
-| [test_bili_manager.py](../backend/tests/test_bili_manager.py) | 队列与编排：重投复用同一行并作废旧 `bvid`/`aid`、五种前置条件各自报错、重试三分支（已发布→什么都不做 / 在途→什么都不做 / 待核对→**只重新核对且不发命令** / 失败→重新投稿）、重启收敛（`uploading` 与 `queued` 都折成可重试失败、幂等）、worker 崩溃可读且不带走 worker、体检（含 0 字节空壳与「没装」分开）、投稿间隔。 |
+| [test_bili_manager.py](../backend/tests/test_bili_manager.py) | 队列与编排：重投复用同一行并作废旧 `bvid`/`aid`、六种前置条件各自报错（含 **`missing_upload_token`**）、登录落盘时补令牌 / 交换失败仍留住 cookies、导入路径补令牌且**不重复换**、体检把缺令牌报成 blocker、重试三分支（已发布→什么都不做 / 在途→什么都不做 / 待核对→**只重新核对且不发命令** / 失败→重新投稿）、重启收敛（`uploading` 与 `queued` 都折成可重试失败、幂等）、worker 崩溃可读且不带走 worker、体检（含 0 字节空壳与「没装」分开）、投稿间隔。 |
 | [test_api_bilibili.py](../backend/tests/test_api_bilibili.py) | 路由层：真 `BiliManager` + `TestClient` + 按数据库状态等完成（**不用队列空作完成信号**：worker 一 `get()` 走队列就空了，那时它还在跑）。覆盖体检 / 扫码（只有 `confirmed` 才落盘、`%2C` 解码）/ 导入清除 / 预填（单视频与合集、404、422）/ 读回 / 单视频与合集投稿（400 超限定位于第几条、409 列出未下载的、404）/ 重试与重试归集。 |
-| [bili_fakes.py](../backend/tests/bili_fakes.py) | B站 测试的共享替身：`FakeBiliTransport`（覆盖 10 个端点、记录 `calls`/`comments`/`topped`、未知 URL 直接断言失败）、`StubTransport`、脚本化 runner/sleeper、`write_video()`。**`UNSET` 哨兵**是必须的：用 `None` 兼作「没传参数」时，`account=None`（未登录）与 `video=None`（查不到稿件）都会被当成「用默认值」，那两条用例根本测不到目标分支、只会绿着过去。 |
+| [bili_fakes.py](../backend/tests/bili_fakes.py) | B站 测试的共享替身：`FakeBiliTransport`（覆盖 13 个端点，含 TV 令牌交换那三个；记录 `calls`/`comments`/`topped`、未知 URL 直接断言失败）、`StubTransport`、脚本化 runner/sleeper、`write_video()`。**`UNSET` 哨兵**是必须的：用 `None` 兼作「没传参数」时，`account=None`（未登录）与 `video=None`（查不到稿件）都会被当成「用默认值」，那两条用例根本测不到目标分支、只会绿着过去。 |
 
 默认自动测试不依赖真实 YouTube 下载，避免网络、地区、cookies 和 YouTube 风控导致不稳定。
 

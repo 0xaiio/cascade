@@ -38,15 +38,15 @@
 | FR-16 | 已配置的 cookies 可被校验：离线检查格式/域名/鉴权项/过期，可选联网确认登录态，输出「未配置 / 未登录 / 已登录」三档结论与证据。 | [`cookie_health.py`](../backend/app/cookie_health.py#L234)、[`POST /api/cookies/verify`](../backend/app/routers/cookies.py#L24) |
 | FR-17 | 依赖与 JS 运行时状态可在不重启应用的前提下重新探测，并把结论回显到界面。 | [`POST /api/diagnostics/runtime`](../backend/app/routers/diagnostics.py#L52)、[`runtime_env.py`](../backend/app/runtime_env.py#L58) |
 | FR-18 | 界面上的解释性内容默认收起，挂在其所解释的对象旁边，按需展开；展开时不抢占输入焦点、不阻塞其他操作，钉住状态可记忆。 | [`HelpPopover`](../frontend/src/components/HelpPopover.tsx#L42)、[用户手册：辅助说明的查看方式](user-manual.md#辅助说明的查看方式) |
-| FR-19 | 支持把**已下载完成**的视频投稿到 B站：点任务行/条目行上的 B站 上传按钮弹出表单，默认值由后端预填（标题、分区、标签、简介），用户可改后确认。 | [`bili_create_upload`](../backend/app/routers/bilibili.py#L175)、[`BiliUploadDialog`](../frontend/src/components/BiliUploadDialog.tsx#L26) |
-| FR-20 | 支持把整个 playlist 任务按**模板**批量投稿：标题/简介可用 `{title}` `{index}` `{count}` `{job}` 占位符，后端为每条视频各渲染一份，逐条串行投稿，全部确认发布后自动归入同一个 B站 合集。 | [`MetadataTemplate`](../backend/app/bili_meta.py#L141)、[`bili_create_collection`](../backend/app/routers/bilibili.py#L203) |
+| FR-19 | 支持把**已下载完成**的视频投稿到 B站：点任务行/条目行上的 B站 上传按钮弹出表单，默认值由后端预填（标题、分区、标签、简介），用户可改后确认。 | [`bili_create_upload`](../backend/app/routers/bilibili.py#L181)、[`BiliUploadDialog`](../frontend/src/components/BiliUploadDialog.tsx#L26) |
+| FR-20 | 支持把整个 playlist 任务按**模板**批量投稿：标题/简介可用 `{title}` `{index}` `{count}` `{job}` 占位符，后端为每条视频各渲染一份，逐条串行投稿，全部确认发布后自动归入同一个 B站 合集。 | [`MetadataTemplate`](../backend/app/bili_meta.py#L141)、[`bili_create_collection`](../backend/app/routers/bilibili.py#L209) |
 | FR-21 | 提交前校验平台硬限（标题 ≤ 80、简介 ≤ 250、标签总长 < 200 且最多 10 个、单个标签 ≤ 20、评论 ≤ 1000）；**超限只报错不截断**，合集要把问题定位到第几条。 | [`validate`](../backend/app/bili_meta.py#L220)、[`limits`](../backend/app/bili_meta.py#L206) |
 | FR-22 | 提供 B站 环境体检（投稿工具是否可用、ffmpeg、登录态、缺项清单），每条结论文案必须自带「下一步」；并支持修复投稿工具、扫码登录、导入已有登录文件三种前置动作。 | [`bili_status`](../backend/app/routers/bilibili.py#L63)、[`BiliLoginSection`](../frontend/src/components/BiliLoginSection.tsx#L28) |
-| FR-23 | 投稿命令返回成功**不等于**已发布：必须回读账号稿件列表对账；对不上的记录进入「待核对」而非「已发布」或「失败」，且两者的推荐动作不同。 | [`find_archive`](../backend/app/bili_api.py#L111)、[`UPLOAD_UNVERIFIED`](../backend/app/bili_policy.py#L213) |
+| FR-23 | 投稿命令返回成功**不等于**已发布：必须回读账号稿件列表对账；对不上的记录进入「待核对」而非「已发布」或「失败」，且两者的推荐动作不同。 | [`find_archive`](../backend/app/bili_api.py#L111)、[`UPLOAD_UNVERIFIED`](../backend/app/bili_policy.py#L242) |
 | FR-24 | 任务行与条目行各有 B站 上传图标，状态由**后端**按该任务的全部记录聚合出一档徽标（未上传/上传中/已上传/待核对/部分失败/失败），前端不自行推导。 | [`derive_badge`](../backend/app/bili_read_model.py#L60)、[`BiliUploadButton`](../frontend/src/components/BiliUploadButton.tsx#L18) |
-| FR-25 | 失败与待核对可单条重试，动作按终态三选一：重新投稿 / **只**重新核对（不重投）/ 什么都不做；合集归集失败可单独重试，且**不会重复建合集**。 | [`BiliRetryRead`](../backend/app/schemas.py#L486)、[`bili_retry_season`](../backend/app/routers/bilibili.py#L250) |
-| FR-26 | 投稿可自动生成封面（ffmpeg 抽帧）并自动发送、置顶一条评论；评论发送失败不影响稿件本身的状态。 | [`extract_cover_frame`](../backend/app/bili_bin.py#L280)、[`send_and_top_comment`](../backend/app/bili_api.py#L262) |
-| FR-27 | B站 凭据只以文件形式保存，API 与界面**只回传名字与计数**（不返回值、不返回掩码前缀）；登录文件被 git 跟踪时单独作为一条阻断项报出。 | [`cookie_summary`](../backend/app/bili_auth.py#L167)、[`is_cookie_tracked_by_git`](../backend/app/bili_auth.py#L178) |
+| FR-25 | 失败与待核对可单条重试，动作按终态三选一：重新投稿 / **只**重新核对（不重投）/ 什么都不做；合集归集失败可单独重试，且**不会重复建合集**。 | [`BiliRetryRead`](../backend/app/schemas.py#L486)、[`bili_retry_season`](../backend/app/routers/bilibili.py#L256) |
+| FR-26 | 投稿可自动生成封面（ffmpeg 抽帧）并自动发送、置顶一条评论；评论发送失败不影响稿件本身的状态。 | [`extract_cover_frame`](../backend/app/bili_bin.py#L284)、[`send_and_top_comment`](../backend/app/bili_api.py#L262) |
+| FR-27 | B站 凭据只以文件形式保存，API 与界面**只回传名字与计数**（不返回值、不返回掩码前缀）；登录文件被 git 跟踪时单独作为一条阻断项报出。 | [`cookie_summary`](../backend/app/bili_auth.py#L369)、[`is_cookie_tracked_by_git`](../backend/app/bili_auth.py#L380) |
 
 ## 非功能需求
 
@@ -55,7 +55,7 @@
 | 可维护性 | 下载策略、降级原因、读模型、cookies 导入和格式选择拆分到独立模块；文档工具链可复现并检查本地链接与 UML 产物，详见 [实现文档](implementation.md) 和 [文档写作与生成环境](documentation-workflow.md)。 |
 | 稳定性 | 默认稳定性基线见 [PLAN.md](../ai/perf/PLAN.md)：关闭单流节流守卫（`YTDL_THROTTLED_RATE_KBPS=0`），用 90 秒停滞看门狗兜底，保留断点续传、`http_chunk_size=16 MiB` 和同清晰度多 profile 重试；aria2c 多连接默认关闭。支持把并发设为 1 的稳定优先运行方式。 |
 | 可观测性 | 任务中心显示进度、速度、视频大小、ETA、实际分辨率、实际格式和错误原因；诊断接口返回依赖状态与稳定性参数；停滞与媒体流失败都有可读原因。失败日志落盘 `data/logs/app.log` 并带 `category=` 与「诊断 / 原因 / 建议」结构，见 [实现文档](implementation.md#日志落盘)。代理与 cookies 各有一次「真的发请求」的自检，避免只报结论不给证据。 |
-| 安全性 | 不在 UI 或日志回显 cookies、token、敏感 URL query；日志清洗见 [log_safety.py](../backend/app/log_safety.py#L15)；安全审查结论见 [安全审计报告](safety-review.md)。 |
+| 安全性 | 不在 UI 或日志回显 cookies、token、敏感 URL query；日志清洗见 [log_safety.py](../backend/app/log_safety.py#L20)；安全审查结论见 [安全审计报告](safety-review.md)。 |
 | 本地化 | 当前 UI 和主要错误信息面向中文用户。 |
 | 可测试性 | 后端使用 pytest，前端使用 Vitest/jsdom，默认不依赖真实 YouTube 下载；并发与节流行为有可离线复现的基准脚本。B站 上传的领域逻辑（模板渲染、硬限校验、状态折合、对账匹配）全部做成可注入 `transport` / 命令执行器 / sleeper 的纯函数，因此整链也能离线单测，不需要真实账号。 |
 

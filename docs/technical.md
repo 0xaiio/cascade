@@ -174,7 +174,7 @@ Cookies 用于合法账号态、年龄确认或 bot 校验场景。解析阶段�
 5. 若看到「下载停滞：N 秒内没有新增字节」，说明该连接已不再产出数据；重试或换 profile 后仍失败时，把并发降为 1 并检查代理/网络。
 6. 若是连接不稳定，把并发设为 1，确认代理或网络能稳定访问 YouTube 媒体域名。
 7. 若报 `The page needs to be reloaded.`，不要再查网络与 cookies：这是 JS 运行时的症状，见 [JS 运行时与 n challenge](#js-运行时与-n-challenge)。
-8. 若是 B站 上传失败，先在设置面板的「上传到 B站」里看三项体检（`biliup` / 登录 / 封面依赖），再去 `data/logs/app.log` 搜 **`BILI`** 看原始报错；界面上给的那句建议已经是从原始输出里归类出来的，见 [B站 投稿技术要点](#b站-投稿技术要点)。
+8. 若是 B站 上传失败，先看设置面板里「上传到 B站」的体检结论（`biliup` / 登录 / 封面依赖，以及它下面的红字缺项清单 —— **缺「投稿令牌」是最常见的一档**），再去 `data/logs/app.log` 搜 **`biliup 输出`** 看原始报错。注意这个搜索词：失败时 biliup 的原文是逐行按 `biliup 输出 | ` 打进去的；早期版本只落库里不落日志，而失败建议却写着「搜 BILI」，照做的人一定扑空（见 [011](../ai/bug-fix/011-biliup-refuses-a-token-less-cookie-file.md)）。界面上那句结论已经是从原始输出里归类出来的，见 [B站 投稿技术要点](#b站-投稿技术要点)。
 
 ## B站 投稿技术要点
 
@@ -182,10 +182,12 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 
 ### 命令返回 0 不等于已发布
 
-投稿走 `biliup-rs 0.2.4`（`biliup.exe`，安装方式 `winget install --id ForgQi.biliup-rs --exact`），命令组装在 [build_upload_argv](../backend/app/bili_bin.py#L147)。两个必须知道的事实：
+投稿走 `biliup-rs 0.2.4`（`biliup.exe`，安装方式 `winget install --id ForgQi.biliup-rs --exact`），命令组装在 [build_upload_argv](../backend/app/bili_bin.py#L147)。三个必须知道的事实：
 
-- **`--submit web` 是必需的**：cookie 文件登录拿不到 `token_info.access_token`，而默认的 `client` 提交接口要求它，不加这个参数会一路跑到「已上传」之后才在提交环节失败。
+- **登录必须一路做到拿到投稿令牌。** `biliup` 的 `login_by_cookies` 在**发出任何投稿请求之前**会拿 `token_info.access_token` 去 `passport.bilibili.com/x/passport-login/oauth2/info` 校验一次；`access_token` 是空串时 B站 返回 `-400 请求错误`，`biliup` 随即以 `Err` 退出 —— 全程约 1 秒、一个字节都不会上传，而错误码本身读不出「缺令牌」这层意思。所以 [exchange_tv_token](../backend/app/bili_auth.py#L142) 会补上 TV 端三步交换（申请二维码 → 用用户自己的 cookies 替他确认 → 轮询换回 `token_info`），「登录」的完成判据是**拿到令牌**而不是「文件里有 SESSDATA」。详见 bug-fix 记录 [011](../ai/bug-fix/011-biliup-refuses-a-token-less-cookie-file.md)。
 - **返回码 0 只说明命令跑完了，不说明平台上多了稿**。所以 [run_single](../backend/app/bili_upload.py#L297) 在命令返回后一定进 [_verify](../backend/app/bili_upload.py#L243)：用 `GET https://member.bilibili.com/x/web/archives` 回读账号近期稿件，按标题前缀在列表里找（[find_archive](../backend/app/bili_api.py#L111)，带退避重试，因为平台侧列表有延迟）。**查不到就停在 `unverified`** —— 这是本功能唯一不肯妥协的一条，宁可让用户去创作中心确认，也不拿「命令没报错」冒充「已发布」。
+- **`--submit` 这个开关照传，但它不起作用。** 上游 0.2.4 的 `match submit` 两个分支都调 `submit_by_app`（web 分支被注释掉了），实际提交永远走 `/x/vu/app/add`。早先文档里「`--submit web` 是必需的」是一条**写错的结论**：真正拦住投稿的是上面那次启动时的令牌校验，不是提交接口。
+
 
 对账还有一处容易写错：**两侧都要 `strip()`**。B站 会对标题做首尾空白处理，用户在手填表单里多打一个尾随空格时，只归一不比较的写法会让对账永远查不到，把一次成功投稿标成「待核对」。改了标题前缀（前 20 字）之后对账也会失效，这是**已知限制**，不是 bug。
 
@@ -193,7 +195,7 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 
 ### 频控是账号级的
 
-`code 601 您上传视频过快` 是**账号侧**的临时频控，不是本机参数不对。正确处理是等几分钟、原样重投，不要靠改标题/加标签去硬刷 —— 那只会让频控更久。[classify_failure](../backend/app/bili_policy.py#L201) 把它归成一条明确的建议，合集批量投稿之间也留了间隔（`DEFAULT_COLLECTION_GAP_SECONDS`）。这条**无法在本机消解**，只能等。
+`code 601 您上传视频过快` 是**账号侧**的临时频控，不是本机参数不对。正确处理是等几分钟、原样重投，不要靠改标题/加标签去硬刷 —— 那只会让频控更久。[classify_failure](../backend/app/bili_policy.py#L230) 把它归成一条明确的建议，合集批量投稿之间也留了间隔（`DEFAULT_COLLECTION_GAP_SECONDS`）。这条**无法在本机消解**，只能等。
 
 ### 合集（season）的两个端点参数风格相反
 
@@ -202,7 +204,7 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 - **创建**：`POST /x2/creative/web/season/add` —— **form-urlencoded** 传 `title/desc/cover/season_price=0/csrf`，返回 `data` 即 `season_id`。
 - **加稿**：`POST /x2/creative/web/season/section/episodes/add` —— **JSON body**，字段是 camelCase 的 `sectionId` + `episodes[{aid, cid, title, charging_pay}]`，而 **`csrf` 走 query 串**。
 
-两者参数风格正好相反，照抄前者的写法会静默失败。`cid` 只能靠 `GET /x/web-interface/view?bvid=` 拿到，所以归集前对每个已发布稿件都多一次详情请求。「创建」有人工审核，通过前平台上可能看不到，[SEASON_SUBMITTED_NOTE](../backend/app/bili_policy.py#L234) 会把这点说给用户。**重试不重复建合集**：归集失败时保留已拿到的 `season_id`，重试只补加缺口 —— 重复建合集在平台侧不可撤销，比「多等一次」贵得多。
+两者参数风格正好相反，照抄前者的写法会静默失败。`cid` 只能靠 `GET /x/web-interface/view?bvid=` 拿到，所以归集前对每个已发布稿件都多一次详情请求。「创建」有人工审核，通过前平台上可能看不到，[SEASON_SUBMITTED_NOTE](../backend/app/bili_policy.py#L263) 会把这点说给用户。**重试不重复建合集**：归集失败时保留已拿到的 `season_id`，重试只补加缺口 —— 重复建合集在平台侧不可撤销，比「多等一次」贵得多。
 
 ### 评论幂等
 

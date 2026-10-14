@@ -42,7 +42,7 @@ PlantUML 源文件：[four-plus-one-process-view.puml](diagrams/four-plus-one-pr
 
 进程视图关注运行中的并发和事件。FastAPI 请求线程负责校验、持久化和发布事件；`JobManager` worker 按当前并发从队列取出 `JobItem`；一个合集的多个子视频可以并行占用多个 worker，而**单视频任务只有一个 `JobItem`，因此不受并发设置影响**。每个子项的 yt-dlp 调用通过 `asyncio.to_thread` 落到工作线程，其进度 hook 使用自己的 SQLite session；[StallGuard](../backend/app/stall_guard.py) 在同一条 hook 链上观测字节峰值，超时即把该子项判为失败。SQLite 使用 WAL，应用启动与停止时各做一次 `wal_checkpoint(TRUNCATE)`，避免 `-wal` 侧车文件无界增长。SSE 只作为刷新信号，前端再读取 `/api/jobs` 的读模型。并发、限速和重试次数属于运行时设置，详见 [技术文档](technical.md#稳定下载策略)。
 
-B站 上传是**另一条队列**：[BiliManager](../backend/app/bili_manager.py) 只有**单 worker**，与 `JobManager` 的并发 worker 分开。原因是平台限的是账号而不是本地并发，把两者塞进同一个队列会逼出一条不属于下载的限速规则。投稿命令与 API 调用都在工作线程里跑，进度靠 biliup 输出里的阶段词做**粗粒度、单调不回退**的估计（宁可粗，也不编一个看着精确却在骗人的百分比）。启动时 [resume_interrupted](../backend/app/bili_manager.py#L323) 把重启前留在 `queued`/`uploading` 的记录折成**可重试的失败**：进程被杀那一刻正跑在 `biliup` 里，本机无从知道那次投稿在平台上到底成没成，所以既不敢判成功，也不敢自动重投（可能产生重复稿件）—— 只给一条「点重试，或先去创作中心确认」的建议。
+B站 上传是**另一条队列**：[BiliManager](../backend/app/bili_manager.py) 只有**单 worker**，与 `JobManager` 的并发 worker 分开。原因是平台限的是账号而不是本地并发，把两者塞进同一个队列会逼出一条不属于下载的限速规则。投稿命令与 API 调用都在工作线程里跑，进度靠 biliup 输出里的阶段词做**粗粒度、单调不回退**的估计（宁可粗，也不编一个看着精确却在骗人的百分比）。启动时 [resume_interrupted](../backend/app/bili_manager.py#L339) 把重启前留在 `queued`/`uploading` 的记录折成**可重试的失败**：进程被杀那一刻正跑在 `biliup` 里，本机无从知道那次投稿在平台上到底成没成，所以既不敢判成功，也不敢自动重投（可能产生重复稿件）—— 只给一条「点重试，或先去创作中心确认」的建议。
 
 ## 物理视图
 
