@@ -227,6 +227,20 @@ def render_qr_svg(url: str, *, box_size: int = 8, border: int = 2) -> str | None
     return buffer.getvalue().decode("utf-8")
 
 
+def _jar_from_pairs(items: Any) -> dict[str, str]:
+    """`[{"name", "value"}, …]` → `{name: value}`。认不出的条目静默跳过。
+
+    「条目列表」这一形状在四种登录态文件里出现了两次（`LoginInfo` 内层与顶层数组），
+    抽出来是因为两处的判定条件必须**逐字一致** —— 有一处放宽，就会出现
+    「同一个文件按扩展名走这条路读不出来、走那条路读得出来」。
+    """
+    jar: dict[str, str] = {}
+    for item in items or []:
+        if isinstance(item, dict) and "name" in item and "value" in item:
+            jar[str(item["name"])] = str(item["value"])
+    return jar
+
+
 def _flatten_cookies(payload: Any) -> dict[str, str]:
     """四种登录态文件形态统一成 `name -> value`：
 
@@ -235,21 +249,17 @@ def _flatten_cookies(payload: Any) -> dict[str, str]:
     3. `[{"name","value"}, …]`
     4. Netscape `cookies.txt` 文本（由 `load_cookie_jar` 在 JSON 解析失败时处理）
     """
-    if isinstance(payload, dict) and isinstance(payload.get("cookie_info"), dict):
-        jar: dict[str, str] = {}
-        for item in payload["cookie_info"].get("cookies", []) or []:
-            if isinstance(item, dict) and "name" in item and "value" in item:
-                jar[str(item["name"])] = str(item["value"])
-        if jar:
-            return jar
     if isinstance(payload, dict):
+        cookie_info = payload.get("cookie_info")
+        if isinstance(cookie_info, dict):
+            jar = _jar_from_pairs(cookie_info.get("cookies"))
+            # 内层读不出东西时**继续往下走扁平那条**：一个带空 `cookie_info` 的文件
+            # 仍然可能是一份扁平的 cookie 字典。
+            if jar:
+                return jar
         return {str(k): str(v) for k, v in payload.items() if isinstance(v, (str, int, float))}
     if isinstance(payload, list):
-        jar = {}
-        for item in payload:
-            if isinstance(item, dict) and "name" in item and "value" in item:
-                jar[str(item["name"])] = str(item["value"])
-        return jar
+        return _jar_from_pairs(payload)
     return {}
 
 
@@ -463,11 +473,12 @@ class BiliLoginSession:
         jar: dict[str, str] = {}
         callback = str(data.get("url") or "")
         if "?" in callback:
-            from urllib.parse import parse_qs, unquote
-
-            for name, values in parse_qs(callback.split("?", 1)[1], keep_blank_values=True).items():
+            # `urllib.parse` 在模块顶部已经导入，这里不再就地 import 一次 —— 两种写法并存时，
+            # 读的人会以为就地导入有什么不得不这么做的理由。
+            query = urllib.parse.parse_qs(callback.split("?", 1)[1], keep_blank_values=True)
+            for name, values in query.items():
                 if values:
-                    jar[name] = unquote(values[0])
+                    jar[name] = urllib.parse.unquote(values[0])
         for name in (*REQUIRED_COOKIES, *RECOMMENDED_COOKIES):
             if not jar.get(name) and self.jar.get(name):
                 jar[name] = self.jar[name]

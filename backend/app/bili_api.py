@@ -175,10 +175,22 @@ def create_season(transport: Transport, jar: dict[str, str], *, title: str, desc
         headers=_member_headers(jar),
     )
     data = _unwrap(result.json(), where="创建合集")
-    season_id = data if isinstance(data, int) else (data or {}).get("id") if isinstance(data, dict) else None
+    season_id = _season_id_of(data)
+    # 判「有没有」而不是「是不是 None」：`data` 为 `0` 时旧写法也会判成没有编号，
+    # 保持这条口径不在重构里被悄悄放宽。
     if not season_id:
         raise BiliApiError(None, f"合集建好了但没有拿到编号（data={data!r}）", where="创建合集")
-    return int(season_id)
+    return season_id
+
+
+def _season_id_of(data: Any) -> int | None:
+    """从「创建合集」的响应里取出编号。**两种形态都实测到过**：直接是数字，
+    或者裹在 `{"id": …}` 里 —— 全塞进一个嵌套条件表达式时没人看得懂它在认哪几种。"""
+    raw = data.get("id") if isinstance(data, dict) else data
+    try:
+        return int(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
 
 
 def add_episodes(

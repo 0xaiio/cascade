@@ -16,7 +16,7 @@ PlantUML 源文件：[system-context.puml](diagrams/system-context.puml)。
 
 | 容器 | 职责 | 主要入口 |
 | --- | --- | --- |
-| React/Vite 前端 | 解析表单、下载选项、任务中心、cookies 操作和设置面板。 | [App.tsx](../frontend/src/App.tsx)、[api.ts](../frontend/src/api.ts#L36) |
+| React/Vite 前端 | 解析表单、下载选项、任务中心、cookies 操作和设置面板。 | [App.tsx](../frontend/src/App.tsx)、[api.ts](../frontend/src/api.ts#L37) |
 | FastAPI 后端 | HTTP API、SSE、任务调度、SQLite 持久化、调用 yt-dlp。 | [create_app](../backend/app/main.py#L40) |
 | 启动入口 | 解析命令行、启动前做端口预检并识别占用者、把实际监听地址打印出来，再交给 uvicorn。 | [__main__.py](../backend/app/__main__.py#L64)、[dev_server.py](../backend/app/dev_server.py#L44) |
 | 任务调度与执行 | 队列、worker、暂停/重启/删除、进度聚合、错误分类与终态收敛。 | [JobManager](../backend/app/job_manager.py#L44) |
@@ -27,8 +27,8 @@ PlantUML 源文件：[system-context.puml](diagrams/system-context.puml)。
 | 代理与连通性自检 | 解析代理来源（显式 > 系统 > 环境变量）并**真的发一次请求**验证连通；cookies 体检则把离线格式检查与 `LOGGED_IN` 探针合成一个结论。 | [proxy.py](../backend/app/proxy.py#L169)、[connectivity.py](../backend/app/connectivity.py#L73)、[cookie_health.py](../backend/app/cookie_health.py#L234) |
 | 错误翻译与自检留痕 | 把异常链翻译成「诊断 / 原因 / 建议」三段可执行结论；启动时摘除会打坏 JS 运行时的宿主环境变量并留痕。 | [error_advice.py](../backend/app/error_advice.py#L116)、[runtime_env.py](../backend/app/runtime_env.py#L58) |
 | 本机打开器 | 选择可解码播放器打开视频、打开输出目录。 | [system_open.py](../backend/app/system_open.py#L23) |
-| B站 上传编排 | 单 worker 串行投稿、投稿间隔、状态写库与重启收敛、环境体检、事件发布。与下载链路**完全解耦**：独立账号、独立登录文件、独立队列。 | [BiliManager](../backend/app/bili_manager.py#L326) |
-| B站 领域与边界 | 单次投稿的领域逻辑（对账后定结论）、`biliup` 子进程边界、B站 会员态客户端、扫码登录与凭据摘要、元数据与硬限、文案常量。 | [bili_upload.py](../backend/app/bili_upload.py#L297)、[bili_bin.py](../backend/app/bili_bin.py#L275)、[bili_api.py](../backend/app/bili_api.py#L111)、[bili_auth.py](../backend/app/bili_auth.py#L75)、[bili_meta.py](../backend/app/bili_meta.py#L202)、[bili_policy.py](../backend/app/bili_policy.py#L38) |
+| B站 上传编排 | 单 worker 串行投稿、投稿间隔、状态写库与重启收敛、环境体检、事件发布。与下载链路**完全解耦**：独立账号、独立登录文件、独立队列。 | [BiliManager](../backend/app/bili_manager.py#L328) |
+| B站 领域与边界 | 单次投稿的领域逻辑（对账后定结论）、`biliup` 子进程边界、B站 会员态客户端、扫码登录与凭据摘要、元数据与硬限、文案常量。 | [bili_upload.py](../backend/app/bili_upload.py#L297)、[bili_bin.py](../backend/app/bili_bin.py#L271)、[bili_api.py](../backend/app/bili_api.py#L111)、[bili_auth.py](../backend/app/bili_auth.py#L75)、[bili_meta.py](../backend/app/bili_meta.py#L202)、[bili_policy.py](../backend/app/bili_policy.py#L38) |
 
 ## 组件关系
 
@@ -36,7 +36,7 @@ PlantUML 源文件：[system-context.puml](diagrams/system-context.puml)。
 
 PlantUML 源文件：[component-overview.puml](diagrams/component-overview.puml)。
 
-后端把 HTTP 层拆成「装配根 + 按资源分模块的路由」：`main.py` 只做装配与静态托管，路由在 [routers/](../backend/app/routers/__init__.py) 下按资源分模块（诊断、cookies、解析、任务、任务文件、设置、事件、bilibili），跨路由复用的支撑逻辑在 [api_support.py](../backend/app/api_support.py) 与 [job_artifacts.py](../backend/app/job_artifacts.py)，请求级依赖容器是 [api_context.py](../backend/app/api_context.py)；再往下，任务管理、读模型、下载服务、cookies 导入、格式选择、降级决策与降级文案、代理解析与连通性自检各自独立成模块，细节见 [设计文档的模块职责矩阵](design.md#模块职责矩阵)。前端由 [App.tsx](../frontend/src/App.tsx) 只做状态编排与布局，展示职责全部在 [components/](../frontend/src/components/) 下：解析面板 [UrlAnalyzer](../frontend/src/components/UrlAnalyzer.tsx#L29)、解析结果 [AnalysisPanel](../frontend/src/components/AnalysisPanel.tsx#L12)、下载选项 [DownloadOptionsPanel](../frontend/src/components/DownloadOptionsPanel.tsx#L19)、设置 [SettingsPanel](../frontend/src/components/SettingsPanel.tsx#L69)、任务中心 [JobQueue](../frontend/src/components/JobQueue.tsx#L21)、cookies 区 [CookieSection](../frontend/src/components/CookieSection.tsx#L121)、代理区 [ProxySection](../frontend/src/components/ProxySection.tsx#L140)、语言选择 [SearchableLanguageSelect](../frontend/src/components/SearchableLanguageSelect.tsx#L16)、基础件 [Toggle](../frontend/src/components/Toggle.tsx#L4) / [StatusPill](../frontend/src/components/StatusPill.tsx#L4)、B站 上传的 [BiliUploadButton](../frontend/src/components/BiliUploadButton.tsx#L18) / [BiliUploadDialog](../frontend/src/components/BiliUploadDialog.tsx#L65) / [BiliJobStatus](../frontend/src/components/BiliJobStatus.tsx#L18) / [BiliLoginSection](../frontend/src/components/BiliLoginSection.tsx#L28) / [BiliIcon](../frontend/src/components/BiliIcon.tsx#L12)，以及被多处共用的说明浮层 [HelpPopover](../frontend/src/components/HelpPopover.tsx#L42)；纯计算在 [formatting.ts](../frontend/src/formatting.ts)、[quality.ts](../frontend/src/quality.ts)、[subtitles.ts](../frontend/src/subtitles.ts)、[cookieLock.ts](../frontend/src/cookieLock.ts)，HTTP 边界集中在 [api.ts](../frontend/src/api.ts#L36)。
+后端把 HTTP 层拆成「装配根 + 按资源分模块的路由」：`main.py` 只做装配与静态托管，路由在 [routers/](../backend/app/routers/__init__.py) 下按资源分模块（诊断、cookies、解析、任务、任务文件、设置、事件、bilibili），跨路由复用的支撑逻辑在 [api_support.py](../backend/app/api_support.py) 与 [job_artifacts.py](../backend/app/job_artifacts.py)，请求级依赖容器是 [api_context.py](../backend/app/api_context.py)；再往下，任务管理、读模型、下载服务、cookies 导入、格式选择、降级决策与降级文案、代理解析与连通性自检各自独立成模块，细节见 [设计文档的模块职责矩阵](design.md#模块职责矩阵)。前端由 [App.tsx](../frontend/src/App.tsx) 只做状态编排与布局，展示职责全部在 [components/](../frontend/src/components/) 下：解析面板 [UrlAnalyzer](../frontend/src/components/UrlAnalyzer.tsx#L29)、解析结果 [AnalysisPanel](../frontend/src/components/AnalysisPanel.tsx#L12)、下载选项 [DownloadOptionsPanel](../frontend/src/components/DownloadOptionsPanel.tsx#L19)、设置 [SettingsPanel](../frontend/src/components/SettingsPanel.tsx#L69)、任务中心 [JobQueue](../frontend/src/components/JobQueue.tsx#L21)、cookies 区 [CookieSection](../frontend/src/components/CookieSection.tsx#L121)、代理区 [ProxySection](../frontend/src/components/ProxySection.tsx#L140)、语言选择 [SearchableLanguageSelect](../frontend/src/components/SearchableLanguageSelect.tsx#L16)、基础件 [Toggle](../frontend/src/components/Toggle.tsx#L4) / [StatusPill](../frontend/src/components/StatusPill.tsx#L4)、B站 上传的 [BiliUploadButton](../frontend/src/components/BiliUploadButton.tsx#L19) / [BiliUploadDialog](../frontend/src/components/BiliUploadDialog.tsx#L63) / [BiliJobStatus](../frontend/src/components/BiliJobStatus.tsx#L19) / [BiliLoginSection](../frontend/src/components/BiliLoginSection.tsx#L29) / [BiliIcon](../frontend/src/components/BiliIcon.tsx#L12)，以及被多处共用的说明浮层 [HelpPopover](../frontend/src/components/HelpPopover.tsx#L42)；纯计算在 [formatting.ts](../frontend/src/formatting.ts)、[quality.ts](../frontend/src/quality.ts)、[subtitles.ts](../frontend/src/subtitles.ts)、[cookieLock.ts](../frontend/src/cookieLock.ts)，B站 上传另有三个 [biliForm.ts](../frontend/src/biliForm.ts)（表单词汇表与本地预检）、[biliStatus.ts](../frontend/src/biliStatus.ts)（稿件/合集状态判定）、[errors.ts](../frontend/src/errors.ts)（异常 → 一句人话），HTTP 边界集中在 [api.ts](../frontend/src/api.ts#L37)。
 
 B站 上传这一组还额外把「**界面状态从哪来**」定死了：任务行上那一档徽标（未上传 / 上传中 / 已上传 / 待核对 / 部分失败 / 失败）由后端从该任务的全部记录现场聚合（[derive_badge](../backend/app/bili_read_model.py#L60)），前端只负责渲染颜色与文案。前端自己判「算不算已上传」迟早会和后端的两套状态机漂移。
 
@@ -91,7 +91,7 @@ B站 上传有**自己的两套状态**，与 `JobStatus` 无关：
 - 稿件 [BiliUploadStatus](../backend/app/models.py#L89)：`queued` → `uploading` → `submitted`（命令成功、待对账）→ `published` / `reviewing` / `rejected`（按平台状态码折合）；命令失败落 `failed`，对账查不到落 `unverified`（待核对）。**`unverified` 不是失败的变体**：它表达「我们还不知道」，所以它的重试只重读平台、绝不重投。
 - 合集 [BiliSeasonStatus](../backend/app/models.py#L107)：`pending` → `grouping` → `grouped` / `failed`。`grouped` 只表示「已提交归集」——B站 对合集还有一道人工审核。
 
-进程重启后，停在 `uploading` 的记录（含 `queued`）一律折成**可重试的失败**，而不是永远停在「上传中」，见 [resume_interrupted](../backend/app/bili_manager.py#L368)。
+进程重启后，停在 `uploading` 的记录（含 `queued`）一律折成**可重试的失败**，而不是永远停在「上传中」，见 [resume_interrupted](../backend/app/bili_manager.py#L370)。
 
 ## 数据模型
 

@@ -2860,11 +2860,13 @@ components:
 
     BiliLimits:
       type: object
-      required: [title, desc, tags, tag_count, tag_item, comment]
+      required: [title, desc, tags, tag_count, tag_item, tag_preview, comment]
       description: >
         Platform field limits, served by the backend so the dialog does not
         hardcode them: title/desc/tags/comment are character limits, tag_count
-        the maximum number of tags, tag_item the limit per single tag.
+        the maximum number of tags, tag_item the limit per single tag, and
+        tag_preview how many characters of an over-long tag are echoed back
+        when reporting it (so the dialog and the 400 response word it the same).
       properties:
         title:
           type: integer
@@ -2881,6 +2883,9 @@ components:
         tag_item:
           type: integer
           example: 20
+        tag_preview:
+          type: integer
+          example: 40
         comment:
           type: integer
           example: 1000

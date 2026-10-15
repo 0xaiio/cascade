@@ -19,21 +19,27 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.bili_policy import (
+    ACCEPTED_STATUSES,
     BADGE_FAILED,
     BADGE_NONE,
     BADGE_PARTIAL,
     BADGE_UNVERIFIED,
     BADGE_UPLOADED,
     BADGE_UPLOADING,
+    REJECTED_STATUSES,
 )
 from app.bili_read_model import (
+    IN_FLIGHT_STATUSES,
     bilibili_video_url,
     derive_badge,
     item_index_map,
+    latest_season,
+    list_seasons,
     read_all_job_uploads,
     read_job_uploads,
     read_season,
     read_upload,
+    season_upload_ids,
 )
 from app.models import BiliSeason, BiliSeasonStatus, BiliUpload, BiliUploadStatus, Job, JobItem
 
@@ -136,6 +142,26 @@ def test_an_unverified_only_batch_is_never_reported_as_uploaded():
 
 def test_a_rejected_upload_counts_as_failure_not_success():
     assert derive_badge([upload(BiliUploadStatus.rejected.value)], None) == BADGE_FAILED
+
+
+def test_the_badge_rule_classifies_every_status_exactly_once():
+    """成败两组集合住在 `bili_policy`，`derive_badge` 直接读它们 —— 这条钉住「同源」。
+
+    口径：「在途 / 成功 / 失败」三组两两不相交，且**除 `unverified` 外**每一种状态都必须
+    被其中一组认领 —— `unverified` 是唯一「谁都没归类」的那一档，它折成「待核对」。
+    新加一个状态却忘了归类，会在这里露出来，而不是等线上多出一条永远显示「待核对」的稿件。
+    """
+    groups = (IN_FLIGHT_STATUSES, ACCEPTED_STATUSES, REJECTED_STATUSES)
+    everything = {status.value for status in BiliUploadStatus}
+    covered = set().union(*groups)
+    # 三个集合两两不相交（一个状态被两组认领 = 同一行在不同分支里成败不一致）。
+    for index, group in enumerate(groups):
+        for other in groups[index + 1 :]:
+            assert not (group & other), (sorted(group), sorted(other))
+    # 未被任何一组认领的**只能**是 `unverified`；多出一个就是有状态忘了归类。
+    assert everything - covered == {BiliUploadStatus.unverified.value}, sorted(everything - covered)
+    # 而「没被归类」必须折成待核对，不能折成成功。
+    assert derive_badge([upload(BiliUploadStatus.unverified.value)], None) == BADGE_UNVERIFIED
 
 
 def test_badge_only_moves_forward_when_a_pending_season_is_added():
@@ -342,3 +368,78 @@ def test_elapsed_seconds_ticks_while_still_running(engine):
 def test_elapsed_seconds_is_zero_without_a_start_time(engine):
     """还没开始跑（排队中）时没有起算点，只能给 0 —— 编一个数出来更糟。"""
     assert read_upload(upload(BiliUploadStatus.queued.value)).elapsed_seconds == 0
+
+
+# ================================================================ 归集记录的选取与那串 id
+# 这一组锁的是「写入与读取必须选中同一条」。判据失守时的表现是**静默的**：
+# 界面显示的批次不是后台正在更新的那一个 —— 看起来一切正常，直到用户去 B站 找合集。
+def add_season(engine, season_id: str, *, job_id: str = "j1", created_at=None, upload_ids: str = "[]"):
+    with Session(engine) as session:
+        row = BiliSeason(id=season_id, job_id=job_id, upload_ids_json=upload_ids)
+        if created_at is not None:
+            row.created_at = created_at
+        session.add(row)
+        session.commit()
+
+
+def test_list_seasons_is_ordered_so_the_selection_is_deterministic(engine):
+    """无序返回时，同一个请求在不同时刻会选中不同的行 —— 界面于是会「闪」。"""
+    base = datetime(2026, 10, 14, 3, 0, 0, tzinfo=UTC)
+    add_season(engine, "s-late", created_at=base + timedelta(minutes=5))
+    add_season(engine, "s-early", created_at=base)
+    add_season(engine, "s-mid", created_at=base + timedelta(minutes=1))
+    with Session(engine) as session:
+        assert [row.id for row in list_seasons(session, "j1")] == ["s-early", "s-mid", "s-late"]
+
+
+def test_latest_season_picks_the_most_recent_row(engine):
+    base = datetime(2026, 10, 14, 3, 0, 0, tzinfo=UTC)
+    add_season(engine, "s-old", created_at=base)
+    add_season(engine, "s-new", created_at=base + timedelta(minutes=5))
+    add_season(engine, "s-middle", created_at=base + timedelta(minutes=1))
+    with Session(engine) as session:
+        assert latest_season(session, "j1").id == "s-new"
+
+
+def test_latest_season_is_none_when_the_job_has_no_record(engine):
+    """没有记录是**正常结论**（单视频默认「不归集」就是这一档），不是异常。"""
+    with Session(engine) as session:
+        assert latest_season(session, "j1") is None
+
+
+def test_write_and_read_agree_on_which_record_is_current(engine):
+    """`latest_season` 的全部意义：`_upsert_season` 与 `read_job_uploads` 选中同一条。
+
+    真出现两条记录时（历史数据、或将来某次改动引入的重复写入），两处各挑一条会让
+    「后台在更新的那条」与「界面显示的那条」分叉，而任何一条单独的断言都看不出来。
+    """
+    base = datetime(2026, 10, 14, 3, 0, 0, tzinfo=UTC)
+    add_season(engine, "s-first", created_at=base)
+    add_season(engine, "s-second", created_at=base + timedelta(minutes=5))
+    with Session(engine) as session:
+        assert latest_season(session, "j1").id == "s-second"
+        assert read_job_uploads(session, "j1").season.id == "s-second"
+
+
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [
+        ('["u1", "u2"]', ["u1", "u2"]),
+        ("[]", []),
+        ("", []),
+        ("not json at all", []),
+        ('{"a": 1}', []),
+        ("[1, 2]", ["1", "2"]),
+        ("[null]", ["None"]),
+    ],
+)
+def test_season_upload_ids_tolerates_every_shape_the_column_can_be_in(stored, expected):
+    """这一列是 JSON **文本**，历史上被三种写法各自解析过。坏值一律当空表：
+    一条读不懂的记录不该让整个任务的徽标算不出来（那会让「失败」看起来像「未上传」）。"""
+    row = BiliSeason(id="s1", job_id="j1", upload_ids_json=stored)
+    assert season_upload_ids(row) == expected
+
+
+def test_season_upload_ids_of_a_null_column_is_empty():
+    """`upload_ids_json` 允许为 `None`（老行补列时会是这样）。"""
+    assert season_upload_ids(BiliSeason(id="s1", job_id="j1", upload_ids_json=None)) == []

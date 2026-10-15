@@ -82,6 +82,41 @@ def test_flatten_accepts_a_list_of_name_value_objects(tmp_path):
     assert load_cookie_jar_from(tmp_path, payload) == {"SESSDATA": SECRET, "bili_jct": "j"}
 
 
+def test_the_two_entry_list_call_sites_agree(tmp_path):
+    """同一个「条目列表」形状在两种登录态文件里各有一处调用点（`LoginInfo` 内层 / 顶层数组）。
+
+    两处判定必须**逐字一致**：有一处放宽，就会出现「同一个文件按扩展名走这条路读不出来、
+    走那条路读得出来」—— 而这种不一致只会在用户的某一个文件上复现，极难查。
+    """
+    entries = [{"name": "SESSDATA", "value": SECRET}, {"name": "bili_jct", "value": "j"}]
+    nested = load_cookie_jar_from(tmp_path, {"cookie_info": {"cookies": entries}})
+    flat = load_cookie_jar_from(tmp_path, entries)
+    assert nested == flat == {"SESSDATA": SECRET, "bili_jct": "j"}
+
+
+def test_entries_missing_a_name_or_a_value_are_skipped(tmp_path):
+    """缺 `name` 或 `value` 的条目静默跳过 —— 不能因为平台多发了一个坏条目就丢光全部 cookie。"""
+    payload = [
+        {"name": "SESSDATA", "value": SECRET},
+        {"name": "no_value"},
+        {"value": "no_name"},
+        "not-an-object",
+        None,
+        3,
+    ]
+    assert load_cookie_jar_from(tmp_path, payload) == {"SESSDATA": SECRET}
+
+
+def test_an_empty_inner_cookie_list_falls_through_to_the_flat_dict(tmp_path):
+    """`cookie_info.cookies` 为空时**继续走扁平那条**：这种文件仍可能是一份扁平的 cookie 字典。
+
+    若把它当成「内层读过了」而直接返回空表，用户会看到「登录态文件读出来了，但是空的」，
+    而文件里其实明明白白写着 SESSDATA。
+    """
+    payload = {"cookie_info": {"cookies": []}, "SESSDATA": SECRET}
+    assert load_cookie_jar_from(tmp_path, payload) == {"SESSDATA": SECRET}
+
+
 def test_flatten_drops_nested_non_scalar_values_from_a_flat_dict(tmp_path):
     """扁平 dict 里混进嵌套结构（如 `{"token_info": {...}}`）时不能把整个对象塞进 Cookie 头。"""
     assert load_cookie_jar_from(tmp_path, {"SESSDATA": SECRET, "token_info": {"a": 1}}) == {"SESSDATA": SECRET}

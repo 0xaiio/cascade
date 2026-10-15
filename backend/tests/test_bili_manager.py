@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -35,7 +37,8 @@ from app.bili_manager import (
 )
 from app.bili_meta import MetadataTemplate, UploadMetadata, default_collection_template
 from app.bili_policy import SEASON_CREATE_FAILED
-from app.bili_upload import UploadTarget
+from app.bili_read_model import read_job_uploads
+from app.bili_upload import UploadResult, UploadTarget
 from app.config import AppSettings
 from app.events import EventBroker
 from app.models import (
@@ -1509,4 +1512,141 @@ async def test_single_submit_refuses_new_without_a_title(tmp_path):
         )
     assert caught.value.code == "missing_season_title"
     assert harness.transport.called("/season/add") == 0
+    await harness.manager.stop()
+
+
+# ================================================================ 写库的两个并发作者
+# 进度与结论**由两个线程分别写**：进度来自 `bili_bin.run_command` 的读数线程
+# （回调 → `_store_progress`），结论来自 worker 线程（`_store_result`）。两者写的是同一行的
+# `progress` 列，所以这里钉的是同一条不变量：**已经记下的最大值不会被更小的值覆盖**。
+def _queued_upload(harness: Harness, upload_id: str = "u1", *, status: str | None = None, **fields) -> None:
+    with Session(harness.engine) as session:
+        row = BiliUpload(id=upload_id, job_id="job1", status=status or BiliUploadStatus.uploading.value, **fields)
+        session.add(row)
+        session.commit()
+
+
+def test_storing_a_result_never_lowers_the_recorded_progress(tmp_path):
+    harness = make_harness(tmp_path)
+    _queued_upload(harness, progress=0.8)
+    harness.manager._store_result(
+        "u1",
+        UploadResult(index=1, item_id=None, status=BiliUploadStatus.published.value, progress=0.2),
+    )
+    assert harness.upload("u1").progress == pytest.approx(0.8)
+
+
+def test_progress_is_ignored_once_the_row_is_no_longer_uploading(tmp_path):
+    """结论已经落地之后再来的进度回调必须丢掉。
+
+    它晚到了，说的还是上一个阶段的事 —— 写进去会让一条「已上传」的记录在界面上
+    重新动起来（或者把 `published` 之外的状态又改回去）。
+    """
+    harness = make_harness(tmp_path)
+    _queued_upload(harness, status=BiliUploadStatus.published.value, progress=0.95)
+    harness.manager._store_progress("u1", 0.3)
+    row = harness.upload("u1")
+    assert (row.status, row.progress) == (BiliUploadStatus.published.value, pytest.approx(0.95))
+
+
+def test_progress_writes_for_a_missing_row_are_a_noop(tmp_path):
+    """记录被删掉了（用户删任务）也要静默接受：进度回调不该把正在跑的投稿打断。"""
+    harness = make_harness(tmp_path)
+    harness.manager._store_progress("never-existed", 0.5)
+    harness.manager._store_result("never-existed", UploadResult(index=1, item_id=None, status="failed"))
+
+
+def test_both_progress_and_result_writes_take_the_same_lock(tmp_path):
+    """**两个作者必须共用同一把锁** —— 这就是「已提交的进度可能被更小的值覆盖」的修法。
+
+    这条不改行为、也测不出竞态本身（竞态是时序相关的，单线程里跑不出来），它测的是
+    **修法是否还在**：`_store_result` 曾经不取锁，于是读数线程可能带着一个过期的
+    `progress` 在结论之后才提交。少了这道互斥时，唯一的症状是界面上的进度**倒退**
+    —— 而它几乎不可能被复现，所以只能这样钉住成因。
+    """
+    harness = make_harness(tmp_path)
+    _queued_upload(harness)
+
+    entered: list[str] = []
+    inner = harness.manager._progress_lock
+
+    class Probe:
+        def __enter__(self):
+            entered.append(threading.current_thread().name)
+            return inner.__enter__()
+
+        def __exit__(self, *exc_info):
+            return inner.__exit__(*exc_info)
+
+    harness.manager._progress_lock = Probe()
+    harness.manager._store_progress("u1", 0.5)
+    harness.manager._store_result("u1", UploadResult(index=1, item_id=None, status=BiliUploadStatus.published.value))
+    assert len(entered) == 2, "进度与结论必须各自进一次同一把锁"
+
+
+# ================================================================ 归集记录的定位
+def test_find_upload_treats_a_blank_item_id_as_the_job_level_row(tmp_path):
+    """`None` 与空串是同一件事（都表示「整个任务一条记录」）。
+
+    判据收进 SQL 之后最容易出的一处偏差就是把它写成 `column == None` ——
+    SQL 里那是恒假，于是每次提交都会新建一行，而不是更新原来那行。
+    """
+    harness = make_harness(tmp_path)
+    with Session(harness.engine) as session:
+        session.add(BiliUpload(id="job-level", job_id="job1", item_id=None))
+        session.add(BiliUpload(id="item-level", job_id="job1", item_id="i1"))
+        session.commit()
+        assert harness.manager._find_upload(session, "job1", None).id == "job-level"
+        assert harness.manager._find_upload(session, "job1", "").id == "job-level"
+        assert harness.manager._find_upload(session, "job1", "i1").id == "item-level"
+        assert harness.manager._find_upload(session, "job1", "other") is None
+
+
+async def test_a_write_targets_the_same_season_row_the_reader_reports(tmp_path):
+    """**写入与读取必须选中同一条归集记录。**
+
+    真出现两条时（历史数据、手改库、将来某次改动引入的重复写入），一边取首条、一边取末条
+    会让「后台正在更新的批次」和「界面显示的批次」分叉 —— 而两条单独的断言都看不出来，
+    因为各自都是自洽的。这条用例把两个方向钉在一起。
+    """
+    harness = make_harness(
+        tmp_path,
+        transport=FakeBiliTransport(archives=[{"aid": 1, "bvid": "BV1", "title": TITLE, "state": 0}]),
+    )
+    items = harness.seed_job("job1", "单视频任务", 1)
+    base = datetime(2026, 10, 14, 3, 0, 0, tzinfo=UTC)
+    with Session(harness.engine) as session:
+        session.add(BiliSeason(id="season-old", job_id="job1", created_at=base, status=BiliSeasonStatus.grouped.value))
+        session.add(
+            BiliSeason(
+                id="season-new",
+                job_id="job1",
+                created_at=base + timedelta(minutes=5),
+                status=BiliSeasonStatus.failed.value,
+            )
+        )
+        session.commit()
+
+    created = await harness.manager.submit_single(
+        job_id="job1",
+        item_id=items[0]["id"],
+        meta=harness.meta(),
+        video_path=Path(items[0]["path"]),
+        make_cover=False,
+        comment="",
+        group_mode="new",
+        season_title="新合集",
+    )
+    await drain(harness.manager)
+
+    with Session(harness.engine) as session:
+        reported = read_job_uploads(session, "job1").season.id
+        old = session.get(BiliSeason, "season-old")
+        new = session.get(BiliSeason, "season-new")
+    # 被更新的是「最新那条」，而且正是读模型回报的那条。
+    assert reported == "season-new"
+    assert new.title == "新合集"
+    # 老那条**一个字段都没被碰**：写入不能顺手把首条也改了。
+    assert (old.title, old.status) == ("", BiliSeasonStatus.grouped.value)
+    assert created.id
     await harness.manager.stop()

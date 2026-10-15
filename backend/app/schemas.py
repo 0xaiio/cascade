@@ -356,12 +356,11 @@ class BiliLimits(BaseModel):
     tags: int
     tag_count: int
     tag_item: int
+    # 报「某个标签太长」时回显多少个字。**它也是平台相关的数字**（由 `TAG_PREVIEW_MAX` 决定），
+    # 所以一并下发：界面写死一个（曾经是 12）就会出现「弹窗里截到 12 个字、服务端的 400 里
+    # 截到 40 个字」——同一件事的两种说法，而用户无从判断哪个才算数。
+    tag_preview: int
     comment: int
-
-
-class BiliPrefillRequest(BaseModel):
-    job_id: str = Field(min_length=1)
-    item_id: str | None = None
 
 
 class BiliPrefillItem(BaseModel):

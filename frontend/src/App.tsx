@@ -35,7 +35,9 @@ import { JobQueue } from "./components/JobQueue";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { StatusPill } from "./components/StatusPill";
 import { UrlAnalyzer } from "./components/UrlAnalyzer";
+import { groupNotice, noticeTarget } from "./biliForm";
 import { browserCookieLockFromError, type BrowserCookieLock } from "./cookieLock";
+import { errorMessage } from "./errors";
 import { chooseAvailableResolution } from "./quality";
 import { effectiveSubtitleSourceForAnalysis } from "./subtitles";
 import type {
@@ -104,6 +106,9 @@ const SEASON_LIST_UNREADABLE: BiliSeasonList = {
  * 先给一个结论，再被更好的结论替换。
  */
 const SEASON_LIST_TIMEOUT_MS = 12_000;
+
+/** 「上传已完成」那条提示在页面上挂多久。与 `BiliLoginSection` 的轮询间隔同属「界面节奏」常量。 */
+const BILI_NOTICE_MS = 10_000;
 
 /**
  * 应用容器：**只做状态编排、请求发起与布局**。
@@ -187,7 +192,7 @@ export default function App() {
 
   useEffect(() => {
     if (!biliNotice) return;
-    const timer = window.setTimeout(() => setBiliNotice(null), 10000);
+    const timer = window.setTimeout(() => setBiliNotice(null), BILI_NOTICE_MS);
     return () => window.clearTimeout(timer);
   }, [biliNotice]);
 
@@ -476,36 +481,35 @@ export default function App() {
     // **归集去向必须出现在回执里**，包括「不归集」：那是用户刚在表单里做过的一个选择，
     // 回执不提它，用户就没法确认自己选的那个真的生效了 —— 而「不归集」恰恰是最容易
     // 被误以为没生效的一项（界面上看不出任何变化）。
-    const target = isCollection
-      ? `《${prefill.job_title}》的 ${prefill.items.length} 个视频`
-      : `《${values.metadata.title}》`;
-    setBiliNotice(
-      values.groupMode === "none"
-        ? `已开始上传${target}，不归集 —— 跑完这里会变成「已上传」。`
-        : values.groupMode === "existing"
-          ? `已开始上传${target}，跑完会加进你选的合集。`
-          : isCollection
-            ? `已开始上传${target}，逐个投完后会自动归入同一个合集。`
-            : `已开始上传${target}，投完会自动建一个同名合集并把它放进去。`
-    );
+    const target = noticeTarget({
+      isCollection,
+      jobTitle: prefill.job_title,
+      metadataTitle: values.metadata.title,
+      itemCount: prefill.items.length
+    });
+    setBiliNotice(groupNotice({ groupMode: values.groupMode, isCollection, target }));
+  }
+
+  /**
+   * 重试的两条路（重投一条稿件 / 重跑一次归集）**形状完全一样**：拿到回执里那句话当提示，
+   * 再重拉一次徽标。`request` 与 `fallback` 是唯一的差异 —— 抄两份时，
+   * 第二份漏掉 `refreshBiliUploads()` 这种错不会有任何报错。
+   */
+  async function runBiliRetry(request: () => Promise<{ message: string }>, fallback: string) {
+    try {
+      setBiliNotice((await request()).message);
+      await refreshBiliUploads();
+    } catch (err) {
+      setError(biliMessage(err, fallback));
+    }
   }
 
   async function handleBiliRetryUpload(uploadId: string) {
-    try {
-      setBiliNotice((await retryBiliUpload(uploadId)).message);
-      await refreshBiliUploads();
-    } catch (err) {
-      setError(biliMessage(err, "重试失败"));
-    }
+    await runBiliRetry(() => retryBiliUpload(uploadId), "重试失败");
   }
 
   async function handleBiliRetrySeason(seasonRecordId: string) {
-    try {
-      setBiliNotice((await retryBiliSeason(seasonRecordId)).message);
-      await refreshBiliUploads();
-    } catch (err) {
-      setError(biliMessage(err, "重试归集失败"));
-    }
+    await runBiliRetry(() => retryBiliSeason(seasonRecordId), "重试归集失败");
   }
 
   function updateJobInList(job: Job) {
@@ -722,7 +726,7 @@ export default function App() {
  * 只显示 `message` 等于把「下一步做什么」丢掉 —— 那是本功能的验收口径之一。
  */
 function biliMessage(err: unknown, fallback: string): string {
-  const message = err instanceof Error ? err.message : fallback;
+  const message = errorMessage(err, fallback);
   if (!(err instanceof ApiError) || !err.detail || typeof err.detail !== "object") {
     return message;
   }

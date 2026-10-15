@@ -362,7 +362,7 @@ export const biliStatusPayload: BiliStatus = {
     { tid: "122", label: "野生技术协会" },
     { tid: "171", label: "电子竞技" }
   ],
-  limits: { title: 80, desc: 250, tags: 200, tag_count: 10, tag_item: 20, comment: 1000 },
+  limits: { title: 80, desc: 250, tags: 200, tag_count: 10, tag_item: 20, tag_preview: 40, comment: 1000 },
   gap_seconds: 20,
   uploads_in_flight: 0
 };

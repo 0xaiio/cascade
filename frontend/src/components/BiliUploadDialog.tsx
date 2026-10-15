@@ -1,22 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Upload, X } from "lucide-react";
-import type { BiliGroupMode, BiliMetadata, BiliPrefill, BiliSeasonList } from "../types";
+import {
+  COPYRIGHT_REPRINT,
+  COPYRIGHT_SELF,
+  GROUP_MODE_EXISTING,
+  GROUP_MODE_NEW,
+  GROUP_MODE_NONE,
+  countTags,
+  findChosenSeason,
+  groupHint,
+  localPreflight,
+  renderTemplate
+} from "../biliForm";
+import { errorMessage } from "../errors";
+import type { BiliGroupMode, BiliMetadata, BiliPrefill, BiliPrefillItem, BiliSeasonList } from "../types";
 import { BiliIcon } from "./BiliIcon";
-
-/**
- * 版权取值。与 B站 接口的 `copyright` 字段同值域，也与服务端 `bili_meta.COPYRIGHT_*` 一致。
- *
- * **默认转载**：这个工作流搬的是从别的平台下载下来的视频，绝大多数稿件都不是自己拍的。
- * 默认「自制」会把每一单都填成假信息，而 B站 对「把转载标成自制」是有处置的。
- * 理由写在 `backend/app/bili_meta.py` 的 `DEFAULT_COPYRIGHT` 旁边，两边都要改。
- */
-export const COPYRIGHT_SELF = "1";
-export const COPYRIGHT_REPRINT = "2";
-
-/** 归入方式。与服务端 `bili_meta.GROUP_MODE_*` 同值。**默认 `new`**（改动前的行为）。 */
-export const GROUP_MODE_NONE = "none";
-export const GROUP_MODE_EXISTING = "existing";
-export const GROUP_MODE_NEW = "new";
 
 /**
  * 上传表单弹窗。**单视频与合集共用这一个组件**，只是标题与提示词不同：
@@ -153,77 +151,50 @@ export function BiliUploadDialog({
     if (groupMode === GROUP_MODE_EXISTING && seasons === null) loadSeasonsRef.current();
   }, [groupMode, seasons]);
 
-  const tagCount = useMemo(() => metadata.tags.split(",").filter((item) => item.trim()).length, [metadata.tags]);
-  // 标签的**单项**上限也要查。服务端 `validate()` 会拒，但等到点了提交才看到 400
-  // 就已经离输入框很远了；`limits.tag_item` 一直下发着，这里就地用上。
-  const longestTag = useMemo(
-    () => metadata.tags.split(",").reduce((longest, item) => (item.trim().length > longest.length ? item.trim() : longest), ""),
-    [metadata.tags]
-  );
-  // 转载稿缺来源是**平台的硬要求**（会被 B站 退回来），所以就地拦住 ——
-  // 与服务端 `bili_meta.validate` 同一条判据，写两遍是为了让用户在输入框旁边就看到。
-  // 合集场景没有这个输入框（每条各用各的原始链接），由服务端逐条渲染时保证，不在这里查。
-  const sourceRequired = !isCollection && metadata.copyright === COPYRIGHT_REPRINT;
+  // 标签的个数与最长项：判据在 `biliForm`（与服务端 `bili_meta.validate` 同源），
+  // 这里只负责把 `tagCount` 渲染成 `3/10 个`。
+  const tagCount = useMemo(() => countTags(metadata.tags), [metadata.tags]);
   // 「加入已有合集」必须真的选了一个，而选的那个此刻必须**还在列表里**。
   // 后一条不是防御性编程：合集列表是打开弹窗时读回来的，用户在弹窗开着的时候
   // 不可能删掉合集，但**测试夹具与服务端都会变** —— 与其赌它不会变，
   // 不如在提交前确认一次，否则就是一个 400。
-  const chosenSeason = seasonOptions.find((item) => item.season_id === seasonId);
+  const chosenSeason = findChosenSeason(seasonOptions, seasonId);
+  // 全部预检条件收在一个纯函数里（`biliForm.localPreflight`）：
+  // 它单独可测，不必先渲染一个弹窗、再往输入框里打 80 个字。
   const localProblems = useMemo(
-    () => [
-      ...(metadata.title.trim() ? [] : [isCollection ? "标题模板渲染后不能是空的" : "标题不能是空的"]),
-      ...(metadata.title.length > limits.title ? [`标题超出 ${metadata.title.length - limits.title} 个字`] : []),
-      ...(metadata.desc.length > limits.desc ? [`简介超出 ${metadata.desc.length - limits.desc} 个字`] : []),
-      ...(metadata.tags.length > limits.tags ? [`标签总长超出 ${metadata.tags.length - limits.tags} 个字`] : []),
-      ...(tagCount > limits.tag_count ? [`标签有 ${tagCount} 个，最多 ${limits.tag_count} 个`] : []),
-      ...(longestTag.length > limits.tag_item
-        ? [`「${longestTag.length > 12 ? `${longestTag.slice(0, 12)}…` : longestTag}」这个标签有 ${longestTag.length} 个字，单个标签最多 ${limits.tag_item} 个字`]
-        : []),
-      ...(comment.length > limits.comment ? [`评论超出 ${comment.length - limits.comment} 个字`] : []),
-      ...(sourceRequired && !metadata.source.trim()
-        ? ["选了「转载」但没填原视频链接（转载稿必须填来源，留空会被 B站 退回来）"]
-        : []),
-      // **只在真的要用这份列表时才拦提交**：选了「加入已有」才需要它。
-      // 把「读到合集列表」当成整张表单的前置条件，会让「列表读不到」直接等于
-      // 「视频传不上去」—— 而用户可能只是想投个视频、压根不打算归集。
-      ...(groupMode === GROUP_MODE_EXISTING && !seasonsLoaded
-        ? ["正在读取账号里的合集…"]
-        : []),
-      // **单视频与合集用同一条规则**：控件既然在两处都可见，判据就不能只在一处成立 ——
-      // 否则单视频用户选了「加入已有」又没挑合集时，只会吃到一个服务端 400
-      // （`missing_season_id`），而这句话明明可以就在下拉旁边说出来。
-      ...(groupMode === GROUP_MODE_EXISTING && !chosenSeason
-        ? [seasonId === null
-          ? "选了「加入已有合集」但还没选是哪个合集"
-          : "选中的合集已经不在列表里了，请重新选一个"]
-        : [])
-    ],
-    [
-      chosenSeason,
-      comment.length,
-      groupMode,
-      isCollection,
-      limits,
-      longestTag,
-      metadata,
-      seasonId,
-      seasonTitle,
-      seasonsLoaded,
-      sourceRequired,
-      tagCount
-    ]
+    () =>
+      localPreflight({
+        metadata,
+        comment,
+        limits,
+        isCollection,
+        groupMode,
+        seasonId,
+        seasonsLoaded,
+        chosenSeason
+      }),
+    [chosenSeason, comment, groupMode, isCollection, limits, metadata, seasonId, seasonsLoaded]
   );
   const notReady = prefill.items.filter((item) => !item.ready);
   const blocked = localProblems.length > 0 || notReady.length > 0;
-  // 说明文案按场景分句：单视频说「这条视频」，合集说「这些视频」。
-  // 共用一句会让人以为单视频投稿也会批量处理。
-  const itemsLabel = isCollection ? "这些视频" : "这条视频";
-  const groupHint =
-    groupMode === GROUP_MODE_NEW
-      ? `自动建一个名为「${seasonTitle.trim() || prefill.job_title}」的新合集，把${itemsLabel}放进去。`
-      : groupMode === GROUP_MODE_EXISTING
-        ? `把${itemsLabel}追加到你选的已有合集里，不新建。B站 对合集有审核，加进去之后可能还需要等平台处理。`
-        : `不建合集、也不加入任何合集，${itemsLabel}单独成稿。`;
+  const groupHintText = groupHint({
+    groupMode,
+    seasonTitle,
+    jobTitle: prefill.job_title,
+    isCollection
+  });
+
+  /** 逐条预览要提交的标题。**只是预览** —— 真正提交的内容由服务端渲染（见 `biliForm.renderTemplate`）。 */
+  function previewTitle(item: BiliPrefillItem): string {
+    return renderTemplate({
+      template: metadata.title,
+      index: item.index,
+      title: item.source_title,
+      count: prefill.items.length,
+      job: prefill.job_title,
+      source: item.source_url
+    });
+  }
 
   async function submit() {
     if (blocked) return;
@@ -241,7 +212,7 @@ export function BiliUploadDialog({
         seasonTitle
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "提交失败");
+      setError(errorMessage(err, "提交失败"));
       setSubmitting(false);
     }
   }
@@ -389,7 +360,7 @@ export function BiliUploadDialog({
                 <span>不归集</span>
               </label>
             </div>
-            <p className="hint">{groupHint}</p>
+            <p className="hint">{groupHintText}</p>
           </div>
 
           {groupMode === GROUP_MODE_NEW && (
@@ -528,7 +499,7 @@ export function BiliUploadDialog({
                           {item.source_title}
                           {item.ready ? null : <span className="bili-inline-warn">还没下载好</span>}
                         </td>
-                        <td>{renderTemplate(metadata.title, item, prefill)}</td>
+                        <td>{previewTitle(item)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -573,22 +544,4 @@ export function BiliUploadDialog({
       </div>
     </div>
   );
-}
-
-/**
- * 前端只为「预览」渲染一次模板。
- *
- * **它不是提交路径**：真正提交的内容由服务端用 `{title}` 模板 + 每条视频的数据渲染
- * （`bili_meta.render`，单一来源）。这里重放一遍是为了让用户改一个字就能看到效果；
- * 若两者不一致，以服务端为准 —— 这正是为什么提交结果的标题会在界面上回显。
- */
-function renderTemplate(template: string, item: BiliPrefill["items"][number], prefill: BiliPrefill) {
-  const values: Record<string, string> = {
-    index: String(item.index).padStart(2, "0"),
-    title: item.source_title,
-    count: String(prefill.items.length),
-    job: prefill.job_title,
-    source: item.source_url
-  };
-  return template.replace(/\{(index|title|count|job|source)\}/g, (match, key: string) => values[key] ?? match);
 }

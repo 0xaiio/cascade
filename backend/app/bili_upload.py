@@ -54,6 +54,7 @@ from .bili_meta import (
     validate,
 )
 from .bili_policy import (
+    ACCEPTED_STATUSES,
     MISSING_VIDEO,
     SEASON_CREATE_FAILED,
     SEASON_EPISODES_FAILED,
@@ -154,10 +155,9 @@ class UploadResult:
 
     @property
     def ok(self) -> bool:
-        return self.status in {
-            BiliUploadStatus.published.value,
-            BiliUploadStatus.reviewing.value,
-        }
+        """平台上确实已经有这条稿件。**判据在 `bili_policy.ACCEPTED_STATUSES`**，
+        与徽标派生用的是同一组取值 —— 两处各写一遍字面量时，加一档状态就会只改一处。"""
+        return self.status in ACCEPTED_STATUSES
 
 
 @dataclass
@@ -355,10 +355,9 @@ def run_single(
     result.status = BiliUploadStatus.submitted.value
     _verify(context, meta.title, result)
 
-    if comment and result.episode_ready and result.status in {
-        BiliUploadStatus.published.value,
-        BiliUploadStatus.reviewing.value,
-    }:
+    # `result.ok` 而不是再抄一遍「published / reviewing」：这条判据（以及上面的
+    # `episode_ready`）本来就写在 `UploadResult` 上，散回调用点是同一份判断的第二处。
+    if comment and result.episode_ready and result.ok:
         outcome = send_and_top_comment(
             context.transport,
             context.jar,

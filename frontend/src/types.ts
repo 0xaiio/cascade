@@ -215,6 +215,27 @@ export type BiliBadge = "none" | "uploading" | "uploaded" | "unverified" | "part
 export type BiliBadgeTone = "idle" | "busy" | "ok" | "warn" | "bad";
 
 /**
+ * 稿件级上传状态。**取值与服务端 `models.BiliUploadStatus` 一一对应**，写在这里而不是
+ * 让字段是裸 `string`，是为了让「拿一个状态去查表」这类代码在 `tsc` 阶段就被挡住 ——
+ * 不然打错一个字母只有运行时才会发现（而那时它表现为「重试按钮不出现」这种静默现象）。
+ */
+export type BiliUploadStatus =
+  | "queued"
+  | "uploading"
+  | "submitted"
+  | "published"
+  | "reviewing"
+  | "rejected"
+  | "unverified"
+  | "failed";
+
+/** 合集归集状态。`skipped` = 用户在投稿时选了「不归集」，是**终态**。 */
+export type BiliSeasonStatus = "pending" | "grouping" | "grouped" | "failed" | "skipped";
+
+/** 版权取值。与 B站 接口的 `copyright` 同值域，所以界面不需要翻译层。 */
+export type BiliCopyright = "1" | "2";
+
+/**
  * 「结论 + 下一步」。本功能所有缺项/失败提示都是这个形状 ——
  * 只报结论不给动作的提示在验收口径里算未完成。
  */
@@ -285,7 +306,7 @@ export interface BiliMetadata {
   tags: string;
   tid: string;
   /** 版权：`"1"` 自制 / `"2"` 转载。与 B站 接口同值域，所以不需要翻译层。 */
-  copyright: string;
+  copyright: BiliCopyright;
   /**
    * 转载来源链接。
    *
@@ -301,6 +322,9 @@ export interface BiliLimits {
   tags: number;
   tag_count: number;
   tag_item: number;
+  /** 报「某个标签太长」时回显多少个字。**不要在前端另写一个数** —— 那会让弹窗与服务端
+   *  的 400 对同一件事给出两种截断结果。 */
+  tag_preview: number;
   comment: number;
 }
 
@@ -350,10 +374,10 @@ export interface BiliUpload {
   tid_label: string;
   /** 实际提交出去的版权（`"1"` 自制 / `"2"` 转载）与来源链接（提交时的快照）。
    *  界面显示「转载 / 自制」用它，也是「重试没有把稿件悄悄换成自制」可被核对的那一份证据。 */
-  copyright: string;
+  copyright: BiliCopyright | "";
   copyright_label: string;
   source: string;
-  status: string;
+  status: BiliUploadStatus;
   status_text: string;
   badge: BiliBadge;
   badge_text: string;
@@ -381,7 +405,7 @@ export interface BiliSeason {
   title: string;
   desc: string;
   season_id: number | null;
-  status: string;
+  status: BiliSeasonStatus;
   status_text: string;
   upload_ids: string[];
   error: string | null;

@@ -258,6 +258,34 @@ def test_create_season_accepts_an_object_payload_too():
     assert create_season(transport, JAR, title="合集", desc="简介", cover_url="") == 555
 
 
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        (777, 777),
+        ("777", 777),  # 平台上见过把编号发成字符串的形态
+        ({"id": 777}, 777),
+        ({"id": "777"}, 777),
+    ],
+)
+def test_create_season_reads_the_id_out_of_every_shape_the_platform_sends(data, expected):
+    """`_season_id_of` 是这两种形态的**唯一**收口 —— 它放宽一格，就是「合集建好了却读不出编号」。"""
+    transport = StubTransport({"code": 0, "data": data})
+    assert create_season(transport, JAR, title="合集", desc="简介", cover_url="") == expected
+
+
+@pytest.mark.parametrize("data", [None, 0, "", "abc", {}, {"id": None}, {"id": "abc"}, {}, [555], {"other": 1}])
+def test_create_season_reports_a_missing_id_for_anything_that_is_not_a_number(data):
+    """坏形状必须走到「没有拿到编号」这一句，而不是把 `None` 或异常漏给调用方。
+
+    `0` 也在这一批里：判的是「有没有编号」而不是「是不是 `None`」，`int("abc")` 抛出的
+    `ValueError` 与 `[555]`/`None` 抛出的 `TypeError` 都要被吞成 `None`。
+    """
+    transport = StubTransport({"code": 0, "data": data})
+    with pytest.raises(BiliApiError) as excinfo:
+        create_season(transport, JAR, title="合集", desc="简介", cover_url="")
+    assert "没有拿到编号" in excinfo.value.message
+
+
 def test_create_season_puts_csrf_in_the_form():
     """与 `add_episodes` **相反**：这里的 csrf 在表单正文里。"""
     transport = FakeBiliTransport()

@@ -1,3 +1,4 @@
+import { BADGE_NONE } from "../biliStatus";
 import type { BiliBadge, BiliBadgeTone } from "../types";
 import { BiliIcon } from "./BiliIcon";
 
@@ -35,9 +36,10 @@ export function BiliUploadButton({
   onClick: () => void;
 }) {
   const disabled = Boolean(disabledReason);
-  const label = badge === "none" ? "上传" : badgeText;
-  const action = badge === "none" ? "上传到 B 站" : `B站：${badgeText}`;
-  const title = disabled ? `${action}（暂不可用：${disabledReason}）` : `${action}${badge === "none" ? "" : " · 点击重新上传"}`;
+  const idle = badge === BADGE_NONE;
+  const label = idle ? "上传" : badgeText;
+  const action = idle ? "上传到 B 站" : `B站：${badgeText}`;
+  const title = disabled ? `${action}（暂不可用：${disabledReason}）` : `${action}${idle ? "" : " · 点击重新上传"}`;
   return (
     <button
       className={`bili-button ${compact ? "is-compact" : ""} tone-${badgeTone}`}

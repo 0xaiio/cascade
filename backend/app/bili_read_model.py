@@ -21,14 +21,16 @@ from sqlmodel import Session, select
 
 from .bili_meta import copyright_label, partition_label
 from .bili_policy import (
+    ACCEPTED_STATUSES,
     BADGE_FAILED,
     BADGE_NONE,
     BADGE_PARTIAL,
     BADGE_UNVERIFIED,
     BADGE_UPLOADED,
     BADGE_UPLOADING,
-    BADGE_TEXT,
-    BADGE_TONE,
+    REJECTED_STATUSES,
+    badge_text,
+    badge_tone,
     season_status_text,
     upload_status_text,
 )
@@ -49,8 +51,6 @@ IN_FLIGHT_STATUSES = {
     BiliUploadStatus.uploading.value,
     BiliUploadStatus.submitted.value,
 }
-ACCEPTED_STATUSES = {BiliUploadStatus.published.value, BiliUploadStatus.reviewing.value}
-REJECTED_STATUSES = {BiliUploadStatus.rejected.value, BiliUploadStatus.failed.value}
 
 
 def bilibili_video_url(bvid: str | None) -> str | None:
@@ -109,8 +109,8 @@ def read_upload(upload: BiliUpload, *, index: int = 1) -> BiliUploadRead:
         status=upload.status,
         status_text=upload_status_text(upload.status),
         badge=badge,
-        badge_text=BADGE_TEXT[badge],
-        badge_tone=BADGE_TONE[badge],
+        badge_text=badge_text(badge),
+        badge_tone=badge_tone(badge),
         progress=upload.progress,
         bvid=upload.bvid,
         aid=upload.aid,
@@ -129,11 +129,27 @@ def read_upload(upload: BiliUpload, *, index: int = 1) -> BiliUploadRead:
     )
 
 
-def read_season(season: BiliSeason) -> BiliSeasonRead:
+def season_upload_ids(season: BiliSeason) -> list[str]:
+    """归集记录里那串稿件 id。**单一实现**：读模型（展示）、`BiliManager._season_of`（找这条
+    稿件属于哪个批次）与 `_group_work`（挑出要加进合集的稿件）三处都要它。
+
+    列里存的是 JSON 文本，坏值一律当空表 —— 一条读不懂的记录不该让整个任务的徽标算不出来。
+
+    **必须是数组**：早先只 `try` 了 `json.loads`，于是 `{"a": 1}` 这种形状会被当成
+    「一个成员为键名的列表」返回 `["a"]`；那串东西随后会被拿去 `session.get(BiliUpload, "a")`。
+    不是数组就是坏值，与「JSON 解析失败」同样处理。
+    """
     try:
-        upload_ids = [str(item) for item in json.loads(season.upload_ids_json or "[]")]
+        parsed = json.loads(season.upload_ids_json or "[]")
     except ValueError:
-        upload_ids = []
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [str(item) for item in parsed]
+
+
+def read_season(season: BiliSeason) -> BiliSeasonRead:
+    upload_ids = season_upload_ids(season)
     return BiliSeasonRead(
         id=season.id,
         job_id=season.job_id,
@@ -149,12 +165,36 @@ def read_season(season: BiliSeason) -> BiliSeasonRead:
 
 
 def list_uploads(session: Session, job_id: str) -> list[BiliUpload]:
-    """读一个任务的稿件记录，**按下载条目顺序** —— 合集加入合集的顺序就是它。"""
+    """读一个任务的稿件记录，顺序**由数据库决定**。
+
+    「按下载条目顺序」这件事需要 `JobItem.index`，只有 `read_job_uploads` 拿得到
+    （它先建 `item_index_map` 再排序）。想在调用点拿到有序结果就用那个函数，
+    别以为这里已经排过了 —— 这条 docstring 早先写反了，读的人会以为排序在这一层。
+    """
     return list(session.exec(select(BiliUpload).where(BiliUpload.job_id == job_id)).all())
 
 
 def list_seasons(session: Session, job_id: str) -> list[BiliSeason]:
-    return list(session.exec(select(BiliSeason).where(BiliSeason.job_id == job_id)).all())
+    """按创建顺序返回。**必须有序**：`latest_season` 与 `read_job_uploads` 都取「最后一条」，
+    无序返回会让同一次请求在不同时刻选中不同的行。"""
+    return list(
+        session.exec(
+            select(BiliSeason)
+            .where(BiliSeason.job_id == job_id)
+            .order_by(BiliSeason.created_at, BiliSeason.id)
+        ).all()
+    )
+
+
+def latest_season(session: Session, job_id: str) -> BiliSeason | None:
+    """一个任务当前生效的那条归集记录。
+
+    **写入（`_upsert_season`）与读取（`read_job_uploads`）必须走同一个函数**：一个取首条、
+    一个取末条时，一旦真出现两条记录，界面显示的批次就不是被更新的那一个 ——
+    而这两个调用点此前正是「首 vs 末」相反的。
+    """
+    seasons = list_seasons(session, job_id)
+    return seasons[-1] if seasons else None
 
 
 def item_index_map(session: Session, job_id: str) -> dict[str, int]:
@@ -174,14 +214,15 @@ def read_job_uploads(session: Session, job_id: str) -> BiliJobUploadsRead:
         return (10**6, upload.id)
 
     uploads.sort(key=sort_key)
-    # 一个任务最多一个合集记录：再投一次是「重试」而新建。
+    # 一个任务最多一条归集记录：再投一次是「重试」而不是新建。真有多条时以最新那条为准，
+    # 与 `_upsert_season` 用同一个函数取，免得写入与读取各挑一条。
     season = seasons[-1] if seasons else None
     badge = derive_badge(uploads, season)
     return BiliJobUploadsRead(
         job_id=job_id,
         badge=badge,
-        badge_text=BADGE_TEXT[badge],
-        badge_tone=BADGE_TONE[badge],
+        badge_text=badge_text(badge),
+        badge_tone=badge_tone(badge),
         uploads=[
             read_upload(upload, index=indexes.get(upload.item_id or "", 1))
             for upload in uploads

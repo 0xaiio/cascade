@@ -8,6 +8,7 @@ import {
   repairBiliTool,
   uploadBiliCookies
 } from "../api";
+import { errorMessage } from "../errors";
 import type { BiliQrcode, BiliStatus } from "../types";
 
 /** 轮询间隔。B站 的扫码状态没有推送，只能轮询；1.5 秒在「反应够快」与「不打扰服务端」之间。 */
@@ -51,7 +52,7 @@ export function BiliLoginSection({ onError }: { onError: (message: string) => vo
     try {
       setStatus(await getBiliStatus());
     } catch (err) {
-      onError(err instanceof Error ? err.message : "读取 B 站 状态失败");
+      onError(errorMessage(err, "读取 B 站 状态失败"));
     }
   }
 
@@ -64,7 +65,7 @@ export function BiliLoginSection({ onError }: { onError: (message: string) => vo
       stopPolling();
       pollTimer.current = window.setInterval(() => void poll(challenge.qrcode_key), POLL_INTERVAL_MS);
     } catch (err) {
-      onError(err instanceof Error ? err.message : "获取登录二维码失败");
+      onError(errorMessage(err, "获取登录二维码失败"));
     } finally {
       setBusy(false);
     }
@@ -93,7 +94,7 @@ export function BiliLoginSection({ onError }: { onError: (message: string) => vo
     try {
       setStatus(await uploadBiliCookies(file));
     } catch (err) {
-      onError(err instanceof Error ? err.message : "导入登录文件失败");
+      onError(errorMessage(err, "导入登录文件失败"));
     } finally {
       setBusy(false);
       if (fileInput.current) fileInput.current.value = "";
@@ -108,7 +109,7 @@ export function BiliLoginSection({ onError }: { onError: (message: string) => vo
       stopPolling();
       setPollMessage("");
     } catch (err) {
-      onError(err instanceof Error ? err.message : "清除登录失败");
+      onError(errorMessage(err, "清除登录失败"));
     } finally {
       setBusy(false);
     }
@@ -119,7 +120,7 @@ export function BiliLoginSection({ onError }: { onError: (message: string) => vo
     try {
       setStatus(await repairBiliTool());
     } catch (err) {
-      onError(err instanceof Error ? err.message : "修复失败");
+      onError(errorMessage(err, "修复失败"));
     } finally {
       setBusy(false);
     }

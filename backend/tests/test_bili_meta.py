@@ -159,13 +159,25 @@ def test_render_trims_tags_and_normalizes_tid():
 
 # ---------------------------------------------------------------- 硬限校验
 def test_limits_matches_the_constants():
-    """界面上的字数上限来自这一份；两处不一致时用户会「看着没超却被拒」。"""
+    """界面上的字数上限来自这一份；两处不一致时用户会「看着没超却被拒」。
+
+    `tag_preview` 也是同一类数字（界面用几个标签的回显长度）—— 它必须一起走这一份，
+    不许在前端再写死一个 40；所以这里按**全字段**比对，缺一个就红。
+    """
     value = limits()
-    assert (value.title, value.desc, value.tags, value.tag_count, value.comment) == (
+    assert (
+        value.title,
+        value.desc,
+        value.tags,
+        value.tag_count,
+        value.tag_preview,
+        value.comment,
+    ) == (
         TITLE_MAX,
         DESC_MAX,
         TAG_MAX,
         TAG_MAX_COUNT,
+        TAG_PREVIEW_MAX,
         COMMENT_MAX,
     )
 

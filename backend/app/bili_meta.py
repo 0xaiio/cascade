@@ -340,6 +340,7 @@ def limits() -> "BiliLimits":
         tags=TAG_MAX,
         tag_count=TAG_MAX_COUNT,
         tag_item=TAG_ITEM_MAX,
+        tag_preview=TAG_PREVIEW_MAX,
         comment=COMMENT_MAX,
     )
 

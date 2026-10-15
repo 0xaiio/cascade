@@ -88,10 +88,12 @@ from .bili_policy import (
 )
 from .bili_read_model import (
     IN_FLIGHT_STATUSES,
+    latest_season,
     list_seasons,
     read_job_uploads,
     read_season,
     read_upload,
+    season_upload_ids,
 )
 from .bili_upload import (
     SeasonOutcome,
@@ -790,7 +792,7 @@ class BiliManager:
         默认路径上多出来的东西必须是零。已有记录仍然会被停掉（见下），
         因为一条 `pending` 会让 `_maybe_group` 照旧自动归集。
         """
-        season = next(iter(list_seasons(session, job_id)), None)
+        season = latest_season(session, job_id)
         if season is None:
             if not create_if_missing:
                 return None
@@ -820,11 +822,19 @@ class BiliManager:
         return season
 
     def _find_upload(self, session: Session, job_id: str, item_id: str | None) -> BiliUpload | None:
-        rows = session.exec(select(BiliUpload).where(BiliUpload.job_id == job_id)).all()
-        for row in rows:
-            if (row.item_id or None) == (item_id or None):
-                return row
-        return None
+        """按 `(job_id, item_id)` 找那一行。**`None` 与空串是同一件事**（都表示「整个任务一条」）。
+
+        判据在 SQL 里表达，而不是把任务的全部行取回来在 Python 里筛：后者随条目数线性变差，
+        而这条查询每次提交都要跑一次。
+        """
+        statement = select(BiliUpload).where(BiliUpload.job_id == job_id)
+        if item_id:
+            statement = statement.where(BiliUpload.item_id == item_id)
+        else:
+            statement = statement.where(
+                (BiliUpload.item_id.is_(None)) | (BiliUpload.item_id == "")
+            )
+        return session.exec(statement).first()
 
     def _index_for(self, session: Session, job_id: str, item_id: str | None) -> int:
         if not item_id:
@@ -832,9 +842,19 @@ class BiliManager:
         item = session.get(JobItem, item_id)
         return item.index if item is not None else 1
 
-    def _require_ready(self) -> None:
-        if not find_biliup(self.settings.biliup_path):
+    # ------------------------------------------------------------ 前置条件
+    # 这条链有**两个**调用点：`_require_ready`（提交前拦下来，只关心成不成立）与
+    # `_context`（真正装配时再查一遍，还要拿到 exe 与 jar）。两处曾各抄一遍同样的四步判定，
+    # 差别只在「要不要返回值」—— 那是最容易只改一处的形状。
+    def _require_biliup(self) -> str:
+        """找投稿工具，找不到就抛。返回可执行文件路径（`_context` 要用）。"""
+        exe = find_biliup(self.settings.biliup_path)
+        if not exe:
             raise BiliPreconditionError(*MISSING_BILIUP, code="missing_biliup")
+        return exe
+
+    def _require_jar(self) -> dict[str, str]:
+        """读登录态并确认必需字段齐全，不合格就抛。返回 cookie 字典。"""
         jar = self.current_jar()
         if not jar:
             raise BiliPreconditionError(*MISSING_COOKIE, code="missing_cookie")
@@ -845,6 +865,12 @@ class BiliManager:
                 MISSING_COOKIE_FIELDS[1],
                 code="missing_cookie_fields",
             )
+        return jar
+
+    def _require_ready(self) -> None:
+        """提交前的整条前置条件链。判据与 `_context` 完全同源，只是这里不要返回值。"""
+        self._require_biliup()
+        self._require_jar()
         self._require_upload_token()
 
     def _require_upload_token(self) -> None:
@@ -1061,20 +1087,12 @@ class BiliManager:
             return target, meta, bool(row.make_cover), row.comment or ""
 
     def _context(self, *, on_progress: Callable[[float], None] | None = None) -> UploadContext:
-        """装配一次上传的外部依赖。前置条件在这里**再查一遍** —— 排队期间状态可能已经变了。"""
-        exe = find_biliup(self.settings.biliup_path)
-        if not exe:
-            raise BiliPreconditionError(*MISSING_BILIUP, code="missing_biliup")
-        jar = self.current_jar()
-        if not jar:
-            raise BiliPreconditionError(*MISSING_COOKIE, code="missing_cookie")
-        missing = missing_required_cookies(jar)
-        if missing:
-            raise BiliPreconditionError(
-                f"{MISSING_COOKIE_FIELDS[0]}（缺 {'、'.join(missing)}）",
-                MISSING_COOKIE_FIELDS[1],
-                code="missing_cookie_fields",
-            )
+        """装配一次上传的外部依赖。前置条件在这里**再查一遍** —— 排队期间状态可能已经变了。
+
+        用的就是 `_require_ready` 那一组函数（见上），差别只是这里要留下 `exe` 与 `jar`。
+        """
+        exe = self._require_biliup()
+        jar = self._require_jar()
         self._require_upload_token()
         return UploadContext(
             biliup_exe=exe,
@@ -1117,7 +1135,15 @@ class BiliManager:
                 logger.exception("bili 上传：写进度失败 upload_id=%s", upload_id)
 
     def _store_result(self, upload_id: str, result: UploadResult) -> None:
-        with Session(self.engine) as session:
+        """落一条稿件的最终结论。
+
+        **与 `_store_progress` 共用同一把锁。** 两者写的是同一行的 `progress`：进度回调跑在
+        `bili_bin.run_command` 的读数线程上，落结论跑在 worker 线程上。没有这道互斥时，
+        读数线程可能先读到一个较小的旧值、在结论提交之后才把它写回去 ——
+        于是界面上的进度会**倒退**（`max()` 是在各自的事务里算的，挡不住这种交错）。
+        `Lock` 不可重入，但这两个函数互不调用，所以不会自锁。
+        """
+        with self._progress_lock, Session(self.engine) as session:
             row = session.get(BiliUpload, upload_id)
             if row is None:
                 return
@@ -1157,12 +1183,10 @@ class BiliManager:
         self._group_work(job_id, season_id)
 
     def _season_of(self, session: Session, upload: BiliUpload) -> BiliSeason | None:
+        """这条稿件属于哪个归集批次。读不懂的 `upload_ids_json` 当空表 —— 那等于「不属于任何
+        批次」，与 `season_upload_ids` 一致（这一列此前在三处各写了一遍 `try/except ValueError`）。"""
         for season in list_seasons(session, upload.job_id):
-            try:
-                ids = [str(item) for item in json.loads(season.upload_ids_json or "[]")]
-            except ValueError:
-                continue
-            if upload.id in ids:
+            if upload.id in season_upload_ids(season):
                 return season
         return None
 
@@ -1171,10 +1195,7 @@ class BiliManager:
             season = session.get(BiliSeason, season_record_id)
             if season is None:
                 raise KeyError(season_record_id)
-            try:
-                ids = [str(item) for item in json.loads(season.upload_ids_json or "[]")]
-            except ValueError:
-                ids = []
+            ids = season_upload_ids(season)
             rows = [session.get(BiliUpload, item) for item in ids]
             rows = [row for row in rows if row is not None]
             if any(row.status in IN_FLIGHT_STATUSES for row in rows):
@@ -1243,11 +1264,29 @@ class BiliManager:
         直接 await 会报「no running event loop」（这是 job_manager 已经踩过的一条）。"""
         if self._loop is None:
             return
+
+        def schedule() -> None:
+            task = asyncio.ensure_future(self.broker.publish(payload))
+            # 挂上回调才能看见失败：没人 await 的 Task 抛异常时只在 GC 阶段打一行
+            # 「Task exception was never retrieved」，那条日志既不好搜也不指向这里。
+            task.add_done_callback(_log_publish_failure)
+
         try:
-            self._loop.call_soon_threadsafe(lambda: asyncio.ensure_future(self.broker.publish(payload)))
+            self._loop.call_soon_threadsafe(schedule)
         except RuntimeError:
             # 事件循环已关闭（进程正在退出）：丢弃事件，不能因此让 worker 抛异常。
             logger.debug("bili 事件发布被跳过：事件循环已关闭")
+
+
+def _log_publish_failure(task: "asyncio.Task[None]") -> None:
+    """发布事件失败时留一条日志。事件是**补充信息**（界面靠 SSE 触发重拉），
+    发不出去不该把 worker 带走，但也不该悄无声息 —— 否则「界面一直不刷新」这种报障
+    在后端查不到任何线索。"""
+    if task.cancelled():
+        return
+    error = task.exception()
+    if error is not None:
+        logger.warning("bili 事件发布失败：%s", sanitize_log_message(error))
 
 
 def _season_outcome_from_error(exc: BiliPreconditionError) -> SeasonOutcome:

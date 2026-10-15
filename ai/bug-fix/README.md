@@ -39,6 +39,7 @@
 | [009](009-local-dev-port-is-occupied-and-unconfigurable.md) | 8000 被 IncrediBuild 长期占用，启动失败而报错指着「权限」 | `b4f7aba` | `Manager.exe` 以 `0.0.0.0:8000` **独占**监听 → 绑 `127.0.0.1:8000` 得到 `WinError 10013`（权限）而不是 10048（地址已用）；端口值散落多处、Vite 代理还硬编码，换端口会让 `/api` 静默打到 IncrediBuild 上 |
 | [010](010-unselectable-probe-raise-skips-the-fallback.md) | 提示「已自动降级到 1080p」，却根本没有开始下载 | `5eb90e3` | yt-dlp 把「选不出格式」实现成**抛异常**，而降级分支挂在「返回 `is_selectable=False`」上 → 整段降级成了死代码；默认清晰度 1440p 遇上只有 1080p 的视频必然命中 |
 | [011](011-biliup-refuses-a-token-less-cookie-file.md) | 扫码登录只拿到 cookies，biliup 拒绝开工：投稿必失败且查不出原因 | 本次 | 登录文件里 `token_info.access_token` 是空串，`login_by_cookies` 会**无条件先**拿它去 `oauth2/info` 校验，空串被 B站 判成 `-400 请求错误` → biliup 在发出任何投稿请求之前退出（实测 1.4 s）；同时 `on_log` 没有任何调用方，失败建议却让人去 app.log 搜原文 —— 照做只会扑空 |
+| [012](012-preflight-contradicts-itself-and-the-server.md) | 投稿表单的本地预检有两处口径不对：列表还在读就要求用户去选合集、标签回显截断写死 12 个字 | 本次 | 两条 `...(cond ? […] : [])` 各自求值，「正在读取…」与「还没选是哪个合集」在列表未就绪时同时成立 → 表单自相矛盾；而回显截断写死 12（服务端是 `TAG_PREVIEW_MAX = 40`），12 < 单项上限 21，于是那个三元的不截断分支**从未执行过** —— 服务端注释早就点名了这个坑 |
 
 ## 本轮（2026-10-01）背景
 
@@ -163,3 +164,10 @@ failed · 0/1 完成 · 当前没有 1440p 的视频，低于选定分辨率的�
    与 `refresh_token` 已写入，**没有构造过「令牌将过期」的状态来跑那条路**。
    真要验收得手工把 `expires_in` 改小或等 180 天。风险是「某天开始投稿又变成 -400」——
    届时界面上的凭据体检（011 新增的那一项）会把它显出来，不会再静默。
+15. **B站 的三条只读请求没有超时与 `AbortController`**（012 遗留）。只有 `listBiliSeasons`
+   因为踩过「DNS 挂起不受 socket timeout 覆盖」而补了 12 s 兜底 + 请求去重，
+   而 `getBiliPrefill` / `getBiliUploadsSummary` / `getBiliStatus` 仍是裸 `fetch`。
+   DNS 挂起时它们同样会给出一个**没有终点**的 loading，而 012（一）修的那句
+   「正在读取账号里的合集…」正是以「列表最终会回来」为前提的 —— 前提不成立时，
+   用户看到的就是一句永远不消失的说明。修法是给这三条也套同一套兜底（或抽一个共用的
+   `fetchWithTimeout`），未做。

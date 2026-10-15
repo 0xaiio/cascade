@@ -1,3 +1,4 @@
+import { GROUP_MODE_EXISTING } from "./biliForm";
 import type {
   AnalyzeResponse,
   ApiErrorDetail,
@@ -247,6 +248,29 @@ export function getBiliJobUploads(jobId: string): Promise<BiliJobUploads> {
   return request<BiliJobUploads>(`/api/bilibili/uploads?job_id=${encodeURIComponent(jobId)}`);
 }
 
+/**
+ * 归集方式那一组字段。**两条提交路径共用**（单视频 / 合集）。
+ *
+ * `season_title` 只在 `new` 时才有意义，但照传无害：服务端在 `existing` 时用的是平台上
+ * 那个合集自己的名字。`season_id` 则相反 —— `existing` 之外**一个字符都不能带**：
+ * 带上一个残留编号会让服务端按「有 season_id 就不建合集」处理，
+ * 「新建合集」就悄悄变成了往老合集里塞视频（`bili_manager._upsert_season` 的优先级）。
+ *
+ * 这段判断原本在两条路径里各写了一遍。它错起来的代价是**静默的**（归集去了错的合集），
+ * 所以只留一份 —— 复制时最容易漏掉的正是那行 `...(groupMode === "existing" ? …)`。
+ */
+function biliGroupFields(
+  groupMode: BiliGroupMode,
+  seasonId: number | null,
+  seasonTitle: string
+): Record<string, unknown> {
+  return {
+    group_mode: groupMode,
+    season_title: seasonTitle,
+    ...(groupMode === GROUP_MODE_EXISTING ? { season_id: seasonId } : {})
+  };
+}
+
 export function createBiliUpload(
   jobId: string,
   itemId: string | null,
@@ -265,14 +289,7 @@ export function createBiliUpload(
       metadata,
       make_cover: makeCover,
       comment,
-      // 归集方式与合集那边同形。**`season_title` 只在 `new` 时才有意义**，
-      // 但照传无害：服务端在 `existing` 时用的是平台上那个合集自己的名字。
-      group_mode: groupMode,
-      season_title: seasonTitle,
-      // `existing` 之外**不提交**这个字段，与 `createBiliCollection` 同一条理由：
-      // 带上一个残留编号会让服务端按「有 season_id 就不建合集」处理，
-      // 「新建合集」就悄悄变成了往老合集里塞视频。
-      ...(groupMode === "existing" ? { season_id: seasonId } : {})
+      ...biliGroupFields(groupMode, seasonId, seasonTitle)
     })
   });
 }
@@ -292,14 +309,10 @@ export function createBiliCollection(
     body: JSON.stringify({
       job_id: jobId,
       template,
-      season_title: seasonTitle,
       season_desc: seasonDesc,
       make_cover: makeCover,
       comment,
-      group_mode: groupMode,
-      // `existing` 之外的场景**不提交**这个字段：带上一个残留编号会让服务端
-      // 按「有 season_id 就不建合集」处理，于是「新建合集」悄悄变成了往老合集里塞视频。
-      ...(groupMode === "existing" ? { season_id: seasonId } : {})
+      ...biliGroupFields(groupMode, seasonId, seasonTitle)
     })
   });
 }

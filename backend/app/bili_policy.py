@@ -85,11 +85,22 @@ BADGE_TONE: dict[str, str] = {
 
 
 def badge_text(badge: str) -> str:
+    """徽标 → 文案。**读模型走这里，不要直接下标 `BADGE_TEXT`** —— 两处写法就是两份真相。"""
     return BADGE_TEXT.get(badge, BADGE_TEXT[BADGE_NONE])
 
 
 def badge_tone(badge: str) -> str:
-    return BADGE_TONE.get(badge, "idle")
+    return BADGE_TONE.get(badge, BADGE_TONE[BADGE_NONE])
+
+
+# ---------------------------------------------------------------- 稿件状态的成败归类
+# **单一来源。** 这三组集合此前在 `bili_read_model`（徽标派生）与 `bili_upload`（`UploadResult.ok`）
+# 各写了一遍字面量 —— 两处都判「算不算成功」，一旦平台多一档状态就会只改一处。
+# 放在 L1 的常量模块里，是因为 L2 与 L3 都要读它，而 L3 不能反向依赖 L2 的读模型。
+#
+# `accepted` 的语义是**平台上确实已经有这条稿件**（`biliup` 返回 0 从来不算，见 F7）。
+ACCEPTED_STATUSES = frozenset({BiliUploadStatus.published.value, BiliUploadStatus.reviewing.value})
+REJECTED_STATUSES = frozenset({BiliUploadStatus.rejected.value, BiliUploadStatus.failed.value})
 
 
 # ---------------------------------------------------------------- 记录级状态 → 人话

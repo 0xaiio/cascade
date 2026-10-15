@@ -182,7 +182,7 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 
 ### 命令返回 0 不等于已发布
 
-投稿走 `biliup-rs 0.2.4`（`biliup.exe`，安装方式 `winget install --id ForgQi.biliup-rs --exact`），命令组装在 [build_upload_argv](../backend/app/bili_bin.py#L147)。三个必须知道的事实：
+投稿走 `biliup-rs 0.2.4`（`biliup.exe`，安装方式 `winget install --id ForgQi.biliup-rs --exact`），命令组装在 [build_upload_argv](../backend/app/bili_bin.py#L143)。三个必须知道的事实：
 
 - **登录必须一路做到拿到投稿令牌。** `biliup` 的 `login_by_cookies` 在**发出任何投稿请求之前**会拿 `token_info.access_token` 去 `passport.bilibili.com/x/passport-login/oauth2/info` 校验一次；`access_token` 是空串时 B站 返回 `-400 请求错误`，`biliup` 随即以 `Err` 退出 —— 全程约 1 秒、一个字节都不会上传，而错误码本身读不出「缺令牌」这层意思。所以 [exchange_tv_token](../backend/app/bili_auth.py#L142) 会补上 TV 端三步交换（申请二维码 → 用用户自己的 cookies 替他确认 → 轮询换回 `token_info`），「登录」的完成判据是**拿到令牌**而不是「文件里有 SESSDATA」。详见 bug-fix 记录 [011](../ai/bug-fix/011-biliup-refuses-a-token-less-cookie-file.md)。
 - **返回码 0 只说明命令跑完了，不说明平台上多了稿**。所以 [run_single](../backend/app/bili_upload.py#L297) 在命令返回后一定进 [_verify](../backend/app/bili_upload.py#L243)：用 `GET https://member.bilibili.com/x/web/archives` 回读账号近期稿件，按标题前缀在列表里找（[find_archive](../backend/app/bili_api.py#L111)，带退避重试，因为平台侧列表有延迟）。**查不到就停在 `unverified`** —— 这是本功能唯一不肯妥协的一条，宁可让用户去创作中心确认，也不拿「命令没报错」冒充「已发布」。
@@ -195,7 +195,7 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 
 ### 频控是账号级的
 
-`code 601 您上传视频过快` 是**账号侧**的临时频控，不是本机参数不对。正确处理是等几分钟、原样重投，不要靠改标题/加标签去硬刷 —— 那只会让频控更久。[classify_failure](../backend/app/bili_policy.py#L244) 把它归成一条明确的建议，合集批量投稿之间也留了间隔（`DEFAULT_COLLECTION_GAP_SECONDS`）。这条**无法在本机消解**，只能等。
+`code 601 您上传视频过快` 是**账号侧**的临时频控，不是本机参数不对。正确处理是等几分钟、原样重投，不要靠改标题/加标签去硬刷 —— 那只会让频控更久。[classify_failure](../backend/app/bili_policy.py#L255) 把它归成一条明确的建议，合集批量投稿之间也留了间隔（`DEFAULT_COLLECTION_GAP_SECONDS`）。这条**无法在本机消解**，只能等。
 
 ### 版权与来源：`--copyright` 的默认值是错的
 
@@ -205,7 +205,7 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 
 **合集模板上没有共用来源**，这是有意的：合集里每条视频的出处都不同，逐条渲染时各取该条自己的 `source_url`。界面上相应地只在**单视频**场景显示来源输入框；模板的投影刻意留空而不是回填第一条 —— 回填一个看着像「所有条目都用它」的值，正是要避免的误导。
 
-转载稿缺来源会被平台退回来（错误码 `21004 Missing source for reprint`），所以校验拦在提交之前：服务端 [validate](../backend/app/bili_meta.py#L347) 是权威，界面另写一份同判据的检查，让用户在输入框旁边就看到，而不是点了提交再吃一个只有错误码的 400。
+转载稿缺来源会被平台退回来（错误码 `21004 Missing source for reprint`），所以校验拦在提交之前：服务端 [validate](../backend/app/bili_meta.py#L348) 是权威，界面另写一份同判据的检查，让用户在输入框旁边就看到，而不是点了提交再吃一个只有错误码的 400。
 
 ### 合集（season）的两个端点参数风格相反
 
@@ -214,19 +214,19 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 - **创建**：`POST /x2/creative/web/season/add` —— **form-urlencoded** 传 `title/desc/cover/season_price=0/csrf`，返回 `data` 即 `season_id`。
 - **加稿**：`POST /x2/creative/web/season/section/episodes/add` —— **JSON body**，字段是 camelCase 的 `sectionId` + `episodes[{aid, cid, title, charging_pay}]`，而 **`csrf` 走 query 串**。
 
-两者参数风格正好相反，照抄前者的写法会静默失败。`cid` 只能靠 `GET /x/web-interface/view?bvid=` 拿到，所以归集前对每个已发布稿件都多一次详情请求。「创建」有人工审核，通过前平台上可能看不到，[SEASON_SUBMITTED_NOTE](../backend/app/bili_policy.py#L277) 会把这点说给用户。**重试不重复建合集**：归集失败时保留已拿到的 `season_id`，重试只补加缺口 —— 重复建合集在平台侧不可撤销，比「多等一次」贵得多。
+两者参数风格正好相反，照抄前者的写法会静默失败。`cid` 只能靠 `GET /x/web-interface/view?bvid=` 拿到，所以归集前对每个已发布稿件都多一次详情请求。「创建」有人工审核，通过前平台上可能看不到，[SEASON_SUBMITTED_NOTE](../backend/app/bili_policy.py#L288) 会把这点说给用户。**重试不重复建合集**：归集失败时保留已拿到的 `season_id`，重试只补加缺口 —— 重复建合集在平台侧不可撤销，比「多等一次」贵得多。
 
 ### 归集方式：`season_id` 预置就是全部的「加入已有」（单视频与合集共用）
 
 界面上让用户选**新建合集 / 加入已有合集 / 不归集**，但后端的新逻辑只有一行赋值：
 `submit_collection` / `submit_single` 把用户选中的编号写进 [BiliSeason.season_id](../backend/app/models.py#L175)，
-而 [_group_work](../backend/app/bili_manager.py#L1169) 本来就读它当 `existing_season_id`
+而 [_group_work](../backend/app/bili_manager.py#L1193) 本来就读它当 `existing_season_id`
 并据此跳过 `create_season`。**复用既有的「重试不重复建合集」机制，而不是另开一条归集分支** ——
 另开一条就要把「建集 + 加集 + 失败重试 + 状态收敛」再实现一遍。
 
 **单视频也能归集，靠的就是把这一行接到 `submit_single` 上**。在此之前 `submit_single`
 连归集记录都不建，`_maybe_group` 因此永远找不到它 —— 这个能力只有先下载一整个 playlist
-才够得着。两条路径共用同一组字段、同一份校验（[validate_group_choice](../backend/app/bili_meta.py#L438)）
+才够得着。两条路径共用同一组字段、同一份校验（[validate_group_choice](../backend/app/bili_meta.py#L439)）
 与同一套落库，差异**只有默认值**：
 
 | 路径 | 默认 | 为什么 |
@@ -242,18 +242,18 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 
 - **`new` 模式下 `season_id` 必须保持为空**。它一旦被预置成任何值（哪怕是对的 `0`），
   `_group_work` 就会跳过建集、对着不存在的编号加视频。所以这个字段不能「顺手填个默认值」。
-- **用户显式选择必须覆盖上一轮遗留的编号**。[_upsert_season](../backend/app/bili_manager.py#L773)
+- **用户显式选择必须覆盖上一轮遗留的编号**。[_upsert_season](../backend/app/bili_manager.py#L775)
   既有的「`season_id` 不清空」是为了重试不重复建合集；照搬到「用户从加入 A 改成加入 B」上，
   就会静默地继续往 A 里加 —— 用户选了什么完全不起作用。
 - **校验必须看原始输入，不能先归一**。`normalize_group_mode` 把非法值修成 `new` 之后再校验，
   等于把校验废掉了：一个手滑写坏的 `group_mode` 会被静默执行。归一只用于**通过校验之后**
   真正执行的那一步。（这条是被 `test_an_unknown_group_mode_is_400_not_silently_corrected`
   抓出来的，不是推理出来的。）
-- **空合集名拦在投稿之前**。[_require_group_ready](../backend/app/bili_manager.py#L860) 是路由那道
+- **空合集名拦在投稿之前**。[_require_group_ready](../backend/app/bili_manager.py#L886) 是路由那道
   400 之外的第二道闸，因为两个提交方法都是公开的：空标题会被 B站 打回来，而那时
   **视频已经投出去了** —— 那是一次不可回退的半成品状态。
 
-**「读不到」与「真的没有」必须分开**。[list_seasons](../backend/app/bili_api.py#L216) 自己吞掉
+**「读不到」与「真的没有」必须分开**。[list_seasons](../backend/app/bili_api.py#L228) 自己吞掉
 网络异常返回空表，所以未登录时由 manager 按登录态判断、把原因写进 `BiliSeasonListRead.error`。
 不去伪造那个区别，是因为界面上一旦显示成「这个账号还没有合集」，用户就会跑去新建一个重复的。
 同理，没有编号的合集整条跳过（归集要按编号提交），缺标题的保留并用编号兜名。
@@ -261,7 +261,7 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 **「不归集」在两条路径上的落库行为相反，这是刻意的**：
 
 - **合集**：落成终态 [skipped](../backend/app/models.py#L114) 而不是 `pending`。
-  [_maybe_group](../backend/app/bili_manager.py#L1142) 只自动归集 `pending`，留 `pending` 会让
+  [_maybe_group](../backend/app/bili_manager.py#L1168) 只自动归集 `pending`，留 `pending` 会让
   「不归集」根本不管用，且界面上挂一个永远不会结束的徽标。但记录**照建** —— 不落库的话界面上
   什么都不显示，用户分不清是「没归集」还是「还没开始归」。
 - **单视频**：`_upsert_season(create_if_missing=False)` **一条记录都不建**。单视频的默认恰好
@@ -276,7 +276,7 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 `curl --max-time 40` 实测 **40 秒不返回** —— 而网络层用的 `socket` 超时**不覆盖 DNS 解析**，
 所以那次请求等于没有超时，界面上是一个**没有终点**的「正在读取…」。
 
-现在的两道保险都在前端 [App.tsx](../frontend/src/App.tsx#L397)：
+现在的两道保险都在前端 [App.tsx](../frontend/src/App.tsx#L402)：
 `seasonsRequested` 去重（弹窗每收到一条 SSE 事件就重渲染一次，没有去重会反复发请求），
 以及 `SEASON_LIST_TIMEOUT_MS = 12_000` 到点写下一个**读完了、但读不到**的结论
 （`SEASON_LIST_UNREADABLE`，带可操作的建议）。迟到的真结果会**覆盖**这条兜底 ——
@@ -289,13 +289,13 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 
 ### 评论幂等
 
-评论走 `POST /x/v2/reply/add`（旧的 `/x/v2/reply/send` 已下线），置顶走 `/x/v2/reply/top`。重复评论返回 `12051`，所以策略是**先查自己的评论**（在 `/x/v2/reply/main` 里按 `mid` 匹配 + 找 marker 串），有就只补置顶；真撞上 `12051` 时换 `mode=2`（时间序）重找一次。marker 是 [COMMENT_MARKER](../backend/app/bili_upload.py#L82)，写在评论正文里，用来区分「这条评论是本应用发的」和「用户自己发的」。
+评论走 `POST /x/v2/reply/add`（旧的 `/x/v2/reply/send` 已下线），置顶走 `/x/v2/reply/top`。重复评论返回 `12051`，所以策略是**先查自己的评论**（在 `/x/v2/reply/main` 里按 `mid` 匹配 + 找 marker 串），有就只补置顶；真撞上 `12051` 时换 `mode=2`（时间序）重找一次。marker 是 [COMMENT_MARKER](../backend/app/bili_upload.py#L83)，写在评论正文里，用来区分「这条评论是本应用发的」和「用户自己发的」。
 
 ### 登录与 biliup 探测
 
 登录两条路都支持：应用内**扫码**（`/x/passport-login/web/qrcode/generate` + `.../poll`，状态码 `0=confirmed / 86101=waiting / 86090=scanned / 86038=expired`），或**导入/替换已有的 `bili_cookies.json`**。扫码成功后从回调 URL 的 query 与 `Set-Cookie` **两处**取凭据，且 query 里的值需要 `unquote` —— `SESSDATA` 自身含 `%2C`，不解码会写出一个坏 cookie。签发二维码的 SVG **尺寸单位是毫米**（`width="29.6mm"`），前端必须显式覆盖宽高，否则在浏览器里会被当成一个巨大的矢量图撑开表单。
 
-`biliup.exe` 的探测有个 Windows 特有的坑：winget 未开开发者模式时会在 `%LOCALAPPDATA%\Microsoft\WinGet\Links\` 留一个 **0 字节的空壳**，而该目录在 PATH 里优先级最高 —— `shutil.which` 找得到、`path` 也在，但 `CreateProcess` 拒绝执行它。所以每级候选命中后都必须验 PE 头（`MZ`，见 [is_pe](../backend/app/bili_bin.py#L59)），并把「找到了但不能用」如实报出来（[detect_broken_stub](../backend/app/bili_bin.py#L90) / [repair_broken_stub](../backend/app/bili_bin.py#L119)）。界面上这种情况必须按**不通过**渲染并附上原因，不能因为 `found` 为真就打勾。
+`biliup.exe` 的探测有个 Windows 特有的坑：winget 未开开发者模式时会在 `%LOCALAPPDATA%\Microsoft\WinGet\Links\` 留一个 **0 字节的空壳**，而该目录在 PATH 里优先级最高 —— `shutil.which` 找得到、`path` 也在，但 `CreateProcess` 拒绝执行它。所以每级候选命中后都必须验 PE 头（`MZ`，见 [is_pe](../backend/app/bili_bin.py#L59)），并把「找到了但不能用」如实报出来（[detect_broken_stub](../backend/app/bili_bin.py#L86) / [repair_broken_stub](../backend/app/bili_bin.py#L115)）。界面上这种情况必须按**不通过**渲染并附上原因，不能因为 `found` 为真就打勾。
 
 ### 表单与硬限
 

@@ -1,5 +1,6 @@
 import { AlertTriangle, ExternalLink, RotateCcw } from "lucide-react";
-import type { BiliJobUploads, BiliUpload } from "../types";
+import { isBadSeason, isBadUpload, isNotableUpload, isRetryableSeason, isRetryableUpload } from "../biliStatus";
+import type { BiliJobUploads } from "../types";
 
 /**
  * 任务卡片里的 B站 上传明细与「下一步」入口。
@@ -27,17 +28,17 @@ export function BiliJobStatus({
   onOpenVideoPage: (url: string) => void;
 }) {
   const season = uploads.season;
-  const notable = uploads.uploads.filter((upload) => upload.error || upload.video_url);
+  const notable = uploads.uploads.filter(isNotableUpload);
   if (!season && !notable.length) return null;
 
   return (
     <div className="bili-job-status">
       {season && (
-        <div className={`bili-status-line ${season.status === "failed" ? "is-bad" : ""}`}>
+        <div className={`bili-status-line ${isBadSeason(season.status) ? "is-bad" : ""}`}>
           <span className="bili-status-label">合集：{season.status_text}</span>
           {season.error && <span className="bili-status-detail">{season.error}</span>}
           {season.advice && <span className="bili-status-advice">{season.advice}</span>}
-          {(season.status === "failed" || season.status === "pending") && (
+          {isRetryableSeason(season.status) && (
             <button className="ghost-button bili-retry" type="button" onClick={() => onRetrySeason(season.id)}>
               <RotateCcw size={15} />
               重试归集
@@ -45,41 +46,38 @@ export function BiliJobStatus({
           )}
         </div>
       )}
-      {notable.map((upload) => (
-        <div
-          key={upload.id}
-          className={`bili-status-line ${upload.status === "failed" || upload.status === "rejected" ? "is-bad" : ""}`}
-        >
-          <span className="bili-status-label">
-            {upload.index}. {upload.title} · {upload.status_text}
-          </span>
-          {upload.video_url && (
-            <button
-              className="bili-link"
-              type="button"
-              onClick={() => onOpenVideoPage(upload.video_url as string)}
-              aria-label={`在 B 站打开 ${upload.title}`}
-            >
-              <ExternalLink size={14} />
-              在 B 站查看
-            </button>
-          )}
-          {upload.error && <span className="bili-status-detail">{upload.error}</span>}
-          {upload.advice && <span className="bili-status-advice">{upload.advice}</span>}
-          {retryable(upload) && (
-            <button className="ghost-button bili-retry" type="button" onClick={() => onRetryUpload(upload.id)}>
-              <RotateCcw size={15} />
-              {upload.status === "unverified" ? "重新核对" : "重试"}
-            </button>
-          )}
-          {upload.status === "unverified" && <AlertTriangle size={14} className="bili-warn-icon" />}
-        </div>
-      ))}
+      {notable.map((upload) => {
+        // 先取出这个值：它在下面的闭包里要用，而对象属性的窄化**不会**穿过闭包 ——
+        // 于是只能写成 `upload.video_url as string` 这种把类型系统关掉的写法。
+        const videoUrl = upload.video_url;
+        return (
+          <div key={upload.id} className={`bili-status-line ${isBadUpload(upload.status) ? "is-bad" : ""}`}>
+            <span className="bili-status-label">
+              {upload.index}. {upload.title} · {upload.status_text}
+            </span>
+            {videoUrl && (
+              <button
+                className="bili-link"
+                type="button"
+                onClick={() => onOpenVideoPage(videoUrl)}
+                aria-label={`在 B 站打开 ${upload.title}`}
+              >
+                <ExternalLink size={14} />
+                在 B 站查看
+              </button>
+            )}
+            {upload.error && <span className="bili-status-detail">{upload.error}</span>}
+            {upload.advice && <span className="bili-status-advice">{upload.advice}</span>}
+            {isRetryableUpload(upload.status) && (
+              <button className="ghost-button bili-retry" type="button" onClick={() => onRetryUpload(upload.id)}>
+                <RotateCcw size={15} />
+                {upload.status === "unverified" ? "重新核对" : "重试"}
+              </button>
+            )}
+            {upload.status === "unverified" && <AlertTriangle size={14} className="bili-warn-icon" />}
+          </div>
+        );
+      })}
     </div>
   );
-}
-
-/** 哪些状态值得给一个重试按钮。**已成功的不在其中**（见组件文档第 1 条）。 */
-function retryable(upload: BiliUpload): boolean {
-  return ["failed", "rejected", "unverified"].includes(upload.status);
 }

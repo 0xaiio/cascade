@@ -72,10 +72,6 @@ def _first_valid(candidates: Sequence[str | None]) -> str | None:
     return None
 
 
-def winget_stub_path() -> Path:
-    return WINGET_LINK_PATH
-
-
 def find_biliup(explicit: str | None = None) -> str | None:
     """显式配置 > PATH > winget 包目录。每一级都过 `is_pe`，避免拿到 0 字节空壳。"""
     if explicit:
