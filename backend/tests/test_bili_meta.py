@@ -20,6 +20,7 @@ from app.bili_meta import (
     GROUP_MODE_EXISTING,
     GROUP_MODE_NEW,
     GROUP_MODE_NONE,
+    DEFAULT_SINGLE_GROUP_MODE,
     PARTITIONS,
     PARTITION_LABELS,
     TAG_MAX,
@@ -518,3 +519,27 @@ def test_season_option_survives_a_non_numeric_total():
     """条数只是显示用的。一个 `total: "很多"` 不该让整条合集从下拉里消失。"""
     option = normalize_season_option({"id": 5, "title": "合集", "total": "很多"})
     assert option is not None and option["total"] == 0
+
+
+def test_the_single_video_default_is_not_the_collection_default():
+    """**两个默认值必须不同，而且方向是反的。**
+
+    合集改动前的行为是「每次新建一个」，单视频改动前的行为是「从不进任何合集」。
+    用同一个默认值，两处必然有一处是错的：取 `new` 会让每条单视频投稿都在账号里
+    多出一个只含它自己的合集；取 `none` 会让已有的合集投稿突然失去归集。
+    两者都是「升级之后悄悄改了用户的东西」，没有报错可循。
+    """
+    assert DEFAULT_GROUP_MODE == GROUP_MODE_NEW
+    assert DEFAULT_SINGLE_GROUP_MODE == GROUP_MODE_NONE
+    assert DEFAULT_GROUP_MODE != DEFAULT_SINGLE_GROUP_MODE
+
+
+def test_normalize_group_mode_falls_back_to_the_callers_scenario():
+    """回退值由调用方按场景给 —— 因为「既有事实」在单视频与合集上是相反的。"""
+    assert normalize_group_mode("乱写的", fallback=GROUP_MODE_NONE) == GROUP_MODE_NONE
+    assert normalize_group_mode(None, fallback=GROUP_MODE_NONE) == GROUP_MODE_NONE
+    assert normalize_group_mode("", fallback=GROUP_MODE_NONE) == GROUP_MODE_NONE
+    # 合法值不受 `fallback` 影响：它是兜底，不是覆盖。
+    assert normalize_group_mode(GROUP_MODE_EXISTING, fallback=GROUP_MODE_NONE) == GROUP_MODE_EXISTING
+    # 不传 `fallback` 时保持改动前的行为（合集那条路径的调用点都没动）。
+    assert normalize_group_mode("乱写的") == DEFAULT_GROUP_MODE

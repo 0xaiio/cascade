@@ -54,6 +54,8 @@ from .bili_bin import (
 )
 from .bili_http import Transport, default_transport
 from .bili_meta import (
+    DEFAULT_GROUP_MODE,
+    DEFAULT_SINGLE_GROUP_MODE,
     GROUP_MODE_EXISTING,
     GROUP_MODE_NEW,
     GROUP_MODE_NONE,
@@ -240,6 +242,8 @@ def build_prefill(session: Session, job: Job, item_id: str | None = None) -> Bil
             problems=validate_metadata(meta) + validate_comment(comment),
             partitions=partition_options(),
             limits=bili_limits(),
+            # 单视频的「既有事实」是**不进任何合集**，所以默认停在「不归集」。
+            default_group_mode=DEFAULT_SINGLE_GROUP_MODE,
         )
 
     template = default_collection_template(job.title)
@@ -272,6 +276,8 @@ def build_prefill(session: Session, job: Job, item_id: str | None = None) -> Bil
         partitions=partition_options(),
         limits=bili_limits(),
         season_desc=default_season_desc(job.title, len(items)),
+        # 合集的「既有事实」是**每次新建一个**，所以默认保持「新建」。
+        default_group_mode=DEFAULT_GROUP_MODE,
     )
 
 
@@ -561,10 +567,25 @@ class BiliManager:
         video_path: Path,
         make_cover: bool,
         comment: str,
+        group_mode: str = DEFAULT_SINGLE_GROUP_MODE,
+        season_id: int | None = None,
+        season_title: str = "",
+        season_desc: str = "",
     ) -> BiliUploadRead:
+        """投稿一条单视频，并按需把它归进一个合集。
+
+        **`group_mode` 的默认值是「不归集」**（不是合集那边的「新建」）：改动前
+        `submit_single` 连归集记录都不建，单视频从来不进任何合集。把「新建」当默认
+        会让此后每条单视频投稿都在账号里多出一个只含它自己的合集。
+
+        与合集上传的差别只在于「这一批只有一条」，所以落到 `_upsert_season` 上的
+        字段语义是**完全一样**的 —— 归集阶段因此不需要知道自己是单视频还是合集。
+        """
         self._require_ready()
         if not Path(video_path).is_file():
             raise BiliPreconditionError(MISSING_VIDEO[0], MISSING_VIDEO[1], code="missing_video")
+        mode = normalize_group_mode(group_mode, fallback=DEFAULT_SINGLE_GROUP_MODE)
+        self._require_group_ready(mode=mode, season_id=season_id, season_title=season_title)
         with Session(self.engine) as session:
             self._guard_idle(session, job_id)
             row = self._upsert_upload(
@@ -575,6 +596,25 @@ class BiliManager:
                 video_path=Path(video_path),
                 make_cover=make_cover,
                 comment=comment,
+            )
+            self._upsert_season(
+                session,
+                job_id=job_id,
+                # 与合集那边同一条规则：只有 `new` 才轮到我们提供的标题/简介，
+                # `existing` 用平台上那个合集自己的（已经改不了也不该改），
+                # `none` 给一组空值（否则界面上会显示一个与本次无关的旧合集名）。
+                title=season_title if mode == GROUP_MODE_NEW else "",
+                desc=season_desc if mode == GROUP_MODE_NEW else "",
+                upload_ids=[row.id],
+                pin_season_id=season_id if mode == GROUP_MODE_EXISTING else None,
+                skipped=mode == GROUP_MODE_NONE,
+                # 「不归集」且本来就没有归集记录时**什么都不建**：单视频任务从来没有
+                # 归集记录，给每条都补一条 `skipped` 会让任务列表上凭空多出一行
+                # 「合集：未归集」—— 那是噪音，不是信息，而单视频的默认恰好就是「不归集」，
+                # 于是「什么都不做」会变成「每条都多一行」。
+                # 但**已有记录必须停掉**，否则上一轮留下的 `pending` 会让 `_maybe_group`
+                # 照旧自动归集，用户选了「不归集」却还是被归了集。
+                create_if_missing=mode != GROUP_MODE_NONE,
             )
             session.commit()
             read = read_upload(row, index=self._index_for(session, job_id, item_id))
@@ -608,15 +648,7 @@ class BiliManager:
                 code="missing_video",
             )
         mode = normalize_group_mode(group_mode)
-        if mode == GROUP_MODE_EXISTING and season_id is None:
-            # 路由层已经拦过（400），这里再兜一道是因为 `submit_collection` 是**公开方法**：
-            # 漏掉编号时若无条件采纳 `existing`，归集记录会带着一个 `None` 的 `season_id`
-            # 进入「建集」分支 —— 用户明明选了「加入已有」，却凭空多出一个合集。
-            raise BiliPreconditionError(
-                "选了「加入已有合集」但没有选具体是哪个合集",
-                "在归集方式里选中一个账号下已有的合集，或改选「新建合集」",
-                code="missing_season_id",
-            )
+        self._require_group_ready(mode=mode, season_id=season_id, season_title=season_title)
         # 「加入已有合集」与用户手输的合集名/简介是**互斥**的两件事：前者用账号里那个合集
         # 自己的标题与简介（已经在平台上了，改不了也不该改），后者才轮到我们提供的值。
         if mode == GROUP_MODE_EXISTING:
@@ -664,6 +696,9 @@ class BiliManager:
                 # 不建记录会让界面上什么都不显示，用户分不清是「没归集」还是「还没归集」。
                 skipped=mode == GROUP_MODE_NONE,
             )
+            # 合集上传必建记录（下面的事件要用它的 id）—— 与单视频那边「不归集就不建」
+            # 不同，因为合集本来就会有一条归集记录，留一条 `skipped` 是在说明它的去向。
+            assert season is not None
             session.commit()
             read = read_job_uploads(session, job_id)
         for upload_id in upload_ids:
@@ -745,9 +780,20 @@ class BiliManager:
         upload_ids: list[str],
         pin_season_id: int | None = None,
         skipped: bool = False,
-    ) -> BiliSeason:
+        create_if_missing: bool = True,
+    ) -> BiliSeason | None:
+        """写归集记录。返回 `None` 表示「本来就没有记录，且这次也不需要建」。
+
+        `create_if_missing=False` 只给**单视频 + 不归集**用：那时正确的动作是
+        「什么都不做」。若照合集那边一样建一条 `skipped` 记录，单视频的默认行为
+        （从不归集）会让每个单视频任务都在列表上多出一行「合集：未归集」——
+        默认路径上多出来的东西必须是零。已有记录仍然会被停掉（见下），
+        因为一条 `pending` 会让 `_maybe_group` 照旧自动归集。
+        """
         season = next(iter(list_seasons(session, job_id)), None)
         if season is None:
+            if not create_if_missing:
+                return None
             season = BiliSeason(id=_new_id(), job_id=job_id)
         # `season_id` **不清空**：重投时归集要回到同一个合集，重新建一个会留下两个同名合集。
         # `pin_season_id` 是唯一例外 —— 它是用户**明确选了**「加入已有合集」，
@@ -810,6 +856,30 @@ class BiliManager:
         """
         if not read_login_token(self.settings.bili_cookie_path).has_access_token:
             raise BiliPreconditionError(*MISSING_UPLOAD_TOKEN, code="missing_upload_token")
+
+    def _require_group_ready(self, *, mode: str, season_id: int | None, season_title: str) -> None:
+        """归集决策在**执行之前**的最后一道闸。单视频与合集共用。
+
+        路由层已经拦过一遍（400），这里再兜一道是因为 `submit_single` /
+        `submit_collection` 都是公开方法 —— 测试与脚本会直接调，只靠路由防不住。
+
+        两处失败都是**静默**的，所以宁可在投稿之前拒绝：
+        - 缺编号：归集记录会带着 `None` 进入「建集」分支，用户明明选了「加入已有」，
+          却凭空多出一个合集。
+        - 空标题：`create_season` 原样提交，会被 B站 打回来，而那时视频已经投出去了。
+        """
+        if mode == GROUP_MODE_EXISTING and season_id is None:
+            raise BiliPreconditionError(
+                "选了「加入已有合集」但没有选具体是哪个合集",
+                "在归集方式里选中一个账号下已有的合集，或改选「新建合集」",
+                code="missing_season_id",
+            )
+        if mode == GROUP_MODE_NEW and not season_title.strip():
+            raise BiliPreconditionError(
+                "选了「新建合集」但合集名是空的",
+                "给新合集起个名字；界面上留空时本来会用任务名顶上，走到这一步说明这个值是空的",
+                code="missing_season_title",
+            )
 
     async def _enqueue(self, upload_id: str) -> None:
         await self.start()

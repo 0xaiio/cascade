@@ -22,6 +22,7 @@ from .. import api_support
 from ..api_context import ContextDep, SessionDep
 from ..bili_manager import BiliManager, BiliPreconditionError, build_prefill
 from ..bili_meta import (
+    DEFAULT_SINGLE_GROUP_MODE,
     MetadataTemplate,
     UploadMetadata,
     normalize_group_mode,
@@ -184,7 +185,11 @@ def bili_job_uploads(session: SessionDep, ctx: ContextDep, job_id: str) -> BiliJ
 async def bili_create_upload(
     payload: BiliUploadCreate, session: SessionDep, ctx: ContextDep
 ) -> BiliJobUploadsRead:
-    """启动单视频上传。返回**整个任务**的上传状态（界面只有一个图标，必须一次拿到全貌）。"""
+    """启动单视频上传。返回**整个任务**的上传状态（界面只有一个图标，必须一次拿到全貌）。
+
+    单视频也带「归集方式」（默认**不归集**，与改动前的行为一致）：
+    投稿时就能决定这条视频要不要进某个合集，不必先绕去下载一整个 playlist。
+    """
     job = api_support.require_job(session, payload.job_id)
     item = (
         api_support.require_job_item(session, job.id, payload.item_id)
@@ -192,7 +197,19 @@ async def bili_create_upload(
         else api_support.single_job_item(session, job)
     )
     meta = _meta_from(payload.metadata)
+    # 归集决策先于元数据校验报出来，理由与合集那边一致：用户更可能是「刚改了归集方式
+    # 但没选具体合集」，而不是「标题超了 3 个字」。**用原始输入校验，不用归一后的值** ——
+    # 先修再校验等于把校验废掉（非法值已被修成合法值，校验永远看不到它）。
+    group_problems = validate_group_choice(
+        group_mode=payload.group_mode,
+        season_id=payload.season_id,
+        season_title=payload.season_title,
+        count=1,
+    )
+    if group_problems:
+        raise HTTPException(status_code=400, detail=group_problems[0])
     _reject_problems(validate_metadata(meta) + validate_comment(payload.comment))
+    mode = normalize_group_mode(payload.group_mode, fallback=DEFAULT_SINGLE_GROUP_MODE)
     video_path = output_file(item, job.download_dir)
     try:
         await _manager(ctx).submit_single(
@@ -202,6 +219,10 @@ async def bili_create_upload(
             video_path=video_path,
             make_cover=payload.make_cover,
             comment=payload.comment,
+            group_mode=mode,
+            season_id=payload.season_id,
+            # 与合集那边同一个兜底口径：留空用任务名。单视频的任务名就是视频标题。
+            season_title=(payload.season_title or job.title).strip(),
         )
     except BiliPreconditionError as exc:
         raise _not_ready(exc) from exc

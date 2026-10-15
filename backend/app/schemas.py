@@ -398,6 +398,11 @@ class BiliPrefillRead(BaseModel):
     # 合集简介的默认值（单视频恒为空）。界面没有这个输入框，所以由后端派生一句非空的话 ——
     # 平台那边的合集简介是必填项，不能发空串。见 `bili_meta.default_season_desc`。
     season_desc: str = ""
+    # 界面上「归集方式」的初始选中项。**由服务端算，不让前端按 `kind` 推**：
+    # 这个默认值按场景而不同（合集 `new` / 单视频 `none`），写成两处早晚会漂移，
+    # 而漂移的表现是「某次升级之后投稿悄悄多出一批合集」，不会有任何报错。
+    # 兜底取 `none`（不归集）而不是 `new`：漏填时停在「什么都不做」这一侧。
+    default_group_mode: str = "none"
 
 
 class BiliUploadCreate(BaseModel):
@@ -406,6 +411,16 @@ class BiliUploadCreate(BaseModel):
     metadata: BiliMetadata
     make_cover: bool = True
     comment: str = ""
+    # 归入方式：`none` 不归集 / `existing` 加进 `season_id` 指定的已有合集 /
+    # `new` 用 `season_title` 新建一个。**默认 `none`** —— 改动前单视频从不进任何合集，
+    # 把 `new` 当默认会让此后每条单视频投稿都在账号里多出一个只含它自己的合集。
+    # 单视频与合集的字面默认值不同是刻意的，理由见 `bili_meta.DEFAULT_SINGLE_GROUP_MODE`。
+    group_mode: str = "none"
+    # `group_mode="existing"` 时必填。与合集那边同样**不校验它是不是真存在**：
+    # 那是归集阶段的网络动作，这里只挡「没给编号」。
+    season_id: int | None = None
+    # 只有 `group_mode="new"` 用得上；留空时由路由用任务名兜底。
+    season_title: str = ""
 
 
 class BiliSeasonOption(BaseModel):

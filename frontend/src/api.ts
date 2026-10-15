@@ -252,11 +252,28 @@ export function createBiliUpload(
   itemId: string | null,
   metadata: BiliMetadata,
   makeCover: boolean,
-  comment: string
+  comment: string,
+  groupMode: BiliGroupMode,
+  seasonId: number | null,
+  seasonTitle: string
 ): Promise<BiliJobUploads> {
   return request<BiliJobUploads>("/api/bilibili/uploads", {
     method: "POST",
-    body: JSON.stringify({ job_id: jobId, item_id: itemId, metadata, make_cover: makeCover, comment })
+    body: JSON.stringify({
+      job_id: jobId,
+      item_id: itemId,
+      metadata,
+      make_cover: makeCover,
+      comment,
+      // 归集方式与合集那边同形。**`season_title` 只在 `new` 时才有意义**，
+      // 但照传无害：服务端在 `existing` 时用的是平台上那个合集自己的名字。
+      group_mode: groupMode,
+      season_title: seasonTitle,
+      // `existing` 之外**不提交**这个字段，与 `createBiliCollection` 同一条理由：
+      // 带上一个残留编号会让服务端按「有 season_id 就不建合集」处理，
+      // 「新建合集」就悄悄变成了往老合集里塞视频。
+      ...(groupMode === "existing" ? { season_id: seasonId } : {})
+    })
   });
 }
 

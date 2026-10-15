@@ -3053,6 +3053,15 @@ components:
         season_desc:
           type: string
           default: ""
+        default_group_mode:
+          type: string
+          default: "none"
+          enum: [none, existing, new]
+          description: >
+            Initial selection for the grouping radio group. Differs per `kind`:
+            `new` for a collection (that was the pre-change behaviour), `none`
+            for a single video (a single video never joined a collection before).
+            Served from the server so the two call sites cannot drift.
 
     BiliUploadCreate:
       type: object
@@ -3074,6 +3083,24 @@ components:
           type: string
           default: ""
           description: Posted and pinned after the submission confirms. Empty means "do not comment".
+        group_mode:
+          type: string
+          default: "none"
+          enum: [none, existing, new]
+          description: >
+            What to do with the video after it publishes. `none` leaves it
+            standalone (the pre-change behaviour for a single video), `existing`
+            appends it to `season_id`, `new` creates a collection named
+            `season_title`. Note the default differs from `BiliCollectionCreate`
+            (which defaults to `new`) on purpose.
+        season_id:
+          type: integer
+          nullable: true
+          description: Required when `group_mode=existing`. Not checked for existence here.
+        season_title:
+          type: string
+          default: ""
+          description: Only meaningful for `group_mode=new`. Falls back to the job title.
 
     BiliCollectionCreate:
       type: object

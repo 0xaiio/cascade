@@ -8,28 +8,34 @@
 | 层 | 文件 | 用例数 |
 | --- | --- | --- |
 | 纯工具（文案/状态折合） | `backend/tests/test_bili_policy.py` | 28 |
-| 纯工具（模板/标签/硬限/**版权与来源**） | `backend/tests/test_bili_meta.py` | 59 |
+| 纯工具（模板/标签/硬限/**版权与来源**/**归集方式**） | `backend/tests/test_bili_meta.py` | 71 |
 | 基础设施（HTTP 接缝、扫码会话） | `backend/tests/test_bili_auth.py` | 56 |
 | 基础设施（`biliup` 探测/命令/进度/执行） | `backend/tests/test_bili_bin.py` | 44 |
 | 领域（会员态接口） | `backend/tests/test_bili_api.py` | 63 |
 | 领域（单次上传编排） | `backend/tests/test_bili_upload.py` | 67 |
-| 编排（队列/落账/收敛/预填） | `backend/tests/test_bili_manager.py` | 64 |
+| 编排（队列/落账/收敛/预填/**归集决策**） | `backend/tests/test_bili_manager.py` | 76 |
 | 编排（读模型与徽标聚合） | `backend/tests/test_bili_read_model.py` | 47 |
-| 入口（13 个 operation 的状态码） | `backend/tests/test_api_bilibili.py` | 39 |
+| 入口（13 个 operation 的状态码） | `backend/tests/test_api_bilibili.py` | 55 |
 | 共享替身 | `backend/tests/bili_fakes.py` | — |
-| **合计** | **9 个文件** | **467** |
+| **合计** | **9 个文件** | **507** |
 
-数字取自 `pytest --collect-only`（逐文件），与 `backend/tests` 全集减去既有基线相符。
-缺陷 [`011`](../../bug-fix/011-biliup-refuses-a-token-less-cookie-file.md) 修复合入时本表由 420 → 448
-（`test_bili_auth.py` **+17**、`test_bili_manager.py` **+6**、`test_bili_policy.py` **+3**、
-`test_bili_upload.py` **+2**）；
-本次「自制 / 转载 + 原视频链接」再由 448 → **467**（`test_bili_meta.py` 44 → **59**、
-`test_bili_bin.py` 42 → **44**、`test_bili_upload.py` 65 → **67**）。
+数字取自 `pytest --collect-only`（逐文件），与 `backend/tests` 全集减去既有基线相符：
+**507 + 356 = 863**，而 `backend/tests` 全集正是 **863**。
+（那 356 是 `main` 的既有 354 加 [`011`](../../bug-fix/011-biliup-refuses-a-token-less-cookie-file.md)
+给 `test_log_safety.py` 加的 2 项 —— **B站 之外的部分一行没动**。）
 
-`test_bili_meta.py` 那 **+15** 条集中在三组判据：`normalize_copyright` 的回退方向（读不出合法值时
-**回退转载而不是自制** —— 标成自制是替用户声明一件他没说过的事）、`effective_source`
-（自制稿即便带着来源也不提交）、`validate` 对「转载缺来源」的拦截。
-`test_bili_bin.py` 那 +2 条锁的是**实发参数**：`--copyright` 跟着元数据走、
+**这张表 2026-10-15 重新逐文件实测过，此前少记了 25。** 表里停在 `467` 时对应的全集是
+`467 + 356 = 823`，也就是「自制 / 转载 + 原视频链接」那一轮**之前**的状态：那一轮的 +25
+（`test_bili_manager.py` +6、`test_api_bilibili.py` +9、`test_bili_meta.py` +10）
+只写进了下面的正文，没同步进这张表。本轮「归集方式」再 +15（`test_bili_manager.py` +6、
+`test_api_bilibili.py` +7、`test_bili_meta.py` +2）= **507**。两轮的增量现在都在表里了。
+**教训：逐文件表与正文的「+N」是两份，改完一轮要一起核** —— 否则它会安静地停在某个历史快照上，
+而它恰恰是「凭什么算测过了」最容易被引用的一份。
+
+`test_bili_meta.py` 里与版权 / 来源有关的那批集中在三组判据：`normalize_copyright` 的回退方向
+（读不出合法值时**回退转载而不是自制** —— 标成自制是替用户声明一件他没说过的事）、
+`effective_source`（自制稿即便带着来源也不提交）、`validate` 对「转载缺来源」的拦截。
+`test_bili_bin.py` 的那 2 条锁的是**实发参数**：`--copyright` 跟着元数据走、
 `--source` 只在转载时出现 —— 这两条错了会让落库快照与实际提交不一致。
 
 本功能合入前后端既有 **354** 项（22 个文件）保持全绿、前端 **69** 项（11 个文件）保持全绿；
@@ -252,3 +258,116 @@ npx tsc --noEmit
 真实账号上的**三条路径都还没跑过**：加入已有合集、新建合集、不归集。
 B站 对合集有人工审核，所以归集类断言的自动化边界止于「发出了哪些请求、
 落了什么状态」，「平台侧是否接受」需要有真实账号才能验。
+
+## 8. 单视频归集方式的测试
+
+后端 **863 passed**（848 → 863，+15：manager +6、路由 +7、meta +2）、
+前端 **117 passed**（114 → 117，其中一条是**把旧断言反过来**）。
+`tsc --noEmit` 退出码 0。四项检查（`check_layers` / `check_api_contract` / `docs.py check` /
+`check_doc_anchors`）全过。
+
+新增用例钉的判据，按「写错了会不会被用户发现」排：
+
+| 用例 | 钉住什么 |
+| --- | --- |
+| `test_single_submit_joins_an_existing_collection` | 单视频投完真的走完归集；`season/add` **一次都不调** |
+| `test_single_submit_creates_a_collection_when_asked` | 合集名用的是**用户填的**那个，不是任务名 |
+| `test_single_submit_without_grouping_leaves_no_season_record` | 默认路径**一条记录都不落**（`bili_season` 查询为空） |
+| `test_single_submit_to_no_grouping_stops_a_previous_pending_season` | 上一轮的 `pending` 被停成 `skipped`，且**不动它的标题** |
+| `test_single_submit_refuses_existing_without_an_id` / `..._new_without_a_title` | manager 层的两道闸（公开方法不能只靠路由防） |
+| 路由 `..._defaults_to_no_grouping_and_stores_no_season` | 不传 `group_mode` → `season` 读模型是 `None` |
+| 路由 `..._rejects_an_unknown_group_mode_with_400` | 非法值 400 而不是被静默修正 |
+| 路由 `test_prefill_reports_the_default_group_mode_per_kind` | 默认值随预填下发，两种 `kind` 不同 |
+| 前端 `offers 归集方式 on a single video, defaulting to 不归集` | 控件**对单视频可见**、默认是不归集、且列表没回来时仍可提交 |
+| 前端 `never sends a stale season id alongside 新建合集 on a single video` | 切回新建时编号必须被撤掉（且合集名要真的被提交） |
+| 前端 `still uploads when the collection list cannot be read` | 列表拉失败不影响投稿；提示是**结论**而不是「正在读取…」 |
+
+### 三处「实测推翻假设」
+
+**1. 用户报的「看不到任何与合集相关的 UI」，根因是可达性而不是缺陷。**
+我先后排除了三件事：产物是否旧（`frontend/dist/assets/*.js` 建于 19:47，晚于提交的 13:05，
+且 `grep` 得到「归集方式 / 新建合集 / 加入已有合集 / 不归集」四个字符串都在）、
+CSS 是否缺（`.bili-choice` 在源与产物里都有）、以及链路是否断（`App` 的
+`seasons` 确实传进了弹窗）。最后查数据库才看到关键事实：**本机 12 个任务的
+`total_items` 全是 1**，`bili_season` 0 行 —— 也就是**没有任何一个 playlist 任务**，
+而控件当时挂在 `isCollection &&` 上。
+**教训：用户说「界面上没有 X」时，先确认「X 的渲染条件在他的数据上成立吗」，
+不要先去查「X 是不是坏了」。** 这是我第一次在这类反馈上先花时间验证产物与样式。
+
+**2. 旧测试把「只对合集开放」写成了断言，于是它现在必须反过来。**
+`never renders the 归集方式 controls for a single video` 里写着
+「单视频没有『归集』这回事 —— 加上去只会让用户去为一个不存在的概念做选择」。
+这句话在**接口与产品两个层面都不成立**（B站 允许把单条视频放进合集；`create_season`
+不需要先有稿件；归集阶段不看条数）。**测试把设计假设固化下来的代价是：改设计时要先推翻一条绿测试**，
+而那正是它该起的作用 —— 这次它确实让人停了一下、去复核那条假设，复核的结果是假设错了。
+
+**3. `getByLabelText` 找不到「加进哪个合集」，暴露了三处门禁只放开了一处。**
+我只把单选组外面的 `isCollection &&` 去掉，却漏了「合集名输入框」与「合集下拉」两处同类门禁。
+症状是单视频下选了「加入已有合集」**什么都没出现**。三个 `isCollection &&` 是同一件事的三份，
+**改这类门禁必须一次全部搜出来**（`grep -n "{isCollection &&"` 一次列全，再逐条判断
+哪一条是「合集专属」、哪一条只是「当前场景不需要」）。
+
+### 未验证（与本文档其他部分同一条纪律）
+
+真实账号上单视频归集的三条路径（加入已有 / 新建 / 不归集）**都没跑过**，
+合集那三条同样没跑过。B站 对合集有人工审核，所以归集类断言的自动化边界止于
+「发出了哪些请求、落了什么状态」，「平台侧是否接受」需要有真实账号才能验。
+
+## 9. 按需读合集列表的测试
+
+后端 **863 passed**（本轮没动后端）；前端 **119 passed**（117 → 119）；
+`tsc --noEmit` 退出码 0。四项检查全过。
+
+### 9.1 单测钉住的两件事
+
+| 用例 | 钉住什么 |
+| --- | --- |
+| 前端 `does not read the collection list until 加入已有合集 is chosen` | 开窗 **0 次**请求；选中「加入已有」**恰好 1 次**；在三个选项之间来回切**仍是 1 次** |
+| 前端 `blocks the submit on a single video when 加入已有合集 is picked but nothing is chosen` | 单视频与合集**同一条规则**：没挑合集就别放行；挑了就放行 |
+
+第一条比它看起来重要：原先那几条「列表读不到也能投稿」的用例**在回归发生时照样会绿**
+（它们只是不选那一项）。把请求挪回开窗路径，症状只是「开窗多一次真实往返」，
+没有任何断言会失败 —— 所以专门加了一个请求计数器（`mockState.biliSeasonReads`）来钉它。
+**「安静地多做一件事」是测试最难抓的一类回归，得给它一个显式的计数量。**
+
+### 9.2 真实浏览器探针：`tmp_acceptance/ui_single_group.py`（23 条断言，全过）
+
+跑法：后端 `python -m app --port 8010`（单端口托管 `frontend/dist`），
+用 managed `envs/default` 解释器跑探针（需 `websocket-client`）。
+
+新增/修好的断言：
+
+| 断言 | 为什么非要在真浏览器里量 |
+| --- | --- |
+| 开窗至今读合集列表 **0 次** | jsdom 里 `fetch` 是假的，「开窗到底发没发请求」量不出来。探针在**开弹窗之前**装一个 `window.fetch` 记录器（`api.ts` 里是 `fetch(url, ...)`，调用时才查全局，所以装得上）。 |
+| 选中「加入已有」后**恰好 1 次**、来回切**仍 1 次** | 去重依赖 React 的渲染时序，`useRef` 在真实重渲染下的行为只有在真环境里才算验过。 |
+| 那一格**落定**（不是停在「正在读取…」） | 这条只有真浏览器能验，且**恰好在本机失败路径上验到了**（见下）。 |
+| 说明文案主语是「这条视频」/ 单视频表单标题 | 组件在真实 `prefill.kind` 下渲染出来的东西，与单测里手搓的 props 不是一回事。 |
+
+### 9.3 三处「实测推翻假设」
+
+**1. 探针的选择器串到了另一组单选上，而那条断言恒假。**
+`dlg.querySelector('[role=radiogroup]')` 返回的是**第一个**匹配 —— 这张表单上有两组：
+先是「转载 / 自制」（版权），后才是「归集方式」。于是「三个选项齐全」永远拿的是
+「转载 / 自制」那两项。**它不是「偶尔失败」，是恒假**，只是一直没人细看那行输出。
+修法是按 `aria-labelledby` 限定：`[role="radiogroup"][aria-labelledby="bili-group-label"]`。
+**教训：探针里用 `querySelector` 取「那个控件」时，先数一遍页面上同 `role` 的元素有几个。**
+
+**2. 「正在读取…」不是推理出来的，是量出来的，而且比预想的严重得多。**
+我原本按代码推理「DNS 卡住 → 界面挂在正在读取」。实测是
+`curl --max-time 40 http://127.0.0.1:8010/api/bilibili/seasons` → `http=000 time=40.003s` ——
+**40 秒不返回**。这解释了为什么网络层那个 `timeout` 形同虚设：
+它用的是 `socket` 超时，**不覆盖 DNS 解析**。所以 12 秒的客户端兜底是**必需品**而不是保险，
+探针里那句结论（「可能是登录已失效或网络不通…」）就是它给的。
+
+**3. 「落定」这个词本身需要定义，否则探针会写成一个假断言。**
+第一版探针写的是 `time.sleep(0.5)` 然后断言「不是『正在读取』」—— 在**本机**这条会失败
+（请求 40 秒不回，0.5 秒时必然还在读）。改成轮询「那一格已经不是『正在读取』」并给 16 秒上限，
+断言的对象才是设计意图（**最终**落成一个结论），而不是「500 毫秒内落定」这个没人承诺过的时限。
+
+### 9.4 未验证
+
+- 关窗 / 提交后的 `resetSeasonList()`（即「下一轮重新读」）只有单测覆盖，探针没走关窗再开窗。
+- `SEASON_LIST_TIMEOUT_MS` 这条路径**在本机是被真实验到的**（请求 40s 不回），但
+  「真结果迟到并覆盖兜底结论」这条只在单测里构造过，真实环境没出现（本机压根读不到）。
+- B站 侧对归集的接受度：与前几节同一条边界，需要真实账号。

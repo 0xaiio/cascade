@@ -12,7 +12,7 @@
 python -m compileall backend\app
 ```
 
-后端测试（当前基线：**823 passed**）：
+后端测试（当前基线：**863 passed**）：
 
 ```powershell
 python -m pytest backend\tests -q
@@ -35,7 +35,7 @@ python -m pytest backend\tests -q
 >
 > `--basetemp` 指向的目录**必须不存在**，否则 pytest 会先 `rmtree` 它、同样会触发守卫（`tmp_pytest\` 已在 `.gitignore` 里）。
 
-前端测试和构建（当前基线：**105 passed**，12 个文件；`tsc --noEmit` 与 `vite build` 通过）：
+前端测试和构建（当前基线：**119 passed**，12 个文件；`tsc --noEmit` 与 `vite build` 通过）：
 
 ```powershell
 cd frontend
@@ -115,7 +115,7 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 
 ## 后端测试范围
 
-后端测试位于 [backend/tests](../backend/tests/)（31 个 `test_*.py` + [fakes.py](../backend/tests/fakes.py) / [bili_fakes.py](../backend/tests/bili_fakes.py)，当前 **823 passed**）：
+后端测试位于 [backend/tests](../backend/tests/)（31 个 `test_*.py` + [fakes.py](../backend/tests/fakes.py) / [bili_fakes.py](../backend/tests/bili_fakes.py)，当前 **863 passed**）：
 
 | 文件 | 重点 |
 | --- | --- |
@@ -157,7 +157,7 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 
 ## 前端测试范围
 
-前端组件测试是对 `App` 的**集成测试**，按功能面拆成 `frontend/src/*.test.tsx` 多个文件：解析链接与下载选项、cookies 导入与校验、设置面板与代理检测、任务中心（控制/删除/展开、本地文件操作与链接、进度与详情呈现各一个）、清晰度降级、自检信息、帮助浮层、**B站 上传（`bili-upload.test.tsx`，30 例）**、版面与文案不变式，以及只读样式源文的 `styles.test.ts`。当前 **12 个文件 / 99 passed**。
+前端组件测试是对 `App` 的**集成测试**，按功能面拆成 `frontend/src/*.test.tsx` 多个文件：解析链接与下载选项、cookies 导入与校验、设置面板与代理检测、任务中心（控制/删除/展开、本地文件操作与链接、进度与详情呈现各一个）、清晰度降级、自检信息、帮助浮层、**B站 上传（`bili-upload.test.tsx`，50 例）**、版面与文案不变式，以及只读样式源文的 `styles.test.ts`。当前 **12 个文件 / 119 passed**。
 
 跨文件共享的东西只有三处，都在 [frontend/src/test](../frontend/src/test/)：测试台 [appHarness.ts](../frontend/src/test/appHarness.ts)（后端 `fetch` 替身与前后置钩子）、夹具 [appFixtures.ts](../frontend/src/test/appFixtures.ts)、样式源文解析 [cssRules.ts](../frontend/src/test/cssRules.ts)。
 

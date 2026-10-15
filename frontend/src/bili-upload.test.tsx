@@ -224,7 +224,12 @@ describe("App · B站 上传表单（单视频）", () => {
         source: "https://youtu.be/format"
       },
       make_cover: false,
-      comment: ""
+      comment: "",
+      // 单视频的默认归集方式是「不归集」（服务端 `DEFAULT_SINGLE_GROUP_MODE`，随预填一起回来），
+      // 用户没动过就照传。`season_id` 在非 `existing` 时**根本不提交这个字段** ——
+      // 带上一个残留编号会让服务端按「有 season_id 就不建合集」处理。
+      group_mode: "none",
+      season_title: "Unsupported resolution"
     });
   });
 
@@ -239,7 +244,8 @@ describe("App · B站 上传表单（单视频）", () => {
     await user.click(within(dialog).getByRole("button", { name: "开始上传" }));
 
     await waitFor(() =>
-      expect(notice()).toHaveTextContent("已开始上传《Unsupported resolution》，跑完这里会变成「已上传」。")
+      // 回执里必须带上归集去向：用户刚在表单里做过这个选择，不提它就没法确认生效了。
+      expect(notice()).toHaveTextContent("已开始上传《Unsupported resolution》，不归集 —— 跑完这里会变成「已上传」。")
     );
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(await screen.findByRole("button", { name: /B站：已上传 Running video/ })).toBeInTheDocument();
@@ -592,8 +598,17 @@ describe("App · B站 上传表单（合集）", () => {
     expect(await within(dialog).findByText("点「扫码登录」用 B站 App 扫码，或导入一份已登录的 cookies.json")).toBeInTheDocument();
     expect(within(dialog).queryByText(/这个账号下还没有合集/)).not.toBeInTheDocument();
   });
+});
 
-  test("never renders the 归集方式 controls for a single video", async () => {
+/**
+ * 归集方式对**单视频**也是开放的。
+ *
+ * 单开一个块而不是并进上面那个，是因为这一组钉的是「单视频与合集口径不同的那几处」：
+ * 默认值不同（不归集 vs 新建）、文案不同（这条视频 vs 这些视频），
+ * 而它们最容易在「顺手复用合集那边的代码」时被抹平。
+ */
+describe("App · B站 上传表单（单视频的归集方式）", () => {
+  test("offers 归集方式 on a single video, defaulting to 不归集", async () => {
     const user = userEvent.setup();
     mockState.jobs = [downloadedJob()];
     mockState.biliPrefill = biliPrefillSinglePayload;
@@ -602,9 +617,155 @@ describe("App · B站 上传表单（合集）", () => {
     await user.click(await screen.findByRole("button", { name: /上传到 B 站/ }));
     const dialog = await screen.findByRole("dialog");
 
-    // 单视频没有「归集」这回事 —— 加上去只会让用户去为一个不存在的概念做选择。
-    expect(within(dialog).queryByRole("radio", { name: "新建合集" })).not.toBeInTheDocument();
-    expect(within(dialog).queryByRole("radiogroup", { name: "归集方式" })).not.toBeInTheDocument();
+    // 单视频也必须有这个控件：只给 playlist 开放的话，这个能力要先下载一整个合集
+    // 才够得着 —— 本机 12 个任务全是单视频时，界面上永远看不到它（用户实际报的就是这个）。
+    expect(within(dialog).getByRole("radiogroup", { name: "归集方式" })).toBeInTheDocument();
+    // 默认必须是「不归集」：改动前单视频从不进任何合集，默认成「新建」会让此后
+    // 每条单视频投稿都在账号里多出一个只含它自己的合集。
+    expect(within(dialog).getByRole("radio", { name: "不归集" })).toBeChecked();
+    expect(within(dialog).getByRole("radio", { name: "新建合集" })).not.toBeChecked();
+    // 默认那两项都不需要合集列表，所以它没回来也不该挡住提交。
+    expect(within(dialog).getByRole("button", { name: "开始上传" })).toBeEnabled();
+  });
+
+  test("sends the chosen existing collection as a season id", async () => {
+    const user = userEvent.setup();
+    mockState.jobs = [downloadedJob()];
+    mockState.biliPrefill = biliPrefillSinglePayload;
+    mockState.biliSubmitResult = jobUploads();
+    mockState.biliSeasonList = {
+      seasons: [
+        { season_id: 111, title: "C++ Weekly", desc: "讲义", cover_url: "", total: 24 },
+        { season_id: 222, title: "数据库系统", desc: "", cover_url: "", total: 0 }
+      ],
+      error: "",
+      advice: ""
+    };
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /上传到 B 站 Running video/ }));
+    const dialog = await screen.findByRole("dialog");
+
+    await user.click(within(dialog).getByRole("radio", { name: "加入已有合集" }));
+    await user.selectOptions(await within(dialog).findByLabelText("加进哪个合集"), "222");
+    await user.click(within(dialog).getByRole("button", { name: "开始上传" }));
+
+    await waitFor(() => expect(mockState.biliUploadBodies).toHaveLength(1));
+    expect(mockState.biliUploadBodies[0].group_mode).toBe("existing");
+    // 编号按 `Number()` 提交 —— 下拉的 `value` 是字符串，直接传会变成 `"222"`，
+    // 而服务端那个字段是 `int | None`（Pydantic 会转，但别指望它）。
+    expect(mockState.biliUploadBodies[0].season_id).toBe(222);
+  });
+
+  test("blocks the submit on a single video when 加入已有合集 is picked but nothing is chosen", async () => {
+    const user = userEvent.setup();
+    mockState.jobs = [downloadedJob()];
+    mockState.biliPrefill = biliPrefillSinglePayload;
+    mockState.biliSeasonList = {
+      seasons: [{ season_id: 111, title: "C++ Weekly", desc: "", cover_url: "", total: 24 }],
+      error: "",
+      advice: ""
+    };
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /上传到 B 站 Running video/ }));
+    const dialog = await screen.findByRole("dialog");
+
+    await user.click(within(dialog).getByRole("radio", { name: "加入已有合集" }));
+
+    // 单视频与合集**同一条规则**：控件在两处都可见，判据就不能只在一处成立 ——
+    // 否则单视频用户只会吃到一个服务端 400（`missing_season_id`），
+    // 而这句话明明可以就在下拉旁边说出来。
+    expect(await within(dialog).findByText("选了「加入已有合集」但还没选是哪个合集")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "开始上传" })).toBeDisabled();
+
+    // 真的选一个之后就该放行（否则测的只是「按钮会灰」而不是「规则成立」）。
+    await user.selectOptions(await within(dialog).findByLabelText("加进哪个合集"), "111");
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "开始上传" })).toBeEnabled());
+  });
+
+  test("never sends a stale season id alongside 新建合集 on a single video", async () => {
+    const user = userEvent.setup();
+    mockState.jobs = [downloadedJob()];
+    mockState.biliPrefill = biliPrefillSinglePayload;
+    mockState.biliSubmitResult = jobUploads();
+    mockState.biliSeasonList = {
+      seasons: [{ season_id: 111, title: "C++ Weekly", desc: "", cover_url: "", total: 24 }],
+      error: "",
+      advice: ""
+    };
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /上传到 B 站 Running video/ }));
+    const dialog = await screen.findByRole("dialog");
+
+    // 先选一个已有合集，再改选「新建」—— 残留的编号必须被撤掉，否则服务端
+    // 会按「有 season_id 就不建合集」处理，于是「新建」变成了往 111 里塞视频。
+    await user.click(within(dialog).getByRole("radio", { name: "加入已有合集" }));
+    await user.selectOptions(await within(dialog).findByLabelText("加进哪个合集"), "111");
+    await user.click(within(dialog).getByRole("radio", { name: "新建合集" }));
+
+    const name = await within(dialog).findByLabelText("合集名");
+    await user.clear(name);
+    await user.type(name, "我自己的合集");
+    await user.click(within(dialog).getByRole("button", { name: "开始上传" }));
+
+    await waitFor(() => expect(mockState.biliUploadBodies).toHaveLength(1));
+    expect(mockState.biliUploadBodies[0].group_mode).toBe("new");
+    expect(mockState.biliUploadBodies[0]).not.toHaveProperty("season_id");
+    // 填了合集名就必须真的提交它（否则测的只是「控件存在」而不是「控件生效」）。
+    expect(mockState.biliUploadBodies[0].season_title).toBe("我自己的合集");
+  });
+
+  test("does not read the collection list until 加入已有合集 is chosen", async () => {
+    const user = userEvent.setup();
+    mockState.jobs = [downloadedJob()];
+    mockState.biliPrefill = biliPrefillSinglePayload;
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /上传到 B 站 Running video/ }));
+    const dialog = await screen.findByRole("dialog");
+
+    // 开窗时**一次都不读**。默认那两个选项（单视频「不归集」/ 合集「新建」）都不看这份列表，
+    // 而读它是一次真实的网络往返 —— 本机直连 B站 域名时 DNS 解析能卡上好几分钟
+    // （`socket` 超时**不覆盖 DNS**），放在开窗路径上就是「一打开上传窗口先转好几圈」。
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "开始上传" })).toBeEnabled());
+    expect(mockState.biliSeasonReads).toBe(0);
+
+    // 真的选中它才读，且**只读一次** —— 弹窗每收到一条 SSE 事件就重渲染一次，
+    // 若去重失效，这里会随着重渲染反复发请求。
+    await user.click(within(dialog).getByRole("radio", { name: "加入已有合集" }));
+    await waitFor(() => expect(mockState.biliSeasonReads).toBe(1));
+    await user.click(within(dialog).getByRole("radio", { name: "新建合集" }));
+    await user.click(within(dialog).getByRole("radio", { name: "加入已有合集" }));
+    expect(mockState.biliSeasonReads).toBe(1);
+  });
+
+  test("still uploads when the collection list cannot be read", async () => {
+    const user = userEvent.setup();
+    mockState.jobs = [downloadedJob()];
+    mockState.biliPrefill = biliPrefillSinglePayload;
+    mockState.biliSubmitResult = jobUploads();
+    // `null` = 让 `/api/bilibili/seasons` 直接失败。
+    mockState.biliSeasonList = null;
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /上传到 B 站 Running video/ }));
+    const dialog = await screen.findByRole("dialog");
+
+    // 读列表**不是整张表单的前置条件**：默认那两项都不需要它。
+    // 若把它当成门槛，一次读失败就等于「视频传不上去」，而用户可能压根不打算归集。
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "开始上传" })).toBeEnabled());
+
+    // 但要点「加入已有」时必须把失败原因说出来，且**不是「正在读取」** ——
+    // 停在「正在读取」会让用户等一个永远不会结束的加载。
+    // 提示取的是 `advice`（可操作的那句）而不是 `error`，与既有合集/未登录用例同一口径。
+    await user.click(within(dialog).getByRole("radio", { name: "加入已有合集" }));
+    expect(
+      await within(dialog).findByText("可能是登录已失效或网络不通。改选「新建合集」或「不归集」照样能投稿。")
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText(/正在读取账号里的合集/)).not.toBeInTheDocument();
+
+    // 说得出原因，用户就能退回「不归集」把视频投出去（这才是这个兜底的意义）。
+    await user.click(within(dialog).getByRole("radio", { name: "不归集" }));
+    await user.click(within(dialog).getByRole("button", { name: "开始上传" }));
+    await waitFor(() => expect(mockState.biliUploadBodies).toHaveLength(1));
+    expect(mockState.biliUploadBodies[0].group_mode).toBe("none");
   });
 });
 

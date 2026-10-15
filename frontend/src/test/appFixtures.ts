@@ -417,7 +417,9 @@ export const biliPrefillSinglePayload: BiliPrefill = {
   limits: biliStatusPayload.limits,
   make_cover: true,
   make_comment: true,
-  season_desc: ""
+  season_desc: "",
+  // 单视频的默认是「不归集」——与服务端 `DEFAULT_SINGLE_GROUP_MODE` 一致。
+  default_group_mode: "none"
 };
 
 /** 合集的预填模板。第 2 条刻意 `ready: false`，用来验证「没下载好的条目会被挡下」。 */
@@ -463,7 +465,9 @@ export const biliPrefillCollectionPayload: BiliPrefill = {
   limits: biliStatusPayload.limits,
   make_cover: true,
   make_comment: true,
-  season_desc: "Playlist batch（共 2 个视频，由本机下载工作流自动上传）"
+  season_desc: "Playlist batch（共 2 个视频，由本机下载工作流自动上传）",
+  // 合集的默认是「新建」——与服务端 `DEFAULT_GROUP_MODE` 一致（改动前的行为）。
+  default_group_mode: "new"
 };
 
 /** 一条已完成的稿件。`badge` 由后端派生，前端只映射颜色与文案。 */

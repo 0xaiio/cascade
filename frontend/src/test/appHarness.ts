@@ -95,6 +95,14 @@ export const mockState = {
     error: string;
     advice: string;
   } | null,
+  /**
+   * `GET /api/bilibili/seasons` 实际被调的次数。
+   *
+   * 这份列表是**按需读**的（只有选中「加入已有合集」才读）—— 若哪天有人把它挪回开窗路径，
+   * 上面那些「列表读不到也能投稿」的用例**照样会绿**（它们只是不选那一项），
+   * 于是回归会以「一打开上传窗口就多一次真实网络往返」的形式悄悄发生。这个计数专门钉住它。
+   */
+  biliSeasonReads: 0,
   /** 扫码轮询的下一帧结论。`confirmed` 会让界面停止轮询并重新体检。 */
   biliLoginPollState: "waiting",
   biliLoginPollMessage: "等待扫码",
@@ -145,6 +153,7 @@ function resetMockState(): void {
   mockState.biliRetrySeasonIds = [];
   mockState.biliPrefillQueries = [];
   mockState.biliSeasonList = { seasons: [], error: "", advice: "" };
+  mockState.biliSeasonReads = 0;
   mockState.biliLoginPollState = "waiting";
   mockState.biliLoginPollMessage = "等待扫码";
   mockState.biliRetryAction = "reupload";
@@ -372,6 +381,7 @@ export function installAppHarness(): void {
           return Response.json({ message: "已重新归集。", season: mockState.biliSeason });
         }
         if (url.endsWith("/api/bilibili/seasons") && init?.method !== "POST") {
+          mockState.biliSeasonReads += 1;
           if (mockState.biliSeasonList === null) {
             return Response.json({ detail: "读不到合集列表" }, { status: 500 });
           }

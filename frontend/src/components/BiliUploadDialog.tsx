@@ -45,30 +45,44 @@ export const GROUP_MODE_NEW = "new";
  *   一个共用的来源框在语义上就是错的 —— 逐条的来源由服务端在渲染时各填各的
  *   （`bili_upload.render_collection`）。所以这里不是「藏起来」，是**根本没有这个字段**。
  *
- * 「归集方式」只出现在合集场景（单视频本来就没有归集这回事），三条：
+ * 「归集方式」**单视频与合集都有**（投稿时就该能决定这条视频进不进某个合集，
+ * 而不是非要先下载一整个 playlist 才能用上这个能力），三条：
  *
- * - **新建**（默认）：改动前的行为，保持不变。
+ * - **新建**：把这一批投完的视频归到一个新合集里。
  * - **加入已有**：合集列表是打开弹窗时从平台读回来的。读不到（未登录 / 网络不通）时
  *   显示原因并让用户改选新建，**不静默退回新建** —— 静默退回会让用户以为加进了某个合集，
  *   实际上建了一个新的。
- * - **不归集**：服务端会落成终态 `skipped`。留一条 `pending` 的归集记录会让界面上
- *   挂一个永远不会结束的「正在归集」。
+ * - **不归集**：什么都不建也不加入。
+ *
+ * **默认值按场景不同，而且是由服务端给的**（`prefill.default_group_mode`）：
+ * 合集默认「新建」（改动前就是每次新建，保持不变），单视频默认「不归集」
+ * （改动前单视频从不进合集）。在前端按 `kind` 再推一遍就会有两份真相，
+ * 而漂移的表现是「升级后投稿悄悄多出一批合集」——不会有任何报错。
+ *
+ * 合集列表**只在「加入已有」时才成为提交的前置条件**：默认那两个选项都不需要它，
+ * 把「读到列表」当成整张表单的门槛，会让「列表读不到」直接等于「视频传不上去」。
  */
 export function BiliUploadDialog({
   prefill,
   isCollection,
   seasons,
+  loadSeasons,
   onCancel,
   onSubmit
 }: {
   prefill: BiliPrefill;
   isCollection: boolean;
   /**
-   * 账号下的已有合集。**合集场景必传**（`seasonList` 还没回来时传 `null`，
-   * 界面显示「读取中」并禁用提交 —— 那时候用户看不到能选什么）。
-   * 单视频场景忽略这个参数。
+   * 账号下的已有合集。`null` = 还没读（界面显示「读取中」并拦住提交 —— 那时候
+   * 用户看不到能选什么）；空数组 = 账号下确实没有合集；带 `error` = 没读成。
    */
   seasons: BiliSeasonList | null;
+  /**
+   * 去读 `seasons`。**由弹窗按需触发**：只有用户真的选中「加入已有合集」才会被调。
+   * 读它是一次真实的网络往返，而默认选项（合集「新建」/ 单视频「不归集」）都用不上 ——
+   * 放在开窗默认路径上，等于让两个默认选项也陪着等（理由见 App 的 `loadBiliSeasons`）。
+   */
+  loadSeasons: () => void;
   onCancel: () => void;
   onSubmit: (values: {
     metadata: BiliMetadata;
@@ -92,9 +106,12 @@ export function BiliUploadDialog({
   const [metadata, setMetadata] = useState<BiliMetadata>(initial);
   const [makeCover, setMakeCover] = useState(prefill.make_cover);
   const [comment, setComment] = useState(prefill.comment);
-  // **默认「新建合集」**：改动前的行为就是每次上传完自动新建一个。
-  // 改成别的默认值会让用户已有的投稿突然失去归集。
-  const [groupMode, setGroupMode] = useState<BiliGroupMode>(GROUP_MODE_NEW);
+  // **默认值由服务端给**（合集 `new` / 单视频 `none`）。这里保留一个按 `kind` 的兜底，
+  // 是为了不让「服务端返回里少了这个字段」变成「一个都没选中」—— 那样用户会以为
+  // 归集方式是必填项，而其实有一条正确的默认值。
+  const [groupMode, setGroupMode] = useState<BiliGroupMode>(
+    prefill.default_group_mode ?? (isCollection ? GROUP_MODE_NEW : GROUP_MODE_NONE)
+  );
   const [seasonId, setSeasonId] = useState<number | null>(null);
   const [seasonTitle, setSeasonTitle] = useState(prefill.job_title);
   const [submitting, setSubmitting] = useState(false);
@@ -123,6 +140,18 @@ export function BiliUploadDialog({
       opener?.focus?.();
     };
   }, []);
+
+  // `loadSeasons` 也走 ref，理由同上：App 每收到一条 SSE 事件就重渲染一次，
+  // 而 `loadBiliSeasons` 每次渲染都是新的函数身份 —— 放进依赖里会让副作用每渲染跑一次。
+  const loadSeasonsRef = useRef(loadSeasons);
+  loadSeasonsRef.current = loadSeasons;
+
+  // **按需读合集列表**：只有真的选中「加入已有合集」才发起这次请求。三个选项里只有它需要
+  // 这份数据，另外两个（新建 / 不归集）都不看它；`seasons` 一旦落定（真的列表、空列表、
+  // 或读不出来的结论）就不再为 `null`，去重与超时兜底都在 App 侧，这里只管触发。
+  useEffect(() => {
+    if (groupMode === GROUP_MODE_EXISTING && seasons === null) loadSeasonsRef.current();
+  }, [groupMode, seasons]);
 
   const tagCount = useMemo(() => metadata.tags.split(",").filter((item) => item.trim()).length, [metadata.tags]);
   // 标签的**单项**上限也要查。服务端 `validate()` 会拒，但等到点了提交才看到 400
@@ -154,10 +183,16 @@ export function BiliUploadDialog({
       ...(sourceRequired && !metadata.source.trim()
         ? ["选了「转载」但没填原视频链接（转载稿必须填来源，留空会被 B站 退回来）"]
         : []),
-      ...(isCollection && !seasonsLoaded
+      // **只在真的要用这份列表时才拦提交**：选了「加入已有」才需要它。
+      // 把「读到合集列表」当成整张表单的前置条件，会让「列表读不到」直接等于
+      // 「视频传不上去」—— 而用户可能只是想投个视频、压根不打算归集。
+      ...(groupMode === GROUP_MODE_EXISTING && !seasonsLoaded
         ? ["正在读取账号里的合集…"]
         : []),
-      ...(isCollection && groupMode === GROUP_MODE_EXISTING && !chosenSeason
+      // **单视频与合集用同一条规则**：控件既然在两处都可见，判据就不能只在一处成立 ——
+      // 否则单视频用户选了「加入已有」又没挑合集时，只会吃到一个服务端 400
+      // （`missing_season_id`），而这句话明明可以就在下拉旁边说出来。
+      ...(groupMode === GROUP_MODE_EXISTING && !chosenSeason
         ? [seasonId === null
           ? "选了「加入已有合集」但还没选是哪个合集"
           : "选中的合集已经不在列表里了，请重新选一个"]
@@ -180,6 +215,15 @@ export function BiliUploadDialog({
   );
   const notReady = prefill.items.filter((item) => !item.ready);
   const blocked = localProblems.length > 0 || notReady.length > 0;
+  // 说明文案按场景分句：单视频说「这条视频」，合集说「这些视频」。
+  // 共用一句会让人以为单视频投稿也会批量处理。
+  const itemsLabel = isCollection ? "这些视频" : "这条视频";
+  const groupHint =
+    groupMode === GROUP_MODE_NEW
+      ? `自动建一个名为「${seasonTitle.trim() || prefill.job_title}」的新合集，把${itemsLabel}放进去。`
+      : groupMode === GROUP_MODE_EXISTING
+        ? `把${itemsLabel}追加到你选的已有合集里，不新建。B站 对合集有审核，加进去之后可能还需要等平台处理。`
+        : `不建合集、也不加入任何合集，${itemsLabel}单独成稿。`;
 
   async function submit() {
     if (blocked) return;
@@ -309,54 +353,46 @@ export function BiliUploadDialog({
             </div>
           )}
 
-          {isCollection && (
-            <div className="field">
-              <span className="field-label" id="bili-group-label">
-                归集方式
-              </span>
-              <div className="bili-choice" role="radiogroup" aria-labelledby="bili-group-label">
-                <label className="bili-choice-option">
-                  <input
-                    type="radio"
-                    name="bili-group-mode"
-                    value={GROUP_MODE_NEW}
-                    checked={groupMode === GROUP_MODE_NEW}
-                    onChange={() => setGroupMode(GROUP_MODE_NEW)}
-                  />
-                  <span>新建合集</span>
-                </label>
-                <label className="bili-choice-option">
-                  <input
-                    type="radio"
-                    name="bili-group-mode"
-                    value={GROUP_MODE_EXISTING}
-                    checked={groupMode === GROUP_MODE_EXISTING}
-                    onChange={() => setGroupMode(GROUP_MODE_EXISTING)}
-                  />
-                  <span>加入已有合集</span>
-                </label>
-                <label className="bili-choice-option">
-                  <input
-                    type="radio"
-                    name="bili-group-mode"
-                    value={GROUP_MODE_NONE}
-                    checked={groupMode === GROUP_MODE_NONE}
-                    onChange={() => setGroupMode(GROUP_MODE_NONE)}
-                  />
-                  <span>不归集</span>
-                </label>
-              </div>
-              <p className="hint">
-                {groupMode === GROUP_MODE_NEW
-                  ? `全部投完后自动建一个名为「${seasonTitle.trim() || prefill.job_title}」的新合集，再把这些视频加进去。`
-                  : groupMode === GROUP_MODE_EXISTING
-                    ? "全部投完后把这些视频追加到你选的那个合集里，不新建。B站 对合集有审核，加进去之后可能还需要等平台处理。"
-                    : "只把这几个视频投成独立稿件，不建合集、也不加入任何合集。"}
-              </p>
+          <div className="field">
+            <span className="field-label" id="bili-group-label">
+              归集方式
+            </span>
+            <div className="bili-choice" role="radiogroup" aria-labelledby="bili-group-label">
+              <label className="bili-choice-option">
+                <input
+                  type="radio"
+                  name="bili-group-mode"
+                  value={GROUP_MODE_NEW}
+                  checked={groupMode === GROUP_MODE_NEW}
+                  onChange={() => setGroupMode(GROUP_MODE_NEW)}
+                />
+                <span>新建合集</span>
+              </label>
+              <label className="bili-choice-option">
+                <input
+                  type="radio"
+                  name="bili-group-mode"
+                  value={GROUP_MODE_EXISTING}
+                  checked={groupMode === GROUP_MODE_EXISTING}
+                  onChange={() => setGroupMode(GROUP_MODE_EXISTING)}
+                />
+                <span>加入已有合集</span>
+              </label>
+              <label className="bili-choice-option">
+                <input
+                  type="radio"
+                  name="bili-group-mode"
+                  value={GROUP_MODE_NONE}
+                  checked={groupMode === GROUP_MODE_NONE}
+                  onChange={() => setGroupMode(GROUP_MODE_NONE)}
+                />
+                <span>不归集</span>
+              </label>
             </div>
-          )}
+            <p className="hint">{groupHint}</p>
+          </div>
 
-          {isCollection && groupMode === GROUP_MODE_NEW && (
+          {groupMode === GROUP_MODE_NEW && (
             <div className="field">
               <label className="field-label" htmlFor="bili-season-title">
                 合集名
@@ -371,7 +407,7 @@ export function BiliUploadDialog({
             </div>
           )}
 
-          {isCollection && groupMode === GROUP_MODE_EXISTING && (
+          {groupMode === GROUP_MODE_EXISTING && (
             <div className="field">
               <label className="field-label" htmlFor="bili-season-select">
                 加进哪个合集

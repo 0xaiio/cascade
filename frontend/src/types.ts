@@ -330,6 +330,12 @@ export interface BiliPrefill {
   make_comment: boolean;
   /** 合集简介的默认值（单视频恒为空）。界面没有这个输入框，提交时原样回传。 */
   season_desc: string;
+  /**
+   * 「归集方式」的初始选中项。**由服务端给**（合集 `new` / 单视频 `none`）：
+   * 这个默认值按场景而不同，在前端按 `kind` 重推一遍就会有两份真相，
+   * 而漂移的表现是「升级后投稿悄悄多出一批合集」，不会报错。
+   */
+  default_group_mode: BiliGroupMode;
 }
 
 export interface BiliUpload {

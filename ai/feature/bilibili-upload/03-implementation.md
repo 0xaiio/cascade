@@ -223,3 +223,80 @@
 
 前端侧一处顺带修掉的缺陷：`App.tsx` 原本把合集名硬传 `prefill.job_title`，
 所以弹窗里新加的「合集名」输入框**填了也不会生效**。新增的改名用例第一次跑就红在这里。
+
+## 8. 归集方式对单视频开放
+
+第一版只对 playlist 开放。用户反馈「在上传投稿页面并未看到任何与选择合集相关的 UI」——
+查下来**不是样式或产物问题，而是可达性**：本机 12 个任务的 `total_items` **全是 1**
+（`bili_season` 表 0 行），而控件当时挂在 `isCollection &&` 上，于是这台机器上任何能打开的
+投稿表单都是单视频表单，控件永远不会渲染。
+
+改动落在这些文件：
+
+| 位置 | 做了什么 |
+| --- | --- |
+| `bili_meta.py` | `DEFAULT_SINGLE_GROUP_MODE`；`normalize_group_mode` 的 `fallback` 改成参数 |
+| `schemas.py` | `BiliUploadCreate` 增 `group_mode` / `season_id` / `season_title`；`BiliPrefillRead` 增 `default_group_mode` |
+| `bili_manager.py` | `submit_single` 收归集参数并写归集记录；`_require_group_ready`（新，两条路径共用）；`_upsert_season` 增 `create_if_missing`；`build_prefill` 下发默认值 |
+| `routers/bilibili.py` | `POST /uploads` 校验并透传归集决策（**用原始输入校验**） |
+| `BiliUploadDialog.tsx` | 去掉三处 `isCollection &&` 门禁（单选组 + 合集名输入 + 合集下拉）；默认值取自服务端；说明文案按场景分主语 |
+| `App.tsx` / `api.ts` / `types.ts` | **按需**读合集列表（选中「加入已有」才发起，见 §9）；读取失败的哨兵值；单视频提交也带归集字段；回执带上归集去向 |
+
+四处值得单独说的实现细节：
+
+**1. `submit_single` 只是接上了同一套落库，归集阶段一行没改。** 归集阶段只读
+`bili_season.season_id`（有则补加、无则新建）与 `upload_ids`，**不看这批稿件有几条**，
+所以「一条」与「N 条」在它那里没有区别 —— 这也是为什么不需要第二套实现。
+
+**2. `_upsert_season` 的 `create_if_missing` 是给单视频专用的。** 单视频的默认就是「不归集」，
+照合集那样「也建一条 `skipped` 记录」等于让此后每个单视频任务都在列表上多出一行
+「合集：未归集」。**默认路径上多出来的东西必须是零。** 但已有记录仍会被停掉，
+否则上一轮的 `pending` 会让 `_maybe_group` 照旧自动归集。
+
+**3. `_require_group_ready` 是路由那道 400 之外的第二道闸。** `submit_single` /
+`submit_collection` 都是公开方法（测试与脚本会直接调）。新增的「空标题」拦截尤其要紧：
+空标题会被 B站 打回来，而那时**视频已经投出去了**，那是一次不可回退的半成品状态。
+
+**4. 合集列表从「整张表单的门槛」降级为「只有『加入已有』才需要」。** 原来的
+`isCollection && !seasonsLoaded` 会让「列表读不到」直接等于「视频传不上去」；
+而读失败时 `seasons` 停在 `null`，界面上是「正在读取…」—— 一个**永远不会结束**的加载，
+且那一项也选不了。现在：只有选中「加入已有」才拦；失败时 App 写入一个
+**读完了、但读不到**的哨兵值（`SEASON_LIST_UNREADABLE`），界面就能把原因与下一步说出来，
+用户至少能改选另外两项把视频投出去。
+
+前端侧一处顺带收紧的规则：`createBiliUpload` 原来无条件提交 `season_id`，现在与
+`createBiliCollection` 一样**只在 `existing` 时提交这个字段** —— 两条路径的形状不该有两套。
+
+## 9. 合集列表改成按需读（修掉开窗路径上的一次回归）
+
+§8 的第四个细节把「合集列表」从**表单门槛**降级成**只有『加入已有』才需要**，
+但**读取时机**没跟着改：`handleBiliUpload` 里写着 `await loadBiliSeasons()`，也就是
+**每打开一次投稿窗口就发一次真实请求**。默认的那两个选项都用不上它 —— 为一个多数情况下
+不会被打开的选项，让两个默认路径陪着等一次网络往返，这是本功能自己引入的回归。
+
+**为什么这一次「多一个请求」比看起来贵。** 真实验收探针跑出来的症状是
+「加入已有合集」那一格**一直停在「正在读取账号里的合集…」**。追下去是两个叠在一起的事实：
+
+| 事实 | 证据 |
+| --- | --- |
+| 本机直连 B站 域名时 **DNS 解析卡死** | `curl --max-time 40 http://127.0.0.1:8010/api/bilibili/seasons` → `http=000 time=40.003s`（超时退出）。同一条件下 `/api/bilibili/status` 也一样 —— 属既有环境问题，不是本次引入。 |
+| 网络层的 `socket` 超时**不覆盖 DNS 解析** | 所以那次请求等于没有超时。`gethostbyname('member.bilibili.com')` 实测 >60s 不返回。 |
+
+⇒ 放在开窗路径上就是「一打开上传窗口先卡住」，而且**没有终点**。
+
+改法（三处）：
+
+| 位置 | 改了什么 |
+| --- | --- |
+| `App.tsx` | `loadBiliSeasons()` 改为**按需调用**：`seasonsRequested` ref 去重 + `SEASON_LIST_TIMEOUT_MS = 12_000` 到点写 `SEASON_LIST_UNREADABLE`；迟到的真结果**覆盖**兜底。`resetSeasonList()` 统一「开窗 / 关窗 / 提交后」的清场（原来是三处裸 `setSeasonList(null)`）。 |
+| `BiliUploadDialog.tsx` | 新增 `loadSeasons` 属性（走 ref，理由与 `onCancel` 同：App 每收到一条 SSE 事件就重渲染一次）。副作用只在 `groupMode === "existing" && seasons === null` 时触发。 |
+| `BiliUploadDialog.tsx` | 把「选了『加入已有』但还没选是哪个合集」那条拦截**从 `isCollection &&` 放开到两条路径**。控件既然在单视频上可见，判据就不能只在一处成立 —— 否则单视频用户只会吃到一个服务端 400（`missing_season_id`），而那句话说在该说的地方。 |
+
+第三处是**并入本条**而不是另开编号：本条承诺的是「单视频也能用这套归集控件」，
+一个能被看见、却要走一次 400 才知道该怎么用的控件，等于承诺没兑现。
+
+**两个「去重」不是同一件事，别混**：`seasonsRequested` 是**每轮弹窗**一次
+（`resetSeasonList()` 在开窗 / 关窗 / 提交后各清一次），而 `seasons === null` 是**每轮会话**一次
+（落定后就不再是 `null`）。前者防的是「SSE 重渲染导致重复发请求」，后者防的是「用户
+在三个选项之间来回切导致重复发请求」。真实浏览器探针把两条都量了：开窗 0 次、
+首次选中 1 次、来回切仍 1 次。

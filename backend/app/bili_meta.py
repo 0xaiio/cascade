@@ -74,25 +74,38 @@ COPYRIGHT_LABELS: dict[str, str] = {
 }
 
 # ---------------------------------------------------------------- 归集方式
-# 合集上传跑完后要做什么：`none` 不归集 / `existing` 加进已有合集 / `new` 新建一个。
-# **默认 `new`**：改动前的行为就是「每次上传完自动新建一个合集」，保持不变，
-# 否则一次升级就会让用户已有的投稿突然失去归集。
+# 投稿跑完后要做什么：`none` 不归集 / `existing` 加进已有合集 / `new` 新建一个。
+#
+# **默认值是「按场景」的，不是全局一个**（这一点是本节的要点）：
+#
+# - 合集任务（playlist）：`DEFAULT_GROUP_MODE = new`。改动前的行为就是「每次上传完
+#   自动新建一个合集」，保持不变，否则一次升级就会让用户已有的投稿突然失去归集。
+# - 单视频任务：`DEFAULT_SINGLE_GROUP_MODE = none`。改动前单视频**从来不进任何合集**
+#   （`submit_single` 连归集记录都不建）。若把 `new` 当默认，一次升级会让此后每条
+#   单视频投稿都在账号里多出一个只含它自己的合集 —— 这是替用户做了他没说过的事。
+#
+# 判据仍然是「回退到不改变既有事实的那一侧」，只是**「既有事实」本身取决于场景**。
 GROUP_MODE_NONE = "none"
 GROUP_MODE_EXISTING = "existing"
 GROUP_MODE_NEW = "new"
 DEFAULT_GROUP_MODE = GROUP_MODE_NEW
+DEFAULT_SINGLE_GROUP_MODE = GROUP_MODE_NONE
 GROUP_MODES: tuple[str, ...] = (GROUP_MODE_NONE, GROUP_MODE_EXISTING, GROUP_MODE_NEW)
 
 
-def normalize_group_mode(value: str | None) -> str:
-    """读不出合法的归集方式时回退「新建」。
+def normalize_group_mode(value: str | None, *, fallback: str = DEFAULT_GROUP_MODE) -> str:
+    """读不出合法的归集方式时回退到 `fallback`（默认「新建」）。
 
     与 `normalize_copyright` 同一条原则：**回退到不改变既有事实的那一侧**。
     猜成 `existing` 而没有 `season_id` 会让归集无从下手；猜成 `none` 会让用户以为
     归过集了（其实没有）。两者都是「界面没说的东西被替用户决定了」。
+
+    `fallback` 之所以是参数：这个「既有事实」在单视频与合集上是**相反**的
+    （见上面 `DEFAULT_SINGLE_GROUP_MODE` 的说明）。调用方必须按自己的场景传，
+    传错的表现是「升级后一批投稿悄悄多出/失去合集」，而不会有任何报错。
     """
     text = (value or "").strip()
-    return text if text in GROUP_MODES else DEFAULT_GROUP_MODE
+    return text if text in GROUP_MODES else fallback
 
 
 def normalize_season_option(raw: object) -> dict[str, object] | None:
@@ -425,10 +438,12 @@ def merge_item_tags(template_tags: str, item_title: str) -> str:
 def validate_group_choice(
     *, group_mode: str, season_id: int | None, season_title: str, count: int
 ) -> list[str]:
-    """校验「归入方式」这一组字段。
+    """校验「归入方式」这一组字段。单视频与合集**共用**这一份校验。
 
     **刻意与 `validate()` 分开**：那些是每条视频的元数据（合集场景下还要逐条校验 N 遍），
-    这里校验的是**整批一次**的归集决策。混进 `validate()` 会让单视频投稿也去查合集。
+    这里校验的是**整批一次**的归集决策 —— 单视频那个「批」只是恰好只有 1 条。
+    `count` 目前不参与判据（两个场景的判据完全一致），保留它是为了不让调用方
+    因为「参数暂时没用」而少传一个将来会用到的上下文。
     """
     problems: list[str] = []
     if group_mode not in GROUP_MODES:

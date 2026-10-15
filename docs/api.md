@@ -86,13 +86,13 @@
 | `POST` | `/api/bilibili/cookies` | 导入一份已有的 B站 登录文件（`multipart/form-data`，不校验格式）。 | `BiliStatusRead` |
 | `DELETE` | `/api/bilibili/cookies` | 清除 B站 登录态；幂等，本来没有也返回体检结论。 | `BiliStatusRead` |
 | `GET` | `/api/bilibili/prefill` | 预填上传表单：单视频给一组值，合集给「模板 + 逐条预览 + 超限定位」。 | [`BiliPrefillRead`](../backend/app/schemas.py#L382) |
-| `GET` | `/api/bilibili/seasons` | 账号下**已存在**的合集，供投稿界面下拉选择。**未登录也返回 200**（空列表 + `error` 说明原因）。 | [`BiliSeasonListRead`](../backend/app/schemas.py#L425) |
-| `GET` | `/api/bilibili/uploads` | 按任务读回上传状态（任务级徽标 + 条目级明细 + 合集记录）。 | [`BiliJobUploadsRead`](../backend/app/schemas.py#L501) |
-| `POST` | `/api/bilibili/uploads` | 启动单视频投稿；返回**整个任务**的上传状态。 | [`BiliUploadCreate`](../backend/app/schemas.py#L403)、`BiliJobUploadsRead` |
-| `GET` | `/api/bilibili/uploads/summary` | **所有有 B站 记录的任务**的徽标汇总（任务中心每行一个图标，逐个问就是 N 个请求）。 | [`BiliJobUploadsSummaryRead`](../backend/app/schemas.py#L516) |
-| `POST` | `/api/bilibili/uploads/{upload_id}/retry` | 重试一条稿件；动作按终态三选一。 | [`BiliRetryRead`](../backend/app/schemas.py#L527) |
-| `POST` | `/api/bilibili/collections` | 启动合集投稿：按模板逐条投稿，全部确认发布后自动归集。 | [`BiliCollectionCreate`](../backend/app/schemas.py#L434)、`BiliJobUploadsRead` |
-| `POST` | `/api/bilibili/collections/{season_record_id}/group` | 重试合集归集；已有 `season_id` 时只补加视频，不重复建合集。 | [`BiliSeasonRetryRead`](../backend/app/schemas.py#L534) |
+| `GET` | `/api/bilibili/seasons` | 账号下**已存在**的合集，供投稿界面下拉选择。**未登录也返回 200**（空列表 + `error` 说明原因）。 | [`BiliSeasonListRead`](../backend/app/schemas.py#L440) |
+| `GET` | `/api/bilibili/uploads` | 按任务读回上传状态（任务级徽标 + 条目级明细 + 合集记录）。 | [`BiliJobUploadsRead`](../backend/app/schemas.py#L516) |
+| `POST` | `/api/bilibili/uploads` | 启动单视频投稿（可选归入某个合集）；返回**整个任务**的上传状态。 | [`BiliUploadCreate`](../backend/app/schemas.py#L408)、`BiliJobUploadsRead` |
+| `GET` | `/api/bilibili/uploads/summary` | **所有有 B站 记录的任务**的徽标汇总（任务中心每行一个图标，逐个问就是 N 个请求）。 | [`BiliJobUploadsSummaryRead`](../backend/app/schemas.py#L531) |
+| `POST` | `/api/bilibili/uploads/{upload_id}/retry` | 重试一条稿件；动作按终态三选一。 | [`BiliRetryRead`](../backend/app/schemas.py#L542) |
+| `POST` | `/api/bilibili/collections` | 启动合集投稿：按模板逐条投稿，全部确认发布后自动归集。 | [`BiliCollectionCreate`](../backend/app/schemas.py#L449)、`BiliJobUploadsRead` |
+| `POST` | `/api/bilibili/collections/{season_record_id}/group` | 重试合集归集；已有 `season_id` 时只补加视频，不重复建合集。 | [`BiliSeasonRetryRead`](../backend/app/schemas.py#L549) |
 
 路由实现集中在 [routers/](../backend/app/routers/__init__.py)。`POST /api/jobs` 成功时返回 `201`，其余返回模型或 `204`。B站 那一组统一返回 JSON 读模型（没有 `204`）。
 
@@ -244,17 +244,54 @@ cookies 体检结果。字段分三层：
 | `copyright` | 只能取 `1`（自制）或 `2`（转载）。**默认 `2`** |
 | `source` | `copyright=2` 时**必填**；`copyright=1` 时**不提交** |
 
-`copyright` 与 `source` 不在上面这张「长度上限」表里，但同样是提交前的拦截项，判据在 [validate](../backend/app/bili_meta.py#L334)。三点值得调用方注意：
+`copyright` 与 `source` 不在上面这张「长度上限」表里，但同样是提交前的拦截项，判据在 [validate](../backend/app/bili_meta.py#L347)。三点值得调用方注意：
 
 - **读不出合法 `copyright` 时回退 `2`（转载）而不是 `1`**。标成自制是替用户声明一件他没说过的事；标成转载最多让他改一下。
-- **自制稿即便 `source` 带值也不会出现在命令行里**。判据只有一个函数 [effective_source](../backend/app/bili_meta.py#L186) —— 若在别处再写一遍「要不要带来源」，落库快照与实发参数迟早对不上。
+- **自制稿即便 `source` 带值也不会出现在命令行里**。判据只有一个函数 [effective_source](../backend/app/bili_meta.py#L199) —— 若在别处再写一遍「要不要带来源」，落库快照与实发参数迟早对不上。
 - **合集模板上 `source` 恒为空**，逐条来源由服务端渲染时各取该条自己的来源链接。模板里回填第一条的值会让人误以为「所有条目都用它」，所以刻意不回填。
 
 历史上已入库的稿件，`db._ensure_columns` 补的 `copyright` 是 `1`（那是改动之前的实际行为），与产品默认值 `2` 不同 —— 见 [BiliUpload](../backend/app/models.py#L117) 的注释。
 
+### 归集方式（`group_mode` / `season_id` / `season_title`）
+
+**单视频与合集两条投稿路径共用同一组字段与同一份校验**（[validate_group_choice](../backend/app/bili_meta.py#L438)），
+区别只在默认值：
+
+| 字段 | 说明 |
+| --- | --- |
+| `group_mode` | `none` 不归集 / `existing` 加进 `season_id` 指定的已有合集 / `new` 用 `season_title` 新建一个。 |
+| `season_id` | `group_mode=existing` 时必填。**不校验它是否真存在** —— 那是归集阶段的网络动作，提交前查一次会多一次往返，且账号可能在这之后被登出。 |
+| `season_title` | 只在 `new` 时用得上；留空由路由用任务名兜底（`season_title or job.title`）。 |
+
+**默认值按路径不同，而且方向是反的**，这是改动前后行为都必须保持的结果：
+
+- `POST /api/bilibili/uploads`（单视频）默认 `none`。改动前单视频**从不进任何合集**，
+  默认为 `new` 会让此后每条单视频投稿都在账号里多出一个只含它自己的合集。
+- `POST /api/bilibili/collections`（合集）默认 `new`。改动前就是每次投完自动新建，
+  改成别的会让已有的合集投稿突然失去归集。
+
+两个常量分别在 [DEFAULT_GROUP_MODE](../backend/app/bili_meta.py#L91) 与
+[DEFAULT_SINGLE_GROUP_MODE](../backend/app/bili_meta.py#L92)，
+[normalize_group_mode](../backend/app/bili_meta.py#L96) 的回退值是**参数**而不是写死的 ——
+传错的表现是「升级后一批投稿悄悄多出/失去合集」，不会有任何报错。
+
+三条调用方容易踩到的语义：
+
+- **`group_mode=none` 在两条路径上的落库行为不同**。合集那边有一条归集记录，会落成终态
+  `skipped`（界面上要有一句「未归集」可显示）；单视频那边**一条记录都不建**，
+  因为单视频的默认恰好就是 `none`，建记录等于让每个单视频任务都多出一行噪音。
+  两条路径都**会把上一轮留下的 `pending` 记录停掉**，否则 `_maybe_group` 照样自动归集。
+- **`new` 时交付的 `season_id` 必须为空**。预置任何值（哪怕是对的 0）都会让归集阶段跳过
+  建合集，然后对着一个不存在的编号加视频。`season_id` 只在 `existing` 时才有意义。
+- **校验看的是原始输入**。路由先校验再归一：顺序反过来的话，非法值已被修成合法值，
+  校验永远看不到它，一个手写坏的 `group_mode` 会被静默当成某个合法值执行。
+
+`GET /api/bilibili/prefill` 会返回 `default_group_mode`，界面直接用它做初始选中项 ——
+默认值由服务端算，前端不再按 `kind` 推一遍（推两份迟早会漂移）。
+
 ### BiliUploadRead 与 BiliJobUploadsRead
 
-前端真正消费的是 [BiliJobUploadsRead](../backend/app/schemas.py#L501)（任务级读模型）与 [BiliJobUploadsSummaryRead](../backend/app/schemas.py#L516)（全部任务的徽标汇总）。`uploads` 按条目在任务中的位置排序，对不上任何条目的记录排在最后。
+前端真正消费的是 [BiliJobUploadsRead](../backend/app/schemas.py#L516)（任务级读模型）与 [BiliJobUploadsSummaryRead](../backend/app/schemas.py#L531)（全部任务的徽标汇总）。`uploads` 按条目在任务中的位置排序，对不上任何条目的记录排在最后。
 
 条目级 `status` 是后端自己的生命周期，`badge` 是界面用的粗档位：
 

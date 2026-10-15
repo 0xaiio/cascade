@@ -79,6 +79,33 @@ const BILI_SETTLED_BADGES = new Set(["uploaded", "partial", "unverified", "faile
 type BiliDialogState = { prefill: BiliPrefill; isCollection: boolean; itemId: string | null };
 
 /**
+ * 合集列表**读不回来**时的替代值。
+ *
+ * 不能让它留成 `null`：`null` 在弹窗里表示「还在读」，于是一次失败会让「加入已有合集」
+ * 永久停在「正在读取账号里的合集…」—— 用户看到的是一个永远不会结束的加载，而且
+ * 那一项还选不了。这里给一个**读完了、但读不到**的结论，界面就能把原因说出来；
+ * 用户至少可以改选「新建合集」或「不归集」把视频投出去。
+ */
+const SEASON_LIST_UNREADABLE: BiliSeasonList = {
+  seasons: [],
+  error: "读不到账号里的合集",
+  advice: "可能是登录已失效或网络不通。改选「新建合集」或「不归集」照样能投稿。"
+};
+
+/**
+ * 「正在读取账号里的合集…」的最长等待。到点就落成上面那条**结论**。
+ *
+ * 为什么需要它，而不是指望网络层自己的超时：那层用的是 `socket` 超时，
+ * **DNS 解析不在它的覆盖范围内**。实测本机直连 B站 域名时，`gethostbyname` 超过 60 秒
+ * 仍不返回 —— 也就是说别人给的 `timeout` 在这里等于没有，界面上会挂一个**没有终点**的
+ * 「正在读取…」，而「加入已有合集」也因此永远选不了。
+ *
+ * 12 秒是「比本地请求慢很多、但短到用户还愿意等」的取值。真结果晚到时会**覆盖**这条兜底：
+ * 先给一个结论，再被更好的结论替换。
+ */
+const SEASON_LIST_TIMEOUT_MS = 12_000;
+
+/**
  * 应用容器：**只做状态编排、请求发起与布局**。
  *
  * 展示职责一律在 `components/` 下（解析面板、解析结果、下载选项、任务中心、设置、状态点），
@@ -117,8 +144,10 @@ export default function App() {
   const runtimeSaveClearTimer = useRef<number | null>(null);
   const [biliUploads, setBiliUploads] = useState<Record<string, BiliJobUploads>>({});
   const [biliDialog, setBiliDialog] = useState<BiliDialogState | null>(null);
-  /** 账号下的已有合集。`null` = 还在读；空数组 = 确实没有合集。合集表单才用得到。 */
+  /** 账号下的已有合集。`null` = 还没开始读；空数组 = 确实没有合集。**按需读**，见 loadBiliSeasons。 */
   const [seasonList, setSeasonList] = useState<BiliSeasonList | null>(null);
+  /** 本轮弹窗是否已经发起过读列表的请求。弹窗每收到一条 SSE 事件就重渲染，没有这道锁会打出一串请求。 */
+  const seasonsRequested = useRef(false);
   const [biliNotice, setBiliNotice] = useState<string | null>(null);
   /** 上一次观察到的徽标。用来区分「刚刚跑完」与「本来就是这状态」。 */
   const previousBiliBadges = useRef<Record<string, string>>({});
@@ -348,6 +377,38 @@ export default function App() {
     }
   }
 
+  /** 清掉上一轮的合集列表，让下一轮重新按需读。开窗 / 关窗 / 提交后都要调。 */
+  function resetSeasonList() {
+    seasonsRequested.current = false;
+    setSeasonList(null);
+  }
+
+  /**
+   * 按需读账号下的合集。**只有用户选了「加入已有合集」才会被调**（见弹窗里的副作用）。
+   *
+   * 为什么不趁开窗时一并读掉：这份数据只服务于那一个选项，而读它是**一次真实的网络往返**。
+   * 两个默认选项（单视频「不归集」、合集「新建」）都不需要它 —— 为了一个多数情况下不会
+   * 被打开的选项，让每次开窗都先发一个请求不划算。实测代价很具体：本机直连 B站 域名时
+   * DNS 解析会卡住，开窗后「正在读取账号里的合集…」可以挂上好几分钟。
+   *
+   * 呼叫道岔开两道保险：`seasonsRequested` 去重（弹窗每收到一条 SSE 事件就重渲染一次），
+   * 以及一个到点就落结论的定时器（理由见 `SEASON_LIST_TIMEOUT_MS`）。
+   */
+  function loadBiliSeasons() {
+    if (seasonsRequested.current) return;
+    seasonsRequested.current = true;
+    setSeasonList(null);
+    const settle = (list: BiliSeasonList) => setSeasonList(list);
+    const guard = window.setTimeout(() => settle(SEASON_LIST_UNREADABLE), SEASON_LIST_TIMEOUT_MS);
+    listBiliSeasons()
+      .catch(() => SEASON_LIST_UNREADABLE)
+      .then((list) => {
+        // 迟到的真结果**覆盖**兜底：先给一个结论，再被更好的结论替换。
+        window.clearTimeout(guard);
+        settle(list);
+      });
+  }
+
   /**
    * 打开上传窗口。`itemId` 为空 = 整个任务（单视频任务 / 合集流程），
    * 由服务端在 `prefill.kind` 里告诉我们该走哪种表单 —— **不在前端按条目数自己判断**。
@@ -355,18 +416,10 @@ export default function App() {
   async function handleBiliUpload(jobId: string, itemId: string | null) {
     setError(null);
     setBiliNotice(null);
-    // **合集列表在开窗之前就开始读**，而不是等弹窗渲染完再取：
-    // 弹窗一出现就该能看到能选哪些合集，等它自己加载会先闪一下空下拉。
-    // 读失败**不阻止开窗** —— 用户可能只是要投稿不归集，不该因为一个可选
-    // 功能读不到就打不开表单。`seasonList` 会带着原因进去，界面上会显示。
-    setSeasonList(null);
-    const prefillPromise = getBiliPrefill(jobId, itemId);
-    const seasonsPromise = listBiliSeasons().catch(() => null);
+    // 合集列表**不在这里读**（见 loadBiliSeasons）：开窗只做一件必须的事，读预填。
+    resetSeasonList();
     try {
-      const prefill = await prefillPromise;
-      if (prefill.kind === "collection") {
-        void seasonsPromise.then((list) => setSeasonList(list)).catch(() => undefined);
-      }
+      const prefill = await getBiliPrefill(jobId, itemId);
       setBiliDialog({ prefill, isCollection: prefill.kind === "collection", itemId });
     } catch (err) {
       setError(biliMessage(err, "打不开上传窗口"));
@@ -403,21 +456,37 @@ export default function App() {
             values.groupMode,
             values.seasonId
           )
-        : await createBiliUpload(prefill.job_id, itemId, values.metadata, values.makeCover, values.comment);
+        : await createBiliUpload(
+            prefill.job_id,
+            itemId,
+            values.metadata,
+            values.makeCover,
+            values.comment,
+            values.groupMode,
+            values.seasonId,
+            // 与合集那边同一个口径：留空时用任务名（单视频的任务名就是视频标题）顶上。
+            values.seasonTitle || prefill.job_title
+          );
     } catch (err) {
       throw new Error(biliMessage(err, "提交失败"));
     }
     setBiliUploads((current) => ({ ...current, [result.job_id]: result }));
     setBiliDialog(null);
-    setSeasonList(null);
+    resetSeasonList();
+    // **归集去向必须出现在回执里**，包括「不归集」：那是用户刚在表单里做过的一个选择，
+    // 回执不提它，用户就没法确认自己选的那个真的生效了 —— 而「不归集」恰恰是最容易
+    // 被误以为没生效的一项（界面上看不出任何变化）。
+    const target = isCollection
+      ? `《${prefill.job_title}》的 ${prefill.items.length} 个视频`
+      : `《${values.metadata.title}》`;
     setBiliNotice(
-      isCollection
-        ? values.groupMode === "none"
-          ? `已开始上传《${prefill.job_title}》的 ${prefill.items.length} 个视频，不归集。`
-          : values.groupMode === "existing"
-            ? `已开始上传《${prefill.job_title}》的 ${prefill.items.length} 个视频，跑完会加进你选的合集。`
-            : `已开始上传《${prefill.job_title}》的 ${prefill.items.length} 个视频，逐个投完后会自动归入同一个合集。`
-        : `已开始上传《${values.metadata.title}》，跑完这里会变成「已上传」。`
+      values.groupMode === "none"
+        ? `已开始上传${target}，不归集 —— 跑完这里会变成「已上传」。`
+        : values.groupMode === "existing"
+          ? `已开始上传${target}，跑完会加进你选的合集。`
+          : isCollection
+            ? `已开始上传${target}，逐个投完后会自动归入同一个合集。`
+            : `已开始上传${target}，投完会自动建一个同名合集并把它放进去。`
     );
   }
 
@@ -634,9 +703,10 @@ export default function App() {
           prefill={biliDialog.prefill}
           isCollection={biliDialog.isCollection}
           seasons={seasonList}
+          loadSeasons={loadBiliSeasons}
           onCancel={() => {
             setBiliDialog(null);
-            setSeasonList(null);
+            resetSeasonList();
           }}
           onSubmit={handleBiliSubmit}
         />

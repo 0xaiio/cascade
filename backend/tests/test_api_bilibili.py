@@ -612,6 +612,90 @@ def test_joining_an_existing_collection_pins_its_id_without_building_a_new_one(c
     assert client.transport.called("/season/add") == 0
 
 
+# ---------------------------------------------------------------- 单视频的归集方式
+#
+# 单视频与合集共用同一组字段与同一份校验，所以这里只钉**两者口径不同**的地方：
+# 默认值（`none` vs `new`）与「不归集时留不留记录」。
+
+
+def test_single_upload_defaults_to_no_grouping_and_stores_no_season(client):
+    """不传 `group_mode` 时必须**什么都不做**。
+
+    改动前单视频从不进合集，所以默认值只能是 `none`。默认成 `new` 会让此后
+    每条单视频投稿都在账号里多出一个只含它自己的合集 —— 而且不会有任何报错。
+    """
+    client.seed_job("job1", "单视频任务", 1)
+    response = client.client.post("/api/bilibili/uploads", json=single_payload(client))
+    assert response.status_code == 200
+    body = response.json()
+    assert body["season"] is None
+    assert body["uploads"][0]["status"] == "queued"
+    assert client.transport.called("/season/add") == 0
+
+
+def test_single_upload_can_join_an_existing_collection(client):
+    client.seed_job("job1", "单视频任务", 1)
+    response = client.client.post(
+        "/api/bilibili/uploads",
+        json=single_payload(client, group_mode="existing", season_id=7788),
+    )
+    assert response.status_code == 200
+    assert response.json()["season"]["season_id"] == 7788
+    assert client.transport.called("/season/add") == 0
+
+
+def test_single_upload_creates_a_collection_when_asked(client):
+    client.seed_job("job1", "单视频任务", 1)
+    response = client.client.post(
+        "/api/bilibili/uploads",
+        json=single_payload(client, group_mode="new", season_title="我自己的合集"),
+    )
+    assert response.status_code == 200
+    season = response.json()["season"]
+    assert season["title"] == "我自己的合集"
+    # `new` 时编号必须**还没有**：预置任何值都会让归集跳过建合集，
+    # 然后对着一个不存在的编号加视频。
+    assert season["season_id"] is None
+
+
+def test_single_upload_falls_back_to_the_job_title_for_a_new_collection(client):
+    """留空用任务名兜底 —— 与合集那边同一个口径，否则空标题会被 B站 打回来。"""
+    client.seed_job("job1", "单视频任务", 1)
+    response = client.client.post("/api/bilibili/uploads", json=single_payload(client, group_mode="new"))
+    assert response.status_code == 200
+    assert response.json()["season"]["title"] == "单视频任务"
+
+
+def test_single_upload_rejects_an_unknown_group_mode_with_400(client):
+    """校验看的是**原始输入**：先归一再校验，非法值会被修成 `new` 而后静静执行。"""
+    client.seed_job("job1", "单视频任务", 1)
+    response = client.client.post("/api/bilibili/uploads", json=single_payload(client, group_mode="随便写的"))
+    assert response.status_code == 400
+    assert "归集方式" in response.json()["detail"]
+
+
+def test_single_upload_rejects_existing_without_a_season_id_with_400(client):
+    client.seed_job("job1", "单视频任务", 1)
+    response = client.client.post(
+        "/api/bilibili/uploads", json=single_payload(client, group_mode="existing")
+    )
+    assert response.status_code == 400
+    assert "没有选具体是哪个合集" in response.json()["detail"]
+
+
+def test_prefill_reports_the_default_group_mode_per_kind(client):
+    """默认值由服务端给，不让前端按 `kind` 推 —— 推两份迟早会漂移。"""
+    client.seed_job("job1", "单视频任务", 1)
+    single = client.client.get("/api/bilibili/prefill", params={"job_id": "job1"}).json()
+    assert single["kind"] == "single"
+    assert single["default_group_mode"] == "none"
+
+    client.seed_job("job2", "合集任务", 2)
+    collection = client.client.get("/api/bilibili/prefill", params={"job_id": "job2"}).json()
+    assert collection["kind"] == "collection"
+    assert collection["default_group_mode"] == "new"
+
+
 # ================================================================ 重试
 def test_retry_upload_404s_for_an_unknown_record(client):
     response = client.client.post("/api/bilibili/uploads/nope/retry")

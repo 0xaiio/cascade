@@ -1333,3 +1333,180 @@ async def test_manager_itself_refuses_to_join_without_an_id(tmp_path):
     # 拒绝时不该留下任何痕迹：没建记录，也没投递。
     assert harness.transport.called("/season/add") == 0
     await harness.manager.stop()
+
+
+# ================================================================ 单视频的归集方式
+#
+# 这一组钉的是「单视频与合集口径**不同**的那几处」。共用同一套归集机制，
+# 所以最容易在「顺手复用合集那边」时被抹平 —— 而两处的默认值恰好是相反的。
+
+
+async def test_single_submit_joins_an_existing_collection(tmp_path):
+    """单视频投稿也能直接加进一个已有合集。
+
+    `submit_single` 以前**连归集记录都不建**，所以 `_maybe_group` 永远找不到它 ——
+    这个能力在此之前只有先下载一整个 playlist 才够得着。
+    """
+    harness = make_harness(
+        tmp_path,
+        transport=FakeBiliTransport(archives=[{"aid": 1, "bvid": "BV1", "title": TITLE, "state": 0}]),
+    )
+    items = harness.seed_job("job1", "单视频任务", 1)
+    created = await harness.manager.submit_single(
+        job_id="job1",
+        item_id=items[0]["id"],
+        meta=harness.meta(),
+        video_path=Path(items[0]["path"]),
+        make_cover=False,
+        comment="",
+        group_mode="existing",
+        season_id=4242,
+    )
+    await drain(harness.manager)
+
+    assert harness.upload(created.id).status == BiliUploadStatus.published.value
+    season = harness.season("job1")
+    assert season.season_id == 4242
+    assert season.status == BiliSeasonStatus.grouped.value
+    # 一个都不建：建了就是账号里多出一个用户没要的合集。
+    assert harness.transport.called("/season/add") == 0
+    assert harness.transport.called("/season/section/episodes/add") == 1
+    await harness.manager.stop()
+
+
+async def test_single_submit_creates_a_collection_when_asked(tmp_path):
+    """反向：选了「新建合集」时，单视频也会真的建一个并把它放进去。"""
+    harness = make_harness(
+        tmp_path,
+        transport=FakeBiliTransport(archives=[{"aid": 1, "bvid": "BV1", "title": TITLE, "state": 0}]),
+    )
+    items = harness.seed_job("job1", "单视频任务", 1)
+    await harness.manager.submit_single(
+        job_id="job1",
+        item_id=items[0]["id"],
+        meta=harness.meta(),
+        video_path=Path(items[0]["path"]),
+        make_cover=False,
+        comment="",
+        group_mode="new",
+        season_title="我自己的合集",
+    )
+    await drain(harness.manager)
+
+    season = harness.season("job1")
+    # 标题用的是**用户填的那个**，不是任务名 —— `season_title` 漏在中间某一层的话，
+    # 建的合集名会悄悄变成任务名，而两者看起来都「像是对的」。
+    assert season.title == "我自己的合集"
+    assert season.season_id == 990011
+    assert season.status == BiliSeasonStatus.grouped.value
+    assert harness.transport.called("/season/add") == 1
+    await harness.manager.stop()
+
+
+async def test_single_submit_without_grouping_leaves_no_season_record(tmp_path):
+    """默认（不归集）**一条归集记录都不该落**。
+
+    单视频的默认恰好是「不归集」，所以「也建一条 `skipped` 记录」在这里的含义是
+    「此后每个单视频任务都多出一行『合集：未归集』」—— 默认路径上多出来的东西必须是零。
+    （合集那边反过来：它有归集记录，留一条 `skipped` 是在说明它的去向。）
+    """
+    harness = make_harness(
+        tmp_path,
+        transport=FakeBiliTransport(archives=[{"aid": 1, "bvid": "BV1", "title": TITLE, "state": 0}]),
+    )
+    items = harness.seed_job("job1", "单视频任务", 1)
+    created = await harness.manager.submit_single(
+        job_id="job1",
+        item_id=items[0]["id"],
+        meta=harness.meta(),
+        video_path=Path(items[0]["path"]),
+        make_cover=False,
+        comment="",
+    )
+    await drain(harness.manager)
+
+    # 稿件照投 —— 「不归集」说的是合集，不是「不投稿」。
+    assert harness.upload(created.id).status == BiliUploadStatus.published.value
+    with Session(harness.engine) as session:
+        assert list(session.exec(select(BiliSeason).where(BiliSeason.job_id == "job1")).all()) == []
+    assert harness.transport.called("/season/add") == 0
+    assert harness.transport.called("/season/section/episodes/add") == 0
+    await harness.manager.stop()
+
+
+async def test_single_submit_to_no_grouping_stops_a_previous_pending_season(tmp_path):
+    """已有归集记录时，「不归集」必须把它**停掉**而不是放着不管。
+
+    放着不管的后果是 `_maybe_group` 只认 `pending`、照旧自动归集 ——
+    用户明明选了「不归集」，视频投完还是被归了集，而界面上看不出任何异常。
+    """
+    harness = make_harness(
+        tmp_path,
+        transport=FakeBiliTransport(archives=[{"aid": 1, "bvid": "BV1", "title": TITLE, "state": 0}]),
+    )
+    items = harness.seed_job("job1", "单视频任务", 1)
+    with Session(harness.engine) as session:
+        session.add(BiliSeason(id="season-pending", job_id="job1", title="上一轮建的合集"))
+        session.commit()
+
+    await harness.manager.submit_single(
+        job_id="job1",
+        item_id=items[0]["id"],
+        meta=harness.meta(),
+        video_path=Path(items[0]["path"]),
+        make_cover=False,
+        comment="",
+        group_mode="none",
+    )
+    await drain(harness.manager)
+
+    season = harness.season("job1")
+    assert season.status == BiliSeasonStatus.skipped.value
+    # 上一轮的标题**留着**：它是那次投稿的审计痕迹，改掉会让人以为记录被覆盖了。
+    assert season.title == "上一轮建的合集"
+    assert harness.transport.called("/season/add") == 0
+    assert harness.transport.called("/season/section/episodes/add") == 0
+    await harness.manager.stop()
+
+
+async def test_single_submit_refuses_existing_without_an_id(tmp_path):
+    """`submit_single` 是公开方法，路由那道 400 不是唯一防线。"""
+    harness = make_harness(tmp_path)
+    items = harness.seed_job("job1", "单视频任务", 1)
+    with pytest.raises(BiliPreconditionError) as caught:
+        await harness.manager.submit_single(
+            job_id="job1",
+            item_id=items[0]["id"],
+            meta=harness.meta(),
+            video_path=Path(items[0]["path"]),
+            make_cover=False,
+            comment="",
+            group_mode="existing",
+            season_id=None,
+        )
+    assert caught.value.code == "missing_season_id"
+    await harness.manager.stop()
+
+
+async def test_single_submit_refuses_new_without_a_title(tmp_path):
+    """空标题会被 B站 打回来，而那时**视频已经投出去了** —— 所以拦在投稿之前。
+
+    路由层会用任务名兜底（`season_title or job.title`），所以这条只有直接调 manager
+    才会碰到；留着它是因为「投出去了但合集建不起来」是一次不可回退的半成品状态。
+    """
+    harness = make_harness(tmp_path)
+    items = harness.seed_job("job1", "单视频任务", 1)
+    with pytest.raises(BiliPreconditionError) as caught:
+        await harness.manager.submit_single(
+            job_id="job1",
+            item_id=items[0]["id"],
+            meta=harness.meta(),
+            video_path=Path(items[0]["path"]),
+            make_cover=False,
+            comment="",
+            group_mode="new",
+            season_title="   ",
+        )
+    assert caught.value.code == "missing_season_title"
+    assert harness.transport.called("/season/add") == 0
+    await harness.manager.stop()
