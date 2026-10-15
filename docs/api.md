@@ -240,6 +240,16 @@ cookies 体检结果。字段分三层：
 | `desc` | 250 字符 |
 | `tags` | 逗号分隔总长 < 200，最多 10 个，**单个 ≤ 20** |
 | `comment` | 1000 字符 |
+| `copyright` | 只能取 `1`（自制）或 `2`（转载）。**默认 `2`** |
+| `source` | `copyright=2` 时**必填**；`copyright=1` 时**不提交** |
+
+`copyright` 与 `source` 不在上面这张「长度上限」表里，但同样是提交前的拦截项，判据在 [validate](../backend/app/bili_meta.py#L277)。三点值得调用方注意：
+
+- **读不出合法 `copyright` 时回退 `2`（转载）而不是 `1`**。标成自制是替用户声明一件他没说过的事；标成转载最多让他改一下。
+- **自制稿即便 `source` 带值也不会出现在命令行里**。判据只有一个函数 [effective_source](../backend/app/bili_meta.py#L129) —— 若在别处再写一遍「要不要带来源」，落库快照与实发参数迟早对不上。
+- **合集模板上 `source` 恒为空**，逐条来源由服务端渲染时各取该条自己的来源链接。模板里回填第一条的值会让人误以为「所有条目都用它」，所以刻意不回填。
+
+历史上已入库的稿件，`db._ensure_columns` 补的 `copyright` 是 `1`（那是改动之前的实际行为），与产品默认值 `2` 不同 —— 见 [BiliUpload](../backend/app/models.py#L114) 的注释。
 
 ### BiliUploadRead 与 BiliJobUploadsRead
 
