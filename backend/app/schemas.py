@@ -408,6 +408,29 @@ class BiliUploadCreate(BaseModel):
     comment: str = ""
 
 
+class BiliSeasonOption(BaseModel):
+    """账号下的**一个已有合集**，供界面下拉选择。"""
+
+    season_id: int
+    title: str
+    # 简介与封面从平台数据里兜底读取，键名有多个变体（见 `bili_meta.normalize_season_option`）。
+    # 拿不到就留空 —— 空简介只是界面上少一行字，不该让整个下拉列表查不出来。
+    desc: str = ""
+    cover_url: str = ""
+    # 平台统计的视频条数。**仅供界面显示**（让用户认出这是哪个合集），不参与任何判断 ——
+    # 界面上的条数是这个合集**目前**的，与「本次要归入几条」无关。
+    total: int = 0
+
+
+class BiliSeasonListRead(BaseModel):
+    seasons: list[BiliSeasonOption] = Field(default_factory=list)
+    # 列不出来时的原因（未登录 / 网络不通）。空字符串表示「确实没有合集」。
+    # **刻意用 `""` 而不是 `[]` 区分不了这两种情况**：未登录返回空列表，
+    # 界面就会显示成「这个账号还没有合集」，用户会以为是自己还没建过。
+    error: str = ""
+    advice: str = ""
+
+
 class BiliCollectionCreate(BaseModel):
     job_id: str = Field(min_length=1)
     template: BiliMetadata
@@ -415,6 +438,12 @@ class BiliCollectionCreate(BaseModel):
     season_desc: str = ""
     make_cover: bool = True
     comment: str = ""
+    # 归入方式：`none` 不归集 / `existing` 加进 `season_id` 指定的已有合集 /
+    # `new` 用 `season_title` 新建一个。默认 `new` —— 改动前的行为就是每次新建。
+    group_mode: str = "new"
+    # `group_mode="existing"` 时必填。**不校验它是不是真存在**：那是归集阶段的网络动作，
+    # 放在提交前查一次会多一次往返，且账号可能在提交后被登出。这里只挡「没给编号」。
+    season_id: int | None = None
 
 
 class BiliUploadRead(BaseModel):

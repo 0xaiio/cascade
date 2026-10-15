@@ -109,6 +109,9 @@ class BiliSeasonStatus(StrEnum):
     grouping = "grouping"
     grouped = "grouped"
     failed = "failed"
+    # 用户在投稿表单里选了「不归集」。**必须是终态**：`_maybe_group` 只自动归集
+    # `pending`，所以这个状态的作用就是让那批稿件投完就停下，不留一个永远不结束的徽标。
+    skipped = "skipped"
 
 
 class BiliUpload(SQLModel, table=True):

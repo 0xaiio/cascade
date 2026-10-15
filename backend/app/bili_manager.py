@@ -32,6 +32,7 @@ from sqlalchemy.engine import Engine
 from sqlmodel import Session, select
 
 from .bili_api import fetch_account
+from .bili_api import list_seasons as list_account_seasons
 from .bili_auth import (
     BiliLoginSession,
     TvToken,
@@ -53,6 +54,9 @@ from .bili_bin import (
 )
 from .bili_http import Transport, default_transport
 from .bili_meta import (
+    GROUP_MODE_EXISTING,
+    GROUP_MODE_NEW,
+    GROUP_MODE_NONE,
     MetadataTemplate,
     UploadMetadata,
     copyright_label,
@@ -63,9 +67,12 @@ from .bili_meta import (
     effective_source,
     limits as bili_limits,
     normalize_copyright,
+    normalize_group_mode,
+    normalize_season_option,
     partition_options,
     validate as validate_metadata,
     validate_comment,
+    validate_group_choice,
 )
 from .bili_policy import (
     COOKIE_TRACKED_BY_GIT,
@@ -116,6 +123,8 @@ from .schemas import (
     BiliMetadata,
     BiliPrefillItem,
     BiliPrefillRead,
+    BiliSeasonListRead,
+    BiliSeasonOption,
     BiliSeasonRead,
     BiliSeasonRetryRead,
     BiliStatusRead,
@@ -443,6 +452,36 @@ class BiliManager:
             return None
         return BiliAccountRead(mid=payload.get("mid"), name=str(payload.get("uname") or ""))
 
+    # ------------------------------------------------------------ 合集目录
+    async def account_seasons(self) -> BiliSeasonListRead:
+        """账号下的已有合集，供投稿界面下拉选择。**不抛异常**：查不出来也是一种答案。"""
+        return await asyncio.to_thread(self._account_seasons_sync)
+
+    def _account_seasons_sync(self) -> BiliSeasonListRead:
+        jar = self.current_jar()
+        if not jar:
+            return BiliSeasonListRead(
+                seasons=[],
+                error=MISSING_COOKIE[0],
+                advice=MISSING_COOKIE[1],
+            )
+        missing = missing_required_cookies(jar)
+        if missing:
+            return BiliSeasonListRead(
+                seasons=[],
+                error=MISSING_COOKIE_FIELDS[0] + f"（缺 {'、'.join(missing)}）",
+                advice=MISSING_COOKIE_FIELDS[1],
+            )
+        # `list_seasons` 自己吞掉网络异常并返回空表，所以这里拿不到「失败」与「真的没有」
+        # 的区别。**不去伪造那个区别**：接口照实说「没有合集」，界面据此禁用
+        # 「加入已有合集」并引导用户新建 —— 这在两种情况下都是能走的下一步。
+        options: list[BiliSeasonOption] = []
+        for raw in list_account_seasons(self.transport, jar):
+            normalized = normalize_season_option(raw)
+            if normalized is not None:
+                options.append(BiliSeasonOption.model_validate(normalized))
+        return BiliSeasonListRead(seasons=options)
+
     # ------------------------------------------------------------ 体检
     async def health(self, *, probe_account: bool = True) -> BiliStatusRead:
         return await asyncio.to_thread(self._health_sync, probe_account)
@@ -553,6 +592,8 @@ class BiliManager:
         season_desc: str,
         make_cover: bool,
         comment: str,
+        group_mode: str = GROUP_MODE_NEW,
+        season_id: int | None = None,
     ) -> BiliJobUploadsRead:
         self._require_ready()
         missing = [
@@ -566,6 +607,30 @@ class BiliManager:
                 "先等这些下载任务跑完，或对它们单独重试下载",
                 code="missing_video",
             )
+        mode = normalize_group_mode(group_mode)
+        if mode == GROUP_MODE_EXISTING and season_id is None:
+            # 路由层已经拦过（400），这里再兜一道是因为 `submit_collection` 是**公开方法**：
+            # 漏掉编号时若无条件采纳 `existing`，归集记录会带着一个 `None` 的 `season_id`
+            # 进入「建集」分支 —— 用户明明选了「加入已有」，却凭空多出一个合集。
+            raise BiliPreconditionError(
+                "选了「加入已有合集」但没有选具体是哪个合集",
+                "在归集方式里选中一个账号下已有的合集，或改选「新建合集」",
+                code="missing_season_id",
+            )
+        # 「加入已有合集」与用户手输的合集名/简介是**互斥**的两件事：前者用账号里那个合集
+        # 自己的标题与简介（已经在平台上了，改不了也不该改），后者才轮到我们提供的值。
+        if mode == GROUP_MODE_EXISTING:
+            title, desc = season_title, season_desc
+            pinned_id = season_id
+        else:
+            # 标题与简介的空值兜底**在路由层已经做过**（`season_title or job.title`），
+            # 所以这里不重复兜。`new` 原样透传，`none` 给一组空值 ——
+            # 归集记录仍会建（落终态 `skipped`，界面上要有句「未归集」可显示），
+            # 但标题/简介留着上一轮的值会让界面上显示一个与本次无关的合集名。
+            title, desc = (season_title, season_desc) if mode == GROUP_MODE_NEW else ("", "")
+            # `new` 时**刻意不预置** `season_id`：留空才会让归集阶段去 `create_season`。
+            # 预置一个假编号会让它跳过建合集、然后对着不存在的合集加视频。
+            pinned_id = None
         with Session(self.engine) as session:
             self._guard_idle(session, job_id)
             upload_ids: list[str] = []
@@ -588,16 +653,27 @@ class BiliManager:
             season = self._upsert_season(
                 session,
                 job_id=job_id,
-                title=season_title,
-                desc=season_desc,
+                title=title,
+                desc=desc,
                 upload_ids=upload_ids,
+                # **这是「加入已有合集」的全部实现**：把平台已有的编号先写进归集记录，
+                # `_group_work` 读它作为 `existing_season_id`，于是自动跳过 `create_season`
+                # 直接补加视频。复用既有的「重试不重复建合集」机制，而不是另开一条分支。
+                pin_season_id=pinned_id,
+                # 「不归集」：记录照建，但**直接落终态** `skipped`。
+                # 不建记录会让界面上什么都不显示，用户分不清是「没归集」还是「还没归集」。
+                skipped=mode == GROUP_MODE_NONE,
             )
             session.commit()
             read = read_job_uploads(session, job_id)
         for upload_id in upload_ids:
             await self._enqueue(upload_id)
         await self._publish(
+            # 事件名按归集方式分：「不归集」没有归集可开始，发一个在说归集的事件
+            # 会让界面上一个不存在的归集动起来。
             {"type": "bili_season_queued", "job_id": job_id, "season_id": season.id, "count": len(upload_ids)}
+            if mode != GROUP_MODE_NONE
+            else {"type": "bili_collection_queued", "job_id": job_id, "count": len(upload_ids)}
         )
         return read
 
@@ -667,20 +743,32 @@ class BiliManager:
         title: str,
         desc: str,
         upload_ids: list[str],
+        pin_season_id: int | None = None,
+        skipped: bool = False,
     ) -> BiliSeason:
         season = next(iter(list_seasons(session, job_id)), None)
         if season is None:
             season = BiliSeason(id=_new_id(), job_id=job_id)
         # `season_id` **不清空**：重投时归集要回到同一个合集，重新建一个会留下两个同名合集。
+        # `pin_season_id` 是唯一例外 —— 它是用户**明确选了**「加入已有合集」，
+        # 这时归集阶段必须听新选择，不能被上一次投稿留下的编号挡住
+        # （否则用户从「加入已有 A」改成「加入已有 B」，加的还会是 A）。
+        season.season_id = pin_season_id or season.season_id
         season.title = title or season.title
         season.desc = desc or season.desc
-        season.status = BiliSeasonStatus.pending.value
+        # 「不归集」落成**终态**而不是 `pending`：
+        # `_maybe_group` 只自动归集 `pending`，所以这个状态的作用就是让那批稿件投完就停下；
+        # 同时它给界面一个明确的「未归集」可显示 —— 什么都不落库会让用户看到空白，
+        # 分不清是「没归集」还是「还没开始归」。
+        season.status = (
+            BiliSeasonStatus.skipped.value if skipped else BiliSeasonStatus.pending.value
+        )
         season.upload_ids_json = json.dumps(upload_ids)
         season.error = None
         season.advice = None
         season.log_tail = None
         season.started_at = None
-        season.finished_at = None
+        season.finished_at = utc_now() if skipped else None
         season.updated_at = utc_now()
         session.add(season)
         return season

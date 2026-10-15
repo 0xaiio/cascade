@@ -142,6 +142,7 @@ class FakeBiliTransport:
         tv_confirm_error: Exception | None = None,
         tv_confirm_code: int = 0,
         tv_confirm_message: str = "ok",
+        seasons: list[dict[str, Any]] | None = None,
     ) -> None:
         self.archives = [dict(DEFAULT_ARCHIVE)] if archives is UNSET else list(archives or [])
         # 稿件列表有平台侧延迟。`archives_ok_after=N` 让**前 N 次**读取失败、之后成功，
@@ -153,6 +154,12 @@ class FakeBiliTransport:
         )
         self.account = {"mid": 42, "uname": "测试账号"} if account is UNSET else account
         self.season_id = season_id
+        # 合集列表的**内层**对象（`{"season": {...}}` 的那个 `...`）。默认给一个合集，
+        # 测「账号没有合集」时传 `[]`。归一层对缺字段的容忍（见 `normalize_season_option`）
+        # 正是要用这些不完整对象来压。
+        self.seasons = (
+            [{"id": self.season_id, "title": "已有合集"}] if seasons is None else list(seasons)
+        )
         self.season_add_error = season_add_error
         self.episodes_error = episodes_error
         self.comment_code = comment_code
@@ -289,7 +296,7 @@ class FakeBiliTransport:
                 raise self.episodes_error
             return self._json({"code": 0, "data": {}})
         if url.endswith("/x2/creative/web/seasons"):
-            return self._json({"code": 0, "data": {"seasons": [{"season": {"id": self.season_id, "title": "已有合集"}}]}})
+            return self._json({"code": 0, "data": {"seasons": [{"season": row} for row in self.seasons]}})
         if url.endswith("/x/v2/reply/main"):
             mode = int((params or {}).get("mode") or 3)
             rows = self.reply_pages.get(mode, self.replies)

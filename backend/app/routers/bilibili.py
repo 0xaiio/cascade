@@ -24,8 +24,10 @@ from ..bili_manager import BiliManager, BiliPreconditionError, build_prefill
 from ..bili_meta import (
     MetadataTemplate,
     UploadMetadata,
+    normalize_group_mode,
     validate as validate_metadata,
     validate_comment,
+    validate_group_choice,
 )
 from ..bili_read_model import read_all_job_uploads
 from ..bili_upload import UploadTarget, validate_collection
@@ -41,6 +43,7 @@ from ..schemas import (
     BiliPrefillRead,
     BiliQrcodeRead,
     BiliRetryRead,
+    BiliSeasonListRead,
     BiliSeasonRetryRead,
     BiliStatusRead,
     BiliUploadCreate,
@@ -205,6 +208,17 @@ async def bili_create_upload(
     return _manager(ctx).job_uploads(session, job.id)
 
 
+@router.get("/api/bilibili/seasons", response_model=BiliSeasonListRead)
+async def bili_list_seasons(ctx: ContextDep) -> BiliSeasonListRead:
+    """账号下的已有合集，供投稿界面下拉选择。
+
+    **未登录也返回 200**（只是列表为空并带上原因）：这是界面上一个可选功能的输入，
+    不是一次必须成功的动作。用 401/409 逼前端处理异常分支，只会让「想归集但没登录」
+    这种最常见的情况显示成一句报错，而不是引导去登录。
+    """
+    return await _manager(ctx).account_seasons()
+
+
 @router.post("/api/bilibili/collections", response_model=BiliJobUploadsRead)
 async def bili_create_collection(
     payload: BiliCollectionCreate, session: SessionDep, ctx: ContextDep
@@ -228,6 +242,21 @@ async def bili_create_collection(
         copyright=payload.template.copyright,
     )
     problems = validate_collection(template, targets, job_title=job.title)
+    # 归集决策先于合集本身的校验报出来：用户可能刚把「新建」改成「加入已有」
+    # 却忘了选具体是哪个，这时候先报「没选合集」比先报第 3 条标题超限有用。
+    #
+    # **校验用原始输入而不是 `normalize_group_mode` 的结果**：先把非法值修成 `new`，
+    # 下面的校验就永远看不到它，一个手滑写坏的 `group_mode` 会被静默当成「新建合集」。
+    # 归一只用于**通过校验之后**真正执行的那一步。
+    group_problems = validate_group_choice(
+        group_mode=payload.group_mode,
+        season_id=payload.season_id,
+        season_title=payload.season_title,
+        count=len(targets),
+    )
+    if group_problems:
+        raise HTTPException(status_code=400, detail=group_problems[0])
+    mode = normalize_group_mode(payload.group_mode)
     _reject_problems(problems + validate_comment(payload.comment))
     season_title = (payload.season_title or job.title).strip()
     try:
@@ -240,6 +269,8 @@ async def bili_create_collection(
             season_desc=payload.season_desc,
             make_cover=payload.make_cover,
             comment=payload.comment,
+            group_mode=mode,
+            season_id=payload.season_id,
         )
     except BiliPreconditionError as exc:
         raise _not_ready(exc) from exc

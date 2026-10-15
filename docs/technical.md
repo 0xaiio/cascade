@@ -195,17 +195,17 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 
 ### 频控是账号级的
 
-`code 601 您上传视频过快` 是**账号侧**的临时频控，不是本机参数不对。正确处理是等几分钟、原样重投，不要靠改标题/加标签去硬刷 —— 那只会让频控更久。[classify_failure](../backend/app/bili_policy.py#L241) 把它归成一条明确的建议，合集批量投稿之间也留了间隔（`DEFAULT_COLLECTION_GAP_SECONDS`）。这条**无法在本机消解**，只能等。
+`code 601 您上传视频过快` 是**账号侧**的临时频控，不是本机参数不对。正确处理是等几分钟、原样重投，不要靠改标题/加标签去硬刷 —— 那只会让频控更久。[classify_failure](../backend/app/bili_policy.py#L244) 把它归成一条明确的建议，合集批量投稿之间也留了间隔（`DEFAULT_COLLECTION_GAP_SECONDS`）。这条**无法在本机消解**，只能等。
 
 ### 版权与来源：`--copyright` 的默认值是错的
 
 `--copyright` 是**必填**语义（`1` 原创/自制、`2` 转载），而 **`biliup upload` 自己的默认值是 `1`（自制）** —— 早先的实现照抄了这个默认值，等于把每一单都填成「自制」。B站 对「把转载标成自制」是有处置的，所以现在是**默认转载**（`DEFAULT_COPYRIGHT`），由用户在表单里改。
 
-关键判据在 [effective_source](../backend/app/bili_meta.py#L129)：**只有转载稿才有来源**，自制稿即便在界面上带着值也不提交 `--source`。不这么收口的话，「界面上有值」与「命令里带了这个参数」会各写一遍，迟早出现落库的快照与实发参数不一致（`source` 是转载稿专有字段，自制稿带了反而可能被判成误标）。
+关键判据在 [effective_source](../backend/app/bili_meta.py#L186)：**只有转载稿才有来源**，自制稿即便在界面上带着值也不提交 `--source`。不这么收口的话，「界面上有值」与「命令里带了这个参数」会各写一遍，迟早出现落库的快照与实发参数不一致（`source` 是转载稿专有字段，自制稿带了反而可能被判成误标）。
 
 **合集模板上没有共用来源**，这是有意的：合集里每条视频的出处都不同，逐条渲染时各取该条自己的 `source_url`。界面上相应地只在**单视频**场景显示来源输入框；模板的投影刻意留空而不是回填第一条 —— 回填一个看着像「所有条目都用它」的值，正是要避免的误导。
 
-转载稿缺来源会被平台退回来（错误码 `21004 Missing source for reprint`），所以校验拦在提交之前：服务端 [validate](../backend/app/bili_meta.py#L277) 是权威，界面另写一份同判据的检查，让用户在输入框旁边就看到，而不是点了提交再吃一个只有错误码的 400。
+转载稿缺来源会被平台退回来（错误码 `21004 Missing source for reprint`），所以校验拦在提交之前：服务端 [validate](../backend/app/bili_meta.py#L334) 是权威，界面另写一份同判据的检查，让用户在输入框旁边就看到，而不是点了提交再吃一个只有错误码的 400。
 
 ### 合集（season）的两个端点参数风格相反
 
@@ -214,7 +214,37 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 - **创建**：`POST /x2/creative/web/season/add` —— **form-urlencoded** 传 `title/desc/cover/season_price=0/csrf`，返回 `data` 即 `season_id`。
 - **加稿**：`POST /x2/creative/web/season/section/episodes/add` —— **JSON body**，字段是 camelCase 的 `sectionId` + `episodes[{aid, cid, title, charging_pay}]`，而 **`csrf` 走 query 串**。
 
-两者参数风格正好相反，照抄前者的写法会静默失败。`cid` 只能靠 `GET /x/web-interface/view?bvid=` 拿到，所以归集前对每个已发布稿件都多一次详情请求。「创建」有人工审核，通过前平台上可能看不到，[SEASON_SUBMITTED_NOTE](../backend/app/bili_policy.py#L274) 会把这点说给用户。**重试不重复建合集**：归集失败时保留已拿到的 `season_id`，重试只补加缺口 —— 重复建合集在平台侧不可撤销，比「多等一次」贵得多。
+两者参数风格正好相反，照抄前者的写法会静默失败。`cid` 只能靠 `GET /x/web-interface/view?bvid=` 拿到，所以归集前对每个已发布稿件都多一次详情请求。「创建」有人工审核，通过前平台上可能看不到，[SEASON_SUBMITTED_NOTE](../backend/app/bili_policy.py#L277) 会把这点说给用户。**重试不重复建合集**：归集失败时保留已拿到的 `season_id`，重试只补加缺口 —— 重复建合集在平台侧不可撤销，比「多等一次」贵得多。
+
+### 归集方式：`season_id` 预置就是全部的「加入已有」
+
+界面上让用户选**新建合集 / 加入已有合集 / 不归集**，但后端的新逻辑只有一行赋值：
+`submit_collection` 把用户选中的编号写进 [BiliSeason.season_id](../backend/app/models.py#L175)，
+而 [_group_work](../backend/app/bili_manager.py#L1099) 本来就读它当 `existing_season_id`
+并据此跳过 `create_season`。**复用既有的「重试不重复建合集」机制，而不是另开一条归集分支** ——
+另开一条就要把「建集 + 加集 + 失败重试 + 状态收敛」再实现一遍。
+
+三处容易写反的地方：
+
+- **`new` 模式下 `season_id` 必须保持为空**。它一旦被预置成任何值（哪怕是对的 `0`），
+  `_group_work` 就会跳过建集、对着一个不存在的编号加视频。所以这个字段不能「顺手填个默认值」。
+- **用户显式选择必须覆盖上一轮遗留的编号**。[_upsert_season](../backend/app/bili_manager.py#L738)
+  既有的「`season_id` 不清空」是为了重试不重复建合集；照搬到「用户从加入 A 改成加入 B」上，
+  就会静默地继续往 A 里加 —— 用户选了什么完全不起作用。
+- **校验必须看原始输入，不能先归一**。`normalize_group_mode` 把非法值修成 `new` 之后再校验，
+  等于把校验废掉了：一个手滑写坏的 `group_mode` 会被静默执行。归一只用于**通过校验之后**
+  真正执行的那一步。（这条是被 `test_an_unknown_group_mode_is_400_not_silently_corrected`
+  抓出来的，不是推理出来的。）
+
+**「读不到」与「真的没有」必须分开**。[list_seasons](../backend/app/bili_api.py#L216) 自己吞掉
+网络异常返回空表，所以未登录时由 manager 按登录态判断、把原因写进 `BiliSeasonListRead.error`。
+不去伪造那个区别，是因为界面上一旦显示成「这个账号还没有合集」，用户就会跑去新建一个重复的。
+同理，没有编号的合集整条跳过（归集要按编号提交），缺标题的保留并用编号兜名。
+
+**「不归集」落成终态 [skipped](../backend/app/models.py#L114)** 而不是 `pending`：
+[_maybe_group](../backend/app/bili_manager.py#L1072) 只自动归集 `pending`，留 `pending` 会让
+「不归集」根本不管用，且界面上挂一个永远不会结束的徽标。但记录**照建** —— 不落库的话界面上
+什么都不显示，用户分不清是「没归集」还是「还没开始归」。
 
 ### 评论幂等
 
@@ -228,7 +258,7 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 
 ### 表单与硬限
 
-预填与硬限的权威值都在 [bili_meta.py](../backend/app/bili_meta.py)：标题 ≤ 80、简介 ≤ 250、标签逗号分隔总长 < 200（最多 10 个、单个 ≤ 20）、评论 ≤ 1000（`COMMENT_MAX`）。默认分区 `tid=122`（野生技术协会）。合集按模板批量生成时，`{index}` / `{title}` 这类占位符在 [render](../backend/app/bili_meta.py#L202) 里替换，未知占位符由 `unknown_placeholders` 挑出来单独报错。前端的预填数字全部来自服务端，不写死在组件里。
+预填与硬限的权威值都在 [bili_meta.py](../backend/app/bili_meta.py)：标题 ≤ 80、简介 ≤ 250、标签逗号分隔总长 < 200（最多 10 个、单个 ≤ 20）、评论 ≤ 1000（`COMMENT_MAX`）。默认分区 `tid=122`（野生技术协会）。合集按模板批量生成时，`{index}` / `{title}` 这类占位符在 [render](../backend/app/bili_meta.py#L259) 里替换，未知占位符由 `unknown_placeholders` 挑出来单独报错。前端的预填数字全部来自服务端，不写死在组件里。
 
 ## 文件删除语义
 

@@ -203,3 +203,52 @@ npx tsc --noEmit
    且 B站 上**没有**多出第二条。
 
 任何一步的界面文案里出现 `season` / `tid` / `csrf` / `unverified` 这类术语，都算文案不合格。
+
+## 7. 归集方式的测试
+
+后端 **848 passed**（823 → 848，+25）、前端 **114 passed**（105 → 114，+9），
+`tsc --noEmit` 退出码 0。四项检查（`check_layers` / `check_api_contract` / `docs.py check` /
+`check_doc_anchors`）全过。
+
+新增用例钉的判据，按「写错了会不会被用户发现」排：
+
+| 用例 | 钉住什么 |
+| --- | --- |
+| `test_join_an_existing_collection_never_creates_a_new_one` | `season/add` **一次都不能调** |
+| `test_creating_a_collection_still_leaves_season_id_empty...` | 反向：提交后 `season_id` 仍为 `None`（预置成 0 就会跳过建集） |
+| `test_switching_the_target_collection_overrides_the_previous_one` | 两次 `sectionId` 依次是 111 / 222 |
+| `test_choosing_no_collection_leaves_nothing_pending` | 稿件照投、**一次都不建集**、记录落终态 |
+| `test_switching_to_no_collection_stops_a_previous_pending_grouping` | 上一轮的 `pending` 被停掉 |
+| `test_list_seasons_reports_the_login_problem_...` | 「读不到」与「真的没有」是两句话 |
+| `test_a_new_collection_must_not_carry_a_season_id` 等三条 | 矛盾各自报错，不静默取其一 |
+| 前端 `never sends a stale season id alongside 新建合集` | 切回新建时编号必须被撤掉 |
+| `test_manager_itself_refuses_to_join_without_an_id` | `submit_collection` 是**公开方法**，路由那道 400 不是唯一防线 |
+
+### 三处「实测推翻假设」
+
+**1. 路由里先归一再校验，等于把校验废掉了。**
+`test_an_unknown_group_mode_is_400_not_silently_corrected` 第一次跑是红的（200 不是 400）。
+原因是路由先 `mode = normalize_group_mode(payload.group_mode)` 把非法值修成 `new`，
+再拿 `mode` 去校验 —— 校验永远看不到非法值。**修正：校验用原始输入，归一只用于通过校验之后
+真正执行的那一步。** 这条教训可复用：任何「先修正再校验」的顺序都会让校验失效。
+
+**2. `skipped` 我先实现成了「不落库」，被自己的测试判成缺陷。**
+第一版想的是「不归集就别建记录，省得留个挂着的徽标」，于是 `test_choosing_no_collection_...`
+里 `harness.season("job2")` 直接 `NoResultFound`。想清楚之后改了：不落库时界面上什么都不显示，
+用户分不清是「没归集」还是「还没开始归」。**终态记录 + 明确文案** 才同时解决两件事 ——
+不会自动归集（`_maybe_group` 只认 `pending`），也有一句能显示的话。
+
+**3. 测试辅助函数的「顺手重置」会悄悄吃掉调用方的参数。**
+新增的合集方式用例要先造一份「条目全部就绪」的预填（默认夹具刻意留一条未就绪的，
+提交按钮一直是灰的）。我第一版把这份预填写在辅助函数里，而辅助函数内部又无条件
+`mockState.biliPrefill = biliPrefillCollectionPayload` —— 于是 4 个用例全红，
+症状是「找不到『开始上传全部』按钮」，看着像组件坏了。
+试过 `??=` 也不对：`mockState` 每用例被 harness 重置成**单视频**预填，
+「保留调用方设过的值」会让所有既有用例开成单视频表单。
+**最终改成显式传参**（`openCollectionDialog(prefill)`），并在函数里写明为什么不能做小聪明。
+
+### 未验证（与本文档其他部分同一条纪律）
+
+真实账号上的**三条路径都还没跑过**：加入已有合集、新建合集、不归集。
+B站 对合集有人工审核，所以归集类断言的自动化边界止于「发出了哪些请求、
+落了什么状态」，「平台侧是否接受」需要有真实账号才能验。

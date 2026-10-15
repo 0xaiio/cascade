@@ -436,6 +436,184 @@ async def test_submit_collection_keeps_the_previous_season_id_on_a_retry(tmp_pat
     await harness.manager.stop()
 
 
+# ================================================================ 归集方式
+async def test_join_an_existing_collection_never_creates_a_new_one(tmp_path):
+    """「加入已有合集」的全部实现就是**预先把平台编号写进归集记录**：
+    `_group_work` 读它当 `existing_season_id`，于是跳过 `create_season` 只补加视频。
+    复用既有的「重试不重复建合集」机制，而不是另开一条分支。
+    """
+    harness = make_harness(
+        tmp_path,
+        transport=FakeBiliTransport(archives=[{"aid": 1, "bvid": "BV1", "title": TITLE, "state": 0}]),
+    )
+    items = harness.seed_job("job2", "合集任务", 1)
+    target = UploadTarget(index=1, title=TITLE, video_path=Path(items[0]["path"]), item_id=items[0]["id"])
+    await harness.manager.submit_collection(
+        job_id="job2",
+        template=MetadataTemplate(title_template="{title}", desc_template="{title}", tags="标签", tid="122"),
+        targets=[target],
+        paths=[Path(items[0]["path"])],
+        season_title="这个标题不该被用上",
+        season_desc="",
+        make_cover=False,
+        comment="",
+        group_mode="existing",
+        season_id=4242,
+    )
+    await drain(harness.manager)
+
+    season = harness.season("job2")
+    assert season.status == BiliSeasonStatus.grouped.value
+    assert season.season_id == 4242
+    # 关键断言：**一个都没有建**。建了就是两个同名合集，而用户只看见自己选的那个。
+    assert harness.transport.called("/season/add") == 0
+    assert harness.transport.called("/season/section/episodes/add") == 1
+    await harness.manager.stop()
+
+
+async def test_creating_a_collection_still_leaves_season_id_empty_so_the_grouping_builds_it(tmp_path):
+    """与上一条互为反向断言。
+
+    这里的判据是 **`season_id` 在提交后必须仍是 `None`**：它一旦被预置成任何值
+    （哪怕是对的 0），`_group_work` 就会跳过建合集，对着不存在的编号加视频。
+    """
+    harness = make_harness(
+        tmp_path,
+        transport=FakeBiliTransport(archives=[{"aid": 1, "bvid": "BV1", "title": TITLE, "state": 0}]),
+    )
+    items = harness.seed_job("job2", "合集任务", 1)
+    target = UploadTarget(index=1, title=TITLE, video_path=Path(items[0]["path"]), item_id=items[0]["id"])
+    await harness.manager.submit_collection(
+        job_id="job2",
+        template=MetadataTemplate(title_template="{title}", desc_template="{title}", tags="标签", tid="122"),
+        targets=[target],
+        paths=[Path(items[0]["path"])],
+        season_title="合集任务",
+        season_desc="说明",
+        make_cover=False,
+        comment="",
+        group_mode="new",
+    )
+    await drain(harness.manager)
+
+    assert harness.season("job2").season_id == 990011
+    assert harness.transport.called("/season/add") == 1
+    await harness.manager.stop()
+
+
+async def test_switching_the_target_collection_overrides_the_previous_one(tmp_path):
+    """用户从「加入 A」改成「加入 B」时，必须加到 B。
+
+    `_upsert_season` 的「`season_id` 不清空」规则是为了**重试**不重复建合集；
+    照搬到「换了目标合集」上，就会静默地继续往 A 里加 —— 用户选了什么完全不起作用。
+    """
+    harness = make_harness(
+        tmp_path,
+        transport=FakeBiliTransport(archives=[{"aid": 1, "bvid": "BV1", "title": TITLE, "state": 0}]),
+    )
+    items = harness.seed_job("job2", "合集任务", 1)
+    target = UploadTarget(index=1, title=TITLE, video_path=Path(items[0]["path"]), item_id=items[0]["id"])
+
+    async def submit(season_id: int) -> None:
+        await harness.manager.submit_collection(
+            job_id="job2",
+            template=MetadataTemplate(title_template="{title}", desc_template="{title}", tags="标签", tid="122"),
+            targets=[target],
+            paths=[Path(items[0]["path"])],
+            season_title="合集任务",
+            season_desc="说明",
+            make_cover=False,
+            comment="",
+            group_mode="existing",
+            season_id=season_id,
+        )
+        await drain(harness.manager)
+
+    await submit(111)
+    await submit(222)
+
+    assert harness.season("job2").season_id == 222
+    # 加进去的必须是 222 那个：两次归集的 sectionId 都得记下来。
+    # `sectionId` 走 **json_body**（见 `bili_api.add_episodes`：csrf 在 query，参数在正文）。
+    sections = [
+        call["json_body"]["sectionId"]
+        for call in harness.transport.calls
+        if call["url"].endswith("/season/section/episodes/add")
+    ]
+    assert sections == [111, 222]
+    await harness.manager.stop()
+
+
+async def test_choosing_no_collection_leaves_nothing_pending(tmp_path):
+    """「不归集」必须落成终态。
+
+    留着 `pending` 的归集记录有两个后果，都很糟：`_maybe_group` 看到 `pending` 就自动归集，
+    于是「不归集」根本不管用；界面上还会挂一个永远不会结束的「正在归集」。
+    """
+    harness = make_harness(
+        tmp_path,
+        transport=FakeBiliTransport(archives=[{"aid": 1, "bvid": "BV1", "title": TITLE, "state": 0}]),
+    )
+    items = harness.seed_job("job2", "合集任务", 1)
+    target = UploadTarget(index=1, title=TITLE, video_path=Path(items[0]["path"]), item_id=items[0]["id"])
+    await harness.manager.submit_collection(
+        job_id="job2",
+        template=MetadataTemplate(title_template="{title}", desc_template="{title}", tags="标签", tid="122"),
+        targets=[target],
+        paths=[Path(items[0]["path"])],
+        season_title="合集任务",
+        season_desc="说明",
+        make_cover=False,
+        comment="",
+        group_mode="none",
+    )
+    await drain(harness.manager)
+
+    season = harness.season("job2")
+    assert season.status == BiliSeasonStatus.skipped.value
+    assert harness.transport.called("/season/add") == 0
+    assert harness.transport.called("/season/section/episodes/add") == 0
+    # 稿件本身照投 —— 「不归集」说的是合集，不是「不投稿」。
+    assert [row.status for row in harness.uploads("job2")] == [BiliUploadStatus.published.value]
+    await harness.manager.stop()
+
+
+async def test_switching_to_no_collection_stops_a_previous_pending_grouping(tmp_path):
+    """同一任务重投时从「新建」改成「不归集」，上一条归集记录不能留在 `pending`。
+
+    这是「不归集」最容易漏的一处：新建了记录又忘了把它停掉，稿件投完后 `_maybe_group`
+    照样会去建合集 —— 用户明明选了不归集。
+    """
+    harness = make_harness(
+        tmp_path,
+        transport=FakeBiliTransport(archives=[{"aid": 1, "bvid": "BV1", "title": TITLE, "state": 0}]),
+    )
+    items = harness.seed_job("job2", "合集任务", 1)
+    target = UploadTarget(index=1, title=TITLE, video_path=Path(items[0]["path"]), item_id=items[0]["id"])
+
+    async def submit(mode: str) -> None:
+        await harness.manager.submit_collection(
+            job_id="job2",
+            template=MetadataTemplate(title_template="{title}", desc_template="{title}", tags="标签", tid="122"),
+            targets=[target],
+            paths=[Path(items[0]["path"])],
+            season_title="合集任务",
+            season_desc="说明",
+            make_cover=False,
+            comment="",
+            group_mode=mode,
+        )
+        await drain(harness.manager)
+
+    await submit("new")
+    created_before = harness.transport.called("/season/add")
+    await submit("none")
+
+    assert harness.season("job2").status == BiliSeasonStatus.skipped.value
+    assert harness.transport.called("/season/add") == created_before
+    await harness.manager.stop()
+
+
 # ================================================================ 重试的三条路
 async def test_retry_on_a_published_upload_does_nothing(tmp_path):
     """幂等：已经成功的稿件点重试**不能**再投一次。"""
@@ -1123,4 +1301,35 @@ async def test_a_zero_gap_never_sleeps(tmp_path):
     harness.manager._last_upload_finished_at = time.monotonic()
     harness.manager._respect_gap()
     assert harness.sleeper.waits == []
+    await harness.manager.stop()
+
+
+async def test_manager_itself_refuses_to_join_without_an_id(tmp_path):
+    """`submit_collection` 是公开方法，路由那道 400 不是唯一防线。
+
+    漏掉编号时若无条件采纳 `existing`，归集记录会带着 `None` 的 `season_id` 落进
+    「建集」分支 —— 用户明明选了「加入已有」，却凭空多出一个合集。
+    """
+    harness = make_harness(
+        tmp_path,
+        transport=FakeBiliTransport(archives=[{"aid": 1, "bvid": "BV1", "title": TITLE, "state": 0}]),
+    )
+    items = harness.seed_job("job2", "合集任务", 1)
+    target = UploadTarget(index=1, title=TITLE, video_path=Path(items[0]["path"]), item_id=items[0]["id"])
+    with pytest.raises(BiliPreconditionError) as caught:
+        await harness.manager.submit_collection(
+            job_id="job2",
+            template=MetadataTemplate(title_template="{title}", desc_template="{title}", tags="标签", tid="122"),
+            targets=[target],
+            paths=[Path(items[0]["path"])],
+            season_title="合集任务",
+            season_desc="",
+            make_cover=False,
+            comment="",
+            group_mode="existing",
+            season_id=None,
+        )
+    assert caught.value.code == "missing_season_id"
+    # 拒绝时不该留下任何痕迹：没建记录，也没投递。
+    assert harness.transport.called("/season/add") == 0
     await harness.manager.stop()

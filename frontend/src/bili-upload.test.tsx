@@ -8,6 +8,7 @@ import "./styles.css";
 import {
   biliJobUploadsPayload,
   biliPrefillCollectionPayload,
+  biliPrefillSinglePayload,
   biliStatusLoggedInPayload,
   biliStatusPayload,
   biliUploadFailedPayload,
@@ -362,16 +363,35 @@ describe("App · B站 上传表单（单视频）", () => {
 
 describe("App · B站 上传表单（合集）", () => {
   /** 打开合集表单：点条目行上的按钮（它只要求该条目已下载好）。 */
-  async function openCollectionDialog() {
+  async function openCollectionDialog(prefill: typeof mockState.biliPrefill = biliPrefillCollectionPayload) {
     const user = userEvent.setup();
     mockState.jobs = [downloadedPlaylistJob()];
-    mockState.biliPrefill = biliPrefillCollectionPayload;
+    // **显式赋值，不在这里做「保留调用方设过的值」的小聪明**：`biliPrefill` 每用例被
+    // harness 重置成单视频预填，本函数若只在它是 `null` 时才赋值，那些依赖
+    // 「本函数会把它改成合集预填」的既有用例会开成单视频表单 —— 症状是找不到
+    // 「把整个合集上传到 B 站」，看着像组件坏了，其实是自己把参数弄丢了。
+    mockState.biliPrefill = prefill;
     mockState.biliSubmitResult = jobUploads();
     render(<App />);
     // playlist 正在跑 → 默认展开，条目行上的按钮可直接点。
     const button = await screen.findByRole("button", { name: /上传到 B 站 Part one/ });
     await user.click(button);
     return { user, dialog: await screen.findByRole("dialog") };
+  }
+
+  /**
+   * 打开合集表单，并把**所有条目都标成就绪**。
+   *
+   * 默认夹具刻意留着一条未就绪的条目（界面上能看到「还没下载好」的提示），
+   * 那会让提交按钮一直是灰的 —— 归集方式的用例关心的是另一个维度，
+   * 不该被这个挡着。
+   */
+  async function openReadyCollectionDialog(seasonList?: typeof mockState.biliSeasonList) {
+    if (seasonList !== undefined) mockState.biliSeasonList = seasonList;
+    return openCollectionDialog({
+      ...biliPrefillCollectionPayload,
+      items: biliPrefillCollectionPayload.items.map((item) => ({ ...item, ready: true }))
+    });
   }
 
   test("fills the template and previews what each video will become", async () => {
@@ -446,11 +466,145 @@ describe("App · B站 上传表单（合集）", () => {
       season_title: "Playlist batch",
       season_desc: "Playlist batch（共 2 个视频，由本机下载工作流自动上传）",
       make_cover: true,
-      comment: "本视频由个人工作流同步上传，欢迎在评论区交流。"
+      comment: "本视频由个人工作流同步上传，欢迎在评论区交流。",
+      // 归集方式默认「新建」—— 改动前的行为就是每次投完自动建一个。
+      group_mode: "new"
     });
     await waitFor(() =>
       expect(notice()).toHaveTextContent("已开始上传《Playlist batch》的 2 个视频，逐个投完后会自动归入同一个合集。")
     );
+  });
+
+  // ---------------------------------------------------------------- 归集方式
+
+  const twoSeasons = {
+    seasons: [
+      { season_id: 501, title: "C++ Weekly", desc: "每周一更", cover_url: "http://c/1.jpg", total: 22 },
+      { season_id: 502, title: "数据库系统讲义", desc: "", cover_url: "", total: 0 }
+    ],
+    error: "",
+    advice: ""
+  };
+
+  test("defaults to creating a new collection and prefills its name with the job title", async () => {
+    const { dialog } = await openReadyCollectionDialog(twoSeasons);
+
+    expect(within(dialog).getByRole("radio", { name: "新建合集" })).toBeChecked();
+    expect(within(dialog).getByLabelText("合集名")).toHaveValue("Playlist batch");
+    // 「加入已有」的下拉与「不归集」都不该出现 —— 单选三项互斥。
+    expect(within(dialog).queryByLabelText("加进哪个合集")).not.toBeInTheDocument();
+  });
+
+  test("lists the account's own collections when 归入已有合集 is picked", async () => {
+    const { user, dialog } = await openReadyCollectionDialog(twoSeasons);
+
+    await user.click(within(dialog).getByRole("radio", { name: "加入已有合集" }));
+
+    const select = await within(dialog).findByLabelText("加进哪个合集");
+    expect(within(select).getByRole("option", { name: /C\+\+ Weekly（现有 22 个视频）/ })).toBeInTheDocument();
+    expect(within(select).getByRole("option", { name: /数据库系统讲义/ })).toBeInTheDocument();
+    // 没选具体合集之前不能提交 —— 服务端会拒（`validate_group_choice`）。
+    expect(within(dialog).getByRole("button", { name: "开始上传全部" })).toBeDisabled();
+    expect(within(dialog).getByText("选了「加入已有合集」但还没选是哪个合集")).toBeInTheDocument();
+  });
+
+  test("submits the chosen season id and drops it again when switching back to 新建", async () => {
+    const { user, dialog } = await openReadyCollectionDialog(twoSeasons);
+
+    await user.click(within(dialog).getByRole("radio", { name: "加入已有合集" }));
+    await user.selectOptions(await within(dialog).findByLabelText("加进哪个合集"), "502");
+    // 选中后显示该合集自己的简介（不是用户能改的东西）。
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "开始上传全部" })).toBeEnabled());
+    await user.click(within(dialog).getByRole("button", { name: "开始上传全部" }));
+
+    await waitFor(() => expect(mockState.biliCollectionBodies).toHaveLength(1));
+    expect(mockState.biliCollectionBodies[0]).toMatchObject({
+      group_mode: "existing",
+      season_id: 502
+    });
+  });
+
+  test("never sends a stale season id alongside 新建合集", async () => {
+    // 判据：`group_into_season` 的优先级是「有 season_id 就不建合集」。
+    // 带着残留编号提交会让「新建合集」悄悄变成往一个老合集里塞视频 ——
+    // 所以前端必须在切回新建时把它撤掉。
+    const { user, dialog } = await openReadyCollectionDialog(twoSeasons);
+
+    await user.click(within(dialog).getByRole("radio", { name: "加入已有合集" }));
+    await user.selectOptions(await within(dialog).findByLabelText("加进哪个合集"), "502");
+    await user.click(within(dialog).getByRole("radio", { name: "新建合集" }));
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "开始上传全部" })).toBeEnabled());
+    await user.click(within(dialog).getByRole("button", { name: "开始上传全部" }));
+
+    await waitFor(() => expect(mockState.biliCollectionBodies).toHaveLength(1));
+    expect(mockState.biliCollectionBodies[0]).toMatchObject({ group_mode: "new" });
+    expect(mockState.biliCollectionBodies[0]).not.toHaveProperty("season_id");
+  });
+
+  test("submits 不归集 without asking for a season at all", async () => {
+    const { user, dialog } = await openReadyCollectionDialog(twoSeasons);
+
+    await user.click(within(dialog).getByRole("radio", { name: "不归集" }));
+
+    // 「不归集」时连合集名输入框都不该出现 —— 没有要填的东西。
+    expect(within(dialog).queryByLabelText("合集名")).not.toBeInTheDocument();
+    expect(within(dialog).queryByLabelText("加进哪个合集")).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "开始上传全部" }));
+
+    await waitFor(() => expect(mockState.biliCollectionBodies).toHaveLength(1));
+    expect(mockState.biliCollectionBodies[0]).toMatchObject({ group_mode: "none" });
+    expect(notice()).toHaveTextContent("不归集");
+  });
+
+  test("lets the user rename a collection they are about to create", async () => {
+    const { user, dialog } = await openReadyCollectionDialog(twoSeasons);
+
+    const titleBox = within(dialog).getByLabelText("合集名");
+    await user.clear(titleBox);
+    await user.type(titleBox, "我的合集");
+    await user.click(within(dialog).getByRole("button", { name: "开始上传全部" }));
+
+    await waitFor(() => expect(mockState.biliCollectionBodies).toHaveLength(1));
+    expect(mockState.biliCollectionBodies[0]).toMatchObject({ season_title: "我的合集" });
+  });
+
+  test("explains why there is nothing to pick and points at 新建 when the account has no collection", async () => {
+    const { user, dialog } = await openReadyCollectionDialog({ seasons: [], error: "", advice: "" });
+
+    await user.click(within(dialog).getByRole("radio", { name: "加入已有合集" }));
+
+    expect(await within(dialog).findByText(/这个账号下还没有合集/)).toBeInTheDocument();
+    expect(within(dialog).getByRole("radio", { name: "新建合集" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "开始上传全部" })).toBeDisabled();
+  });
+
+  test("shows the login advice instead of pretending the account has no collection", async () => {
+    // 「没登录」与「真的没有合集」在界面上必须是两句话：都显示成空列表会让用户
+    // 以为是自己还没建过合集，于是跑去新建一个重复的。
+    const { user, dialog } = await openReadyCollectionDialog({
+      seasons: [],
+      error: "还没有登录 B站",
+      advice: "点「扫码登录」用 B站 App 扫码，或导入一份已登录的 cookies.json"
+    });
+
+    await user.click(within(dialog).getByRole("radio", { name: "加入已有合集" }));
+
+    expect(await within(dialog).findByText("点「扫码登录」用 B站 App 扫码，或导入一份已登录的 cookies.json")).toBeInTheDocument();
+    expect(within(dialog).queryByText(/这个账号下还没有合集/)).not.toBeInTheDocument();
+  });
+
+  test("never renders the 归集方式 controls for a single video", async () => {
+    const user = userEvent.setup();
+    mockState.jobs = [downloadedJob()];
+    mockState.biliPrefill = biliPrefillSinglePayload;
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: /上传到 B 站/ }));
+    const dialog = await screen.findByRole("dialog");
+
+    // 单视频没有「归集」这回事 —— 加上去只会让用户去为一个不存在的概念做选择。
+    expect(within(dialog).queryByRole("radio", { name: "新建合集" })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("radiogroup", { name: "归集方式" })).not.toBeInTheDocument();
   });
 });
 

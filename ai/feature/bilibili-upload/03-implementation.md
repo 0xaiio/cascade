@@ -191,3 +191,35 @@
 在途，删完再写回就等于白删。要做到「删干净」得让 `BiliManager` 支持按 job 取消在途上传
 （当前只有 `stop()` 整体停 worker，没有按 job 的取消集合）。这属于下载队列的删除语义，
 已登记为 `ai/bug-fix` 候选，等排期。
+
+## 7. 归集方式（新建 / 加入已有 / 不归集）
+
+改动落在这些文件（`group_mode` 是贯穿线）：
+
+| 位置 | 做了什么 |
+| --- | --- |
+| `bili_meta.py` | `GROUP_MODE_*` 常量、`normalize_group_mode`、`normalize_season_option`、`validate_group_choice` |
+| `schemas.py` | `BiliSeasonOption` / `BiliSeasonListRead`；`BiliCollectionCreate` 增 `group_mode` / `season_id` |
+| `bili_manager.py` | `account_seasons()`；`submit_collection` 收 `group_mode` / `season_id`；`_upsert_season` 收 `pin_season_id` / `skipped` |
+| `routers/bilibili.py` | `GET /api/bilibili/seasons`；`POST /collections` 先校验归集决策再校验模板 |
+| `models.py` / `bili_policy.py` | 新终态 `BiliSeasonStatus.skipped` 与它的界面文案 |
+| `BiliUploadDialog.tsx` | 「归集方式」单选 + 合集名下拉 / 新建输入框 |
+| `App.tsx` / `api.ts` / `types.ts` | 开窗前并行读合集列表；提交时按方式决定带不带编号 |
+
+三处值得单独说的实现细节：
+
+**1. `season_id` 预置就是全部的「加入已有」。** `_upsert_season` 收到 `pin_season_id` 时直接写进
+`season.season_id`；`_group_work` 本来就读它当 `existing_season_id` 并据此跳过 `create_season`。
+所以新逻辑只有一行赋值，「不新建、只补加」由既有机制自动成立。
+
+**2. `pin_season_id` 是 `season_id or season.season_id` 里的第一个。**
+既有的「不清空」规则是为了**重试**不重复建合集；新选择必须覆盖，否则「从加入 A 改成加入 B」
+会静默继续往 A 里加。用户显式选择 > 上一轮遗留。
+
+**3. `skipped` 的记录照建。** 原先第一版实现是「不归集就什么都不落库」，
+被自己的测试判成缺陷：不落库时界面上什么都不显示，用户分不清是「没归集」还是「还没开始归」。
+改成**建记录 + 直接落终态**，两个问题同时解决 —— 不会自动归集（因为 `_maybe_group` 只认 `pending`），
+也有一句明确的「未归集（投稿时选了不归集）」可显示。
+
+前端侧一处顺带修掉的缺陷：`App.tsx` 原本把合集名硬传 `prefill.job_title`，
+所以弹窗里新加的「合集名」输入框**填了也不会生效**。新增的改名用例第一次跑就红在这里。

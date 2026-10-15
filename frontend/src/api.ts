@@ -1,6 +1,7 @@
 import type {
   AnalyzeResponse,
   ApiErrorDetail,
+  BiliGroupMode,
   BiliJobUploads,
   BiliJobUploadsSummary,
   BiliLoginPoll,
@@ -8,6 +9,7 @@ import type {
   BiliPrefill,
   BiliQrcode,
   BiliRetry,
+  BiliSeasonList,
   BiliSeasonRetry,
   BiliStatus,
   CookieHealth,
@@ -231,6 +233,16 @@ export function getBiliUploadsSummary(): Promise<BiliJobUploadsSummary> {
   return request<BiliJobUploadsSummary>("/api/bilibili/uploads/summary");
 }
 
+/**
+ * 账号下的已有合集，供投稿界面下拉选择。
+ *
+ * **未登录也返回 200**（列表为空 + `error` 说明原因），所以这里不做异常处理：
+ * 界面要显示那句原因，而不是把它变成一句「加载失败」。
+ */
+export function listBiliSeasons(): Promise<BiliSeasonList> {
+  return request<BiliSeasonList>("/api/bilibili/seasons");
+}
+
 export function getBiliJobUploads(jobId: string): Promise<BiliJobUploads> {
   return request<BiliJobUploads>(`/api/bilibili/uploads?job_id=${encodeURIComponent(jobId)}`);
 }
@@ -254,7 +266,9 @@ export function createBiliCollection(
   seasonTitle: string,
   seasonDesc: string,
   makeCover: boolean,
-  comment: string
+  comment: string,
+  groupMode: BiliGroupMode,
+  seasonId: number | null
 ): Promise<BiliJobUploads> {
   return request<BiliJobUploads>("/api/bilibili/collections", {
     method: "POST",
@@ -264,7 +278,11 @@ export function createBiliCollection(
       season_title: seasonTitle,
       season_desc: seasonDesc,
       make_cover: makeCover,
-      comment
+      comment,
+      group_mode: groupMode,
+      // `existing` 之外的场景**不提交**这个字段：带上一个残留编号会让服务端
+      // 按「有 season_id 就不建合集」处理，于是「新建合集」悄悄变成了往老合集里塞视频。
+      ...(groupMode === "existing" ? { season_id: seasonId } : {})
     })
   });
 }

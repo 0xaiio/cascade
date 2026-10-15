@@ -14,8 +14,12 @@ from app.bili_meta import (
     COPYRIGHT_REPRINT,
     COPYRIGHT_SELF,
     DEFAULT_COPYRIGHT,
+    DEFAULT_GROUP_MODE,
     DEFAULT_TID,
     DESC_MAX,
+    GROUP_MODE_EXISTING,
+    GROUP_MODE_NEW,
+    GROUP_MODE_NONE,
     PARTITIONS,
     PARTITION_LABELS,
     TAG_MAX,
@@ -35,6 +39,8 @@ from app.bili_meta import (
     limits,
     merge_item_tags,
     normalize_copyright,
+    normalize_group_mode,
+    normalize_season_option,
     normalize_tid,
     partition_label,
     partition_options,
@@ -43,6 +49,7 @@ from app.bili_meta import (
     unknown_placeholders,
     validate,
     validate_comment,
+    validate_group_choice,
 )
 
 # 一份**能通过校验**的元数据。
@@ -406,3 +413,108 @@ def test_validate_rejects_a_copyright_outside_the_two_values():
     assert any("版权只能是" in problem for problem in problems), problems
     # 版权非法时不再叠一条「没填来源」：那是同一个问题的两种说法，两条并列只会让人迷惑。
     assert not any("没填原视频链接" in problem for problem in problems), problems
+
+
+# ================================================================ 归集方式
+def test_group_mode_defaults_to_new_so_existing_uploads_keep_grouping():
+    """改动前的行为就是「每次投完自动建一个合集」。
+
+    默认值换成别的，会让用户**已经投出去**的稿件在下次重投时突然失去归集 ——
+    这不是「新功能更好」，是把既有行为偷偷改了。
+    """
+    assert DEFAULT_GROUP_MODE == GROUP_MODE_NEW
+    assert normalize_group_mode(None) == GROUP_MODE_NEW
+    assert normalize_group_mode("") == GROUP_MODE_NEW
+
+
+def test_group_mode_falls_back_rather_than_guessing():
+    """与 `normalize_copyright` 同一条原则：回退到不改变既有事实的那一侧。
+
+    猜成 `existing` 而没有编号会让归集无从下手；猜成 `none` 会让用户以为归过了。
+    """
+    assert normalize_group_mode("乱写的") == GROUP_MODE_NEW
+
+
+def test_normalize_group_mode_keeps_the_three_real_values():
+    for value in (GROUP_MODE_NONE, GROUP_MODE_EXISTING, GROUP_MODE_NEW):
+        assert normalize_group_mode(value) == value
+
+
+def test_join_an_existing_collection_requires_an_id():
+    problems = validate_group_choice(group_mode=GROUP_MODE_EXISTING, season_id=None, season_title="", count=2)
+    assert any("没有选具体是哪个合集" in problem for problem in problems), problems
+
+
+def test_group_choice_rejects_the_three_contradictions():
+    """三条矛盾各自单独报，不静默取其一。
+
+    静默处理（比如「带了编号就当 existing」）的后果是用户选了「新建」却往老合集里塞视频，
+    而界面上完全看不出来。
+    """
+    new_with_id = validate_group_choice(
+        group_mode=GROUP_MODE_NEW, season_id=42, season_title="名字", count=2
+    )
+    assert any("不该带已有合集的编号" in problem for problem in new_with_id), new_with_id
+
+    none_with_id = validate_group_choice(
+        group_mode=GROUP_MODE_NONE, season_id=42, season_title="", count=2
+    )
+    assert any("不该指定合集" in problem for problem in none_with_id), none_with_id
+
+    bogus = validate_group_choice(group_mode="随便", season_id=None, season_title="", count=2)
+    assert len(bogus) == 1, bogus
+
+
+def test_group_choice_accepts_an_empty_new_title():
+    """留空**不算错**：路由层用任务名兜底（`season_title or job.title`）。
+
+    这里若报「要给它起个名字」，就会与后端的兜底行为对不上 ——
+    用户填了个名却被拒，而留空反而能过。
+    """
+    assert validate_group_choice(
+        group_mode=GROUP_MODE_NEW, season_id=None, season_title="", count=2
+    ) == []
+
+
+# ================================================================ 合集归一
+def test_season_option_reads_the_primary_key_names():
+    assert normalize_season_option({"id": 7, "title": "C++ Weekly"}) == {
+        "season_id": 7,
+        "title": "C++ Weekly",
+        "desc": "",
+        "cover_url": "",
+        "total": 0,
+    }
+
+
+def test_season_option_tolerates_the_alternative_key_names():
+    """简介与封面的键名在不同接口版本里换过名，只认一个会把半缺的合集整条丢掉。"""
+    option = normalize_season_option({"season_id": 9, "name": "数据库", "intro": "讲义", "cover_url": "http://c.jpg", "count": 12})
+    assert option == {
+        "season_id": 9,
+        "title": "数据库",
+        "desc": "讲义",
+        "cover_url": "http://c.jpg",
+        "total": 12,
+    }
+
+
+def test_season_option_drops_only_the_rows_that_cannot_be_selected():
+    """没有编号的合集**选不了**（归集时要按编号提交），必须整条跳过。
+
+    与之相对，缺标题的合集仍要留下 —— 用编号兜一个可读名字即可，
+    丢掉它等于让用户少一个可选目标。
+    """
+    assert normalize_season_option(None) is None
+    assert normalize_season_option("junk") is None
+    assert normalize_season_option({"title": "没有编号"}) is None
+    assert normalize_season_option({"id": "不是数字", "title": "坏编号"}) is None
+
+    unnamed = normalize_season_option({"id": 123})
+    assert unnamed is not None and unnamed["title"] == "合集 #123"
+
+
+def test_season_option_survives_a_non_numeric_total():
+    """条数只是显示用的。一个 `total: "很多"` 不该让整条合集从下拉里消失。"""
+    option = normalize_season_option({"id": 5, "title": "合集", "total": "很多"})
+    assert option is not None and option["total"] == 0

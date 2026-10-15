@@ -512,6 +512,106 @@ def test_create_collection_404s_for_an_unknown_job(client):
     assert client.client.post("/api/bilibili/collections", json=collection_payload("nope")).status_code == 404
 
 
+# ================================================================ 归集方式
+def test_list_seasons_returns_the_account_collections(client):
+    client.transport.seasons = [
+        {"id": 501, "title": "C++ Weekly", "intro": "每周一更", "cover": "http://c/1.jpg", "total": 22},
+        {"id": 502, "title": "数据库系统讲义"},
+    ]
+    response = client.client.get("/api/bilibili/seasons")
+    assert response.status_code == 200
+    body = response.json()
+    assert [item["season_id"] for item in body["seasons"]] == [501, 502]
+    assert body["seasons"][0]["desc"] == "每周一更"
+    assert body["seasons"][0]["total"] == 22
+    # 缺字段的那条**仍然可选**，只是简介与条数是空的。
+    assert body["seasons"][1]["desc"] == "" and body["seasons"][1]["total"] == 0
+    assert body["error"] == ""
+
+
+def test_list_seasons_reports_the_login_problem_instead_of_faking_an_empty_list(client):
+    """未登录时返回 200 + 原因，而不是 401，也**不是**一个空列表。
+
+    空列表在界面上会显示成「这个账号还没有合集」，用户于是跑去新建一个重复的 ——
+    「查不到」与「真的没有」必须是两句话。
+    """
+    client.client.delete("/api/bilibili/cookies")
+    response = client.client.get("/api/bilibili/seasons")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["seasons"] == []
+    assert "登录" in body["error"]
+    assert body["advice"]
+
+
+def test_list_seasons_returns_an_empty_list_for_an_account_without_any(client):
+    client.transport.seasons = []
+    body = client.client.get("/api/bilibili/seasons").json()
+    assert body["seasons"] == []
+    # 没有合集**不是错**：`error` 必须留空，界面才知道该说「还没有」而不是「读不到」。
+    assert body["error"] == ""
+
+
+def test_join_an_existing_collection_without_an_id_is_400(client):
+    client.seed_job("job2", "合集任务", 2)
+    response = client.client.post(
+        "/api/bilibili/collections", json=collection_payload(group_mode="existing")
+    )
+    assert response.status_code == 400
+    assert "没有选具体是哪个合集" in response.json()["detail"]
+
+
+def test_a_new_collection_must_not_carry_a_season_id(client):
+    """三条矛盾之一。静默取其一会让「新建」变成往老合集里塞视频，而界面看不出来。"""
+    client.seed_job("job2", "合集任务", 2)
+    response = client.client.post(
+        "/api/bilibili/collections", json=collection_payload(group_mode="new", season_id=4242)
+    )
+    assert response.status_code == 400
+    assert "不该带已有合集的编号" in response.json()["detail"]
+
+
+def test_no_collection_must_not_carry_a_season_id(client):
+    client.seed_job("job2", "合集任务", 2)
+    response = client.client.post(
+        "/api/bilibili/collections", json=collection_payload(group_mode="none", season_id=4242)
+    )
+    assert response.status_code == 400
+    assert "不该指定合集" in response.json()["detail"]
+
+
+def test_an_unknown_group_mode_is_400_not_silently_corrected(client):
+    """非法值要报错。回退到 `new` 看着更「宽容」，但那是替用户决定了他没选的事。"""
+    client.seed_job("job2", "合集任务", 2)
+    response = client.client.post(
+        "/api/bilibili/collections", json=collection_payload(group_mode="随便写的")
+    )
+    assert response.status_code == 400
+    assert "归集方式" in response.json()["detail"]
+
+
+def test_a_collection_left_ungrouped_lands_in_a_terminal_state(client):
+    """`skipped` 必须是终态：留 `pending` 会让 `_maybe_group` 照样去建合集。"""
+    client.seed_job("job2", "合集任务", 2)
+    response = client.client.post("/api/bilibili/collections", json=collection_payload(group_mode="none"))
+    assert response.status_code == 200
+    season = response.json()["season"]
+    assert season["status"] == "skipped"
+    assert season["status_text"] != "状态未知"
+    assert client.transport.called("/season/add") == 0
+
+
+def test_joining_an_existing_collection_pins_its_id_without_building_a_new_one(client):
+    client.seed_job("job2", "合集任务", 2)
+    response = client.client.post(
+        "/api/bilibili/collections",
+        json=collection_payload(group_mode="existing", season_id=7788, season_title="这个标题不该被用上"),
+    )
+    assert response.status_code == 200
+    assert response.json()["season"]["season_id"] == 7788
+    assert client.transport.called("/season/add") == 0
+
+
 # ================================================================ 重试
 def test_retry_upload_404s_for_an_unknown_record(client):
     response = client.client.post("/api/bilibili/uploads/nope/retry")

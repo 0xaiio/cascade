@@ -1624,6 +1624,40 @@ paths:
                       error: null
                       advice: null
 
+  /api/bilibili/seasons:
+    get:
+      tags: [bilibili]
+      operationId: listBiliSeasons
+      summary: Collections that already exist on the account
+      description: |
+        Powers the "join an existing collection" option in the submission dialog.
+        Rows without a usable `season_id` are dropped (they cannot be submitted
+        against); rows missing a title keep a `合集 #<id>` placeholder.
+
+        **A logged-out account also returns 200**, with an empty list and the
+        reason in `error`/`advice`. Distinguishing "could not read" from "really
+        has none" matters: an empty list renders as "this account has no
+        collections yet", which would send the user off to build a duplicate.
+
+        `total` is the collection's current size on the platform. It is display
+        only and never feeds a decision.
+      responses:
+        "200":
+          description: The account's collections, or the reason they could not be read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BiliSeasonListRead"
+              example:
+                seasons:
+                  - season_id: 456789
+                    title: C++ Weekly
+                    desc: 每周一更
+                    cover_url: https://i0.hdslb.com/bfs/archive/example.jpg
+                    total: 22
+                error: ""
+                advice: ""
+
   /api/bilibili/uploads/{upload_id}/retry:
     post:
       tags: [bilibili]
@@ -3186,6 +3220,50 @@ components:
           type: [string, "null"]
         advice:
           type: [string, "null"]
+
+    BiliSeasonOption:
+      type: object
+      required: [season_id, title]
+      description: >
+        One collection that already exists on the account. Distinct from
+        `BiliSeasonRead`, which records where *this* submission is grouped -
+        this one is read from the platform.
+      properties:
+        season_id:
+          type: integer
+          description: Platform id. Rows without a usable one are dropped.
+        title:
+          type: string
+          description: Falls back to `合集 #<id>` when the platform returns no title.
+        desc:
+          type: string
+          default: ""
+          description: Read defensively; `intro` and `desc` are both seen in the wild.
+        cover_url:
+          type: string
+          default: ""
+        total:
+          type: integer
+          default: 0
+          description: Current size on the platform. Display only.
+
+    BiliSeasonListRead:
+      type: object
+      description: >
+        `error` separates "could not be read" from "really has none": both look
+        like an empty list otherwise, and the frontend would then claim the
+        account has no collections, sending the user off to build a duplicate.
+      properties:
+        seasons:
+          type: array
+          items:
+            $ref: "#/components/schemas/BiliSeasonOption"
+        error:
+          type: string
+          default: ""
+        advice:
+          type: string
+          default: ""
 
     BiliJobUploadsRead:
       type: object

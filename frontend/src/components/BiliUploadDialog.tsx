@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Upload, X } from "lucide-react";
-import type { BiliMetadata, BiliPrefill } from "../types";
+import type { BiliGroupMode, BiliMetadata, BiliPrefill, BiliSeasonList } from "../types";
 import { BiliIcon } from "./BiliIcon";
 
 /**
@@ -12,6 +12,11 @@ import { BiliIcon } from "./BiliIcon";
  */
 export const COPYRIGHT_SELF = "1";
 export const COPYRIGHT_REPRINT = "2";
+
+/** 归入方式。与服务端 `bili_meta.GROUP_MODE_*` 同值。**默认 `new`**（改动前的行为）。 */
+export const GROUP_MODE_NONE = "none";
+export const GROUP_MODE_EXISTING = "existing";
+export const GROUP_MODE_NEW = "new";
 
 /**
  * 上传表单弹窗。**单视频与合集共用这一个组件**，只是标题与提示词不同：
@@ -39,17 +44,40 @@ export const COPYRIGHT_REPRINT = "2";
  * - **来源输入框只在「转载 + 单视频」时出现**。合集里每条视频的出处都不一样，
  *   一个共用的来源框在语义上就是错的 —— 逐条的来源由服务端在渲染时各填各的
  *   （`bili_upload.render_collection`）。所以这里不是「藏起来」，是**根本没有这个字段**。
+ *
+ * 「归集方式」只出现在合集场景（单视频本来就没有归集这回事），三条：
+ *
+ * - **新建**（默认）：改动前的行为，保持不变。
+ * - **加入已有**：合集列表是打开弹窗时从平台读回来的。读不到（未登录 / 网络不通）时
+ *   显示原因并让用户改选新建，**不静默退回新建** —— 静默退回会让用户以为加进了某个合集，
+ *   实际上建了一个新的。
+ * - **不归集**：服务端会落成终态 `skipped`。留一条 `pending` 的归集记录会让界面上
+ *   挂一个永远不会结束的「正在归集」。
  */
 export function BiliUploadDialog({
   prefill,
   isCollection,
+  seasons,
   onCancel,
   onSubmit
 }: {
   prefill: BiliPrefill;
   isCollection: boolean;
+  /**
+   * 账号下的已有合集。**合集场景必传**（`seasonList` 还没回来时传 `null`，
+   * 界面显示「读取中」并禁用提交 —— 那时候用户看不到能选什么）。
+   * 单视频场景忽略这个参数。
+   */
+  seasons: BiliSeasonList | null;
   onCancel: () => void;
-  onSubmit: (values: { metadata: BiliMetadata; makeCover: boolean; comment: string }) => Promise<void>;
+  onSubmit: (values: {
+    metadata: BiliMetadata;
+    makeCover: boolean;
+    comment: string;
+    groupMode: BiliGroupMode;
+    seasonId: number | null;
+    seasonTitle: string;
+  }) => Promise<void>;
 }) {
   const initial = (isCollection ? prefill.template : prefill.metadata) ?? {
     title: "",
@@ -64,10 +92,17 @@ export function BiliUploadDialog({
   const [metadata, setMetadata] = useState<BiliMetadata>(initial);
   const [makeCover, setMakeCover] = useState(prefill.make_cover);
   const [comment, setComment] = useState(prefill.comment);
+  // **默认「新建合集」**：改动前的行为就是每次上传完自动新建一个。
+  // 改成别的默认值会让用户已有的投稿突然失去归集。
+  const [groupMode, setGroupMode] = useState<BiliGroupMode>(GROUP_MODE_NEW);
+  const [seasonId, setSeasonId] = useState<number | null>(null);
+  const [seasonTitle, setSeasonTitle] = useState(prefill.job_title);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
   const limits = prefill.limits;
+  const seasonOptions = seasons?.seasons ?? [];
+  const seasonsLoaded = seasons !== null;
   // `onCancel` 走 ref：调用方（App）每收到一条 SSE 事件就重渲染一次，若把它放进副作用依赖里，
   // 每次都会重新 `focus()` + `select()` —— 用户正打字时全选标题。挂载时只跑一次才是对的。
   const cancelRef = useRef(onCancel);
@@ -100,6 +135,11 @@ export function BiliUploadDialog({
   // 与服务端 `bili_meta.validate` 同一条判据，写两遍是为了让用户在输入框旁边就看到。
   // 合集场景没有这个输入框（每条各用各的原始链接），由服务端逐条渲染时保证，不在这里查。
   const sourceRequired = !isCollection && metadata.copyright === COPYRIGHT_REPRINT;
+  // 「加入已有合集」必须真的选了一个，而选的那个此刻必须**还在列表里**。
+  // 后一条不是防御性编程：合集列表是打开弹窗时读回来的，用户在弹窗开着的时候
+  // 不可能删掉合集，但**测试夹具与服务端都会变** —— 与其赌它不会变，
+  // 不如在提交前确认一次，否则就是一个 400。
+  const chosenSeason = seasonOptions.find((item) => item.season_id === seasonId);
   const localProblems = useMemo(
     () => [
       ...(metadata.title.trim() ? [] : [isCollection ? "标题模板渲染后不能是空的" : "标题不能是空的"]),
@@ -113,9 +153,30 @@ export function BiliUploadDialog({
       ...(comment.length > limits.comment ? [`评论超出 ${comment.length - limits.comment} 个字`] : []),
       ...(sourceRequired && !metadata.source.trim()
         ? ["选了「转载」但没填原视频链接（转载稿必须填来源，留空会被 B站 退回来）"]
+        : []),
+      ...(isCollection && !seasonsLoaded
+        ? ["正在读取账号里的合集…"]
+        : []),
+      ...(isCollection && groupMode === GROUP_MODE_EXISTING && !chosenSeason
+        ? [seasonId === null
+          ? "选了「加入已有合集」但还没选是哪个合集"
+          : "选中的合集已经不在列表里了，请重新选一个"]
         : [])
     ],
-    [comment.length, isCollection, limits, longestTag, metadata, sourceRequired, tagCount]
+    [
+      chosenSeason,
+      comment.length,
+      groupMode,
+      isCollection,
+      limits,
+      longestTag,
+      metadata,
+      seasonId,
+      seasonTitle,
+      seasonsLoaded,
+      sourceRequired,
+      tagCount
+    ]
   );
   const notReady = prefill.items.filter((item) => !item.ready);
   const blocked = localProblems.length > 0 || notReady.length > 0;
@@ -125,7 +186,16 @@ export function BiliUploadDialog({
     setError(null);
     setSubmitting(true);
     try {
-      await onSubmit({ metadata, makeCover, comment });
+      await onSubmit({
+        metadata,
+        makeCover,
+        comment,
+        groupMode,
+        // **只在「加入已有合集」时给编号**：其余场景带上一个残留值会让服务端
+        // 按「有 season_id 就不建合集」处理，「新建」悄悄变成往老合集里塞视频。
+        seasonId: groupMode === GROUP_MODE_EXISTING ? seasonId : null,
+        seasonTitle
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "提交失败");
       setSubmitting(false);
@@ -236,6 +306,101 @@ export function BiliUploadDialog({
                 placeholder="https://www.youtube.com/watch?v=…"
               />
               <p className="hint">B站 要求转载稿必须标明来源，留空会被直接退回来。</p>
+            </div>
+          )}
+
+          {isCollection && (
+            <div className="field">
+              <span className="field-label" id="bili-group-label">
+                归集方式
+              </span>
+              <div className="bili-choice" role="radiogroup" aria-labelledby="bili-group-label">
+                <label className="bili-choice-option">
+                  <input
+                    type="radio"
+                    name="bili-group-mode"
+                    value={GROUP_MODE_NEW}
+                    checked={groupMode === GROUP_MODE_NEW}
+                    onChange={() => setGroupMode(GROUP_MODE_NEW)}
+                  />
+                  <span>新建合集</span>
+                </label>
+                <label className="bili-choice-option">
+                  <input
+                    type="radio"
+                    name="bili-group-mode"
+                    value={GROUP_MODE_EXISTING}
+                    checked={groupMode === GROUP_MODE_EXISTING}
+                    onChange={() => setGroupMode(GROUP_MODE_EXISTING)}
+                  />
+                  <span>加入已有合集</span>
+                </label>
+                <label className="bili-choice-option">
+                  <input
+                    type="radio"
+                    name="bili-group-mode"
+                    value={GROUP_MODE_NONE}
+                    checked={groupMode === GROUP_MODE_NONE}
+                    onChange={() => setGroupMode(GROUP_MODE_NONE)}
+                  />
+                  <span>不归集</span>
+                </label>
+              </div>
+              <p className="hint">
+                {groupMode === GROUP_MODE_NEW
+                  ? `全部投完后自动建一个名为「${seasonTitle.trim() || prefill.job_title}」的新合集，再把这些视频加进去。`
+                  : groupMode === GROUP_MODE_EXISTING
+                    ? "全部投完后把这些视频追加到你选的那个合集里，不新建。B站 对合集有审核，加进去之后可能还需要等平台处理。"
+                    : "只把这几个视频投成独立稿件，不建合集、也不加入任何合集。"}
+              </p>
+            </div>
+          )}
+
+          {isCollection && groupMode === GROUP_MODE_NEW && (
+            <div className="field">
+              <label className="field-label" htmlFor="bili-season-title">
+                合集名
+              </label>
+              <input
+                id="bili-season-title"
+                value={seasonTitle}
+                onChange={(event) => setSeasonTitle(event.target.value)}
+                placeholder={prefill.job_title}
+              />
+              <p className="hint">留空会用任务名顶上。简介由应用自动写，不需要你填。</p>
+            </div>
+          )}
+
+          {isCollection && groupMode === GROUP_MODE_EXISTING && (
+            <div className="field">
+              <label className="field-label" htmlFor="bili-season-select">
+                加进哪个合集
+              </label>
+              {!seasonsLoaded ? (
+                <p className="hint">正在读取账号里的合集…</p>
+              ) : seasons?.error ? (
+                <p className="hint hint-error">{seasons.advice || seasons.error}</p>
+              ) : seasonOptions.length === 0 ? (
+                <p className="hint">
+                  这个账号下还没有合集。改选「新建合集」就能直接建一个 ——
+                  B站 的合集是要在创作中心建好后，这里才能往里加。
+                </p>
+              ) : (
+                <select
+                  id="bili-season-select"
+                  value={seasonId === null ? "" : String(seasonId)}
+                  onChange={(event) => setSeasonId(event.target.value === "" ? null : Number(event.target.value))}
+                >
+                  <option value="">请选择一个合集</option>
+                  {seasonOptions.map((option) => (
+                    <option key={option.season_id} value={option.season_id}>
+                      {option.title}
+                      {option.total > 0 ? `（现有 ${option.total} 个视频）` : ""}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {chosenSeason?.desc && <p className="hint">{chosenSeason.desc}</p>}
             </div>
           )}
 

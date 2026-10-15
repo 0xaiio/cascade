@@ -382,6 +382,31 @@ export interface BiliSeason {
   advice: string | null;
 }
 
+/**
+ * 账号下的一个**已有合集**，供投稿界面下拉选择。
+ *
+ * 与 `BiliSeason` 是两回事：那个是「本机这次投稿归集到哪里」的记录，
+ * 这个是「平台上已经存在的合集」，由 `GET /api/bilibili/seasons` 读回。
+ */
+export interface BiliSeasonOption {
+  season_id: number;
+  title: string;
+  desc: string;
+  cover_url: string;
+  /** 该合集**目前**的视频条数。纯显示用，与「这次要归入几条」无关。 */
+  total: number;
+}
+
+export interface BiliSeasonList {
+  seasons: BiliSeasonOption[];
+  /** 列不出来时的原因（未登录 / 登录信息不完整）。空串表示「确实没有合集」。 */
+  error: string;
+  advice: string;
+}
+
+/** 归入方式。取值与服务端 `bili_meta.GROUP_MODE_*` 一致。 */
+export type BiliGroupMode = "none" | "existing" | "new";
+
 export interface BiliJobUploads {
   job_id: string;
   badge: BiliBadge;

@@ -73,6 +73,63 @@ COPYRIGHT_LABELS: dict[str, str] = {
     COPYRIGHT_REPRINT: "转载",
 }
 
+# ---------------------------------------------------------------- 归集方式
+# 合集上传跑完后要做什么：`none` 不归集 / `existing` 加进已有合集 / `new` 新建一个。
+# **默认 `new`**：改动前的行为就是「每次上传完自动新建一个合集」，保持不变，
+# 否则一次升级就会让用户已有的投稿突然失去归集。
+GROUP_MODE_NONE = "none"
+GROUP_MODE_EXISTING = "existing"
+GROUP_MODE_NEW = "new"
+DEFAULT_GROUP_MODE = GROUP_MODE_NEW
+GROUP_MODES: tuple[str, ...] = (GROUP_MODE_NONE, GROUP_MODE_EXISTING, GROUP_MODE_NEW)
+
+
+def normalize_group_mode(value: str | None) -> str:
+    """读不出合法的归集方式时回退「新建」。
+
+    与 `normalize_copyright` 同一条原则：**回退到不改变既有事实的那一侧**。
+    猜成 `existing` 而没有 `season_id` 会让归集无从下手；猜成 `none` 会让用户以为
+    归过集了（其实没有）。两者都是「界面没说的东西被替用户决定了」。
+    """
+    text = (value or "").strip()
+    return text if text in GROUP_MODES else DEFAULT_GROUP_MODE
+
+
+def normalize_season_option(raw: object) -> dict[str, object] | None:
+    """把平台返回的一个合集对象归一成界面要的形状。返回 `None` 表示「这一条没法用」。
+
+    **键名逐个兜底而不是只认一个**：B站 的合集列表在不同接口版本里简介出现过
+    `intro` / `desc`，封面出现过 `cover` / `cover_url`，条数出现过 `total` / `count`，
+    且不是必填。只认一个键名会让「合集标题在、简介空」这种半缺的对象被整条丢掉 ——
+    而它明明是可选的。
+    """
+    if not isinstance(raw, dict):
+        return None
+    raw_id = raw.get("id") or raw.get("season_id")
+    try:
+        season_id = int(raw_id)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        # 没有可用编号的合集选不了（归集时要按编号提交），整条跳过而不是给个 0 进去。
+        return None
+    title = str(raw.get("title") or raw.get("name") or "").strip()
+    if not title:
+        # 没标题没法在下拉里显示（会变成一排「(编号 123)」），但它仍然可以按编号归集，
+        # 所以用编号兜一个可读的名字，而不是丢弃。
+        title = f"合集 #{season_id}"
+    desc = str(raw.get("intro") or raw.get("desc") or "").strip()
+    cover = str(raw.get("cover") or raw.get("cover_url") or "").strip()
+    try:
+        total = int(raw.get("total") or raw.get("count") or 0)
+    except (TypeError, ValueError):
+        total = 0
+    return {
+        "season_id": season_id,
+        "title": title,
+        "desc": desc,
+        "cover_url": cover,
+        "total": total,
+    }
+
 # ---------------------------------------------------------------- 模板占位符
 PLACEHOLDERS: tuple[str, ...] = ("index", "title", "count", "job", "source")
 PLACEHOLDER_RE = re.compile(r"\{(" + "|".join(PLACEHOLDERS) + r")\}")
@@ -363,3 +420,31 @@ def merge_item_tags(template_tags: str, item_title: str) -> str:
         if item and item not in combined:
             combined.append(item)
     return trim_tags(",".join(combined))
+
+
+def validate_group_choice(
+    *, group_mode: str, season_id: int | None, season_title: str, count: int
+) -> list[str]:
+    """校验「归入方式」这一组字段。
+
+    **刻意与 `validate()` 分开**：那些是每条视频的元数据（合集场景下还要逐条校验 N 遍），
+    这里校验的是**整批一次**的归集决策。混进 `validate()` 会让单视频投稿也去查合集。
+    """
+    problems: list[str] = []
+    if group_mode not in GROUP_MODES:
+        problems.append("归集方式只能是「不归集」「加入已有合集」或「新建合集」")
+        return problems
+    if group_mode == GROUP_MODE_EXISTING:
+        if season_id is None:
+            problems.append("选了「加入已有合集」但没有选具体是哪个合集")
+    if group_mode == GROUP_MODE_NEW:
+        # 标题留空不算错：路由层会用任务名兜底（`season_title or job.title`），
+        # 与改动前的行为一致。**不拿空标题去建合集**才是要拦的，而那是路由的事。
+        if season_id is not None:
+            # 不是错，但值得当噪音拦下：界面上选了「加入已有」又带了一个编号回来，
+            # 说明有一处没跟上。这里挡掉比归集时静默忽略更安全 ——
+            # `group_into_season` 的优先级是「有 season_id 就不建合集」。
+            problems.append("新建合集不该带已有合集的编号")
+    if group_mode == GROUP_MODE_NONE and season_id is not None:
+        problems.append("选了「不归集」就不该指定合集")
+    return problems

@@ -86,6 +86,15 @@ export const mockState = {
   biliRetrySeasonIds: [] as string[],
   /** `GET /api/bilibili/prefill` 收到的两级参数。 */
   biliPrefillQueries: [] as Array<{ jobId: string | null; itemId: string | null }>,
+  /**
+   * `GET /api/bilibili/seasons` 的返回值。**默认可改成各种形态**：
+   * 空数组 = 账号没有合集；带 `error` = 没登录；`null` = 让请求失败。
+   */
+  biliSeasonList: { seasons: [], error: "", advice: "" } as {
+    seasons: Array<{ season_id: number; title: string; desc: string; cover_url: string; total: number }>;
+    error: string;
+    advice: string;
+  } | null,
   /** 扫码轮询的下一帧结论。`confirmed` 会让界面停止轮询并重新体检。 */
   biliLoginPollState: "waiting",
   biliLoginPollMessage: "等待扫码",
@@ -135,6 +144,7 @@ function resetMockState(): void {
   mockState.biliRetryUploadIds = [];
   mockState.biliRetrySeasonIds = [];
   mockState.biliPrefillQueries = [];
+  mockState.biliSeasonList = { seasons: [], error: "", advice: "" };
   mockState.biliLoginPollState = "waiting";
   mockState.biliLoginPollMessage = "等待扫码";
   mockState.biliRetryAction = "reupload";
@@ -360,6 +370,12 @@ export function installAppHarness(): void {
         if (url.includes("/api/bilibili/collections/") && url.endsWith("/group")) {
           mockState.biliRetrySeasonIds.push(url.split("/api/bilibili/collections/")[1].replace("/group", ""));
           return Response.json({ message: "已重新归集。", season: mockState.biliSeason });
+        }
+        if (url.endsWith("/api/bilibili/seasons") && init?.method !== "POST") {
+          if (mockState.biliSeasonList === null) {
+            return Response.json({ detail: "读不到合集列表" }, { status: 500 });
+          }
+          return Response.json(mockState.biliSeasonList);
         }
         if (url.endsWith("/api/bilibili/uploads") && init?.method === "POST") {
           mockState.biliUploadBodies.push(JSON.parse(String(init.body ?? "{}")));

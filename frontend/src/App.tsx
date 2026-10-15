@@ -14,6 +14,7 @@ import {
   getBiliUploadsSummary,
   getSettings,
   importBrowserCookies,
+  listBiliSeasons,
   listJobs,
   openJobFolder,
   openJobItemFolder,
@@ -39,9 +40,11 @@ import { chooseAvailableResolution } from "./quality";
 import { effectiveSubtitleSourceForAnalysis } from "./subtitles";
 import type {
   AnalyzeResponse,
+  BiliGroupMode,
   BiliJobUploads,
   BiliMetadata,
   BiliPrefill,
+  BiliSeasonList,
   DownloadOptions,
   Job,
   JobBatchAction,
@@ -114,6 +117,8 @@ export default function App() {
   const runtimeSaveClearTimer = useRef<number | null>(null);
   const [biliUploads, setBiliUploads] = useState<Record<string, BiliJobUploads>>({});
   const [biliDialog, setBiliDialog] = useState<BiliDialogState | null>(null);
+  /** 账号下的已有合集。`null` = 还在读；空数组 = 确实没有合集。合集表单才用得到。 */
+  const [seasonList, setSeasonList] = useState<BiliSeasonList | null>(null);
   const [biliNotice, setBiliNotice] = useState<string | null>(null);
   /** 上一次观察到的徽标。用来区分「刚刚跑完」与「本来就是这状态」。 */
   const previousBiliBadges = useRef<Record<string, string>>({});
@@ -350,8 +355,18 @@ export default function App() {
   async function handleBiliUpload(jobId: string, itemId: string | null) {
     setError(null);
     setBiliNotice(null);
+    // **合集列表在开窗之前就开始读**，而不是等弹窗渲染完再取：
+    // 弹窗一出现就该能看到能选哪些合集，等它自己加载会先闪一下空下拉。
+    // 读失败**不阻止开窗** —— 用户可能只是要投稿不归集，不该因为一个可选
+    // 功能读不到就打不开表单。`seasonList` 会带着原因进去，界面上会显示。
+    setSeasonList(null);
+    const prefillPromise = getBiliPrefill(jobId, itemId);
+    const seasonsPromise = listBiliSeasons().catch(() => null);
     try {
-      const prefill = await getBiliPrefill(jobId, itemId);
+      const prefill = await prefillPromise;
+      if (prefill.kind === "collection") {
+        void seasonsPromise.then((list) => setSeasonList(list)).catch(() => undefined);
+      }
       setBiliDialog({ prefill, isCollection: prefill.kind === "collection", itemId });
     } catch (err) {
       setError(biliMessage(err, "打不开上传窗口"));
@@ -362,21 +377,31 @@ export default function App() {
    * 提交上传。**异常直接抛回弹窗**（在表单里就近报错），不写 `setError` ——
    * 用户需要一边看着自己填的内容一边改，而不是去页顶找红条。
    */
-  async function handleBiliSubmit(values: { metadata: BiliMetadata; makeCover: boolean; comment: string }) {
+  async function handleBiliSubmit(values: {
+    metadata: BiliMetadata;
+    makeCover: boolean;
+    comment: string;
+    groupMode: BiliGroupMode;
+    seasonId: number | null;
+    seasonTitle: string;
+  }) {
     if (!biliDialog) return;
     const { prefill, isCollection, itemId } = biliDialog;
     let result: BiliJobUploads;
     try {
       result = isCollection
-        // 合集名与简介默认用服务端给的值（`season_title` 的口径是「任务名」，与后端
-        // `season_title or job.title` 一致）。界面上没有这两个输入框 —— 它们不该让用户填。
+        // 合集名**用用户在表单里填的那个**（弹窗预填成任务名，所以不改就是任务名），
+        // 简介没有输入框、仍用服务端给的值（与后端 `season_title or job.title` 同口径）。
+        // 「加入已有合集」时这两个值不参与归集 —— 用的是平台上那个合集自己的名字，照传无害。
         ? await createBiliCollection(
             prefill.job_id,
             values.metadata,
-            prefill.job_title,
+            values.seasonTitle || prefill.job_title,
             prefill.season_desc,
             values.makeCover,
-            values.comment
+            values.comment,
+            values.groupMode,
+            values.seasonId
           )
         : await createBiliUpload(prefill.job_id, itemId, values.metadata, values.makeCover, values.comment);
     } catch (err) {
@@ -384,9 +409,14 @@ export default function App() {
     }
     setBiliUploads((current) => ({ ...current, [result.job_id]: result }));
     setBiliDialog(null);
+    setSeasonList(null);
     setBiliNotice(
       isCollection
-        ? `已开始上传《${prefill.job_title}》的 ${prefill.items.length} 个视频，逐个投完后会自动归入同一个合集。`
+        ? values.groupMode === "none"
+          ? `已开始上传《${prefill.job_title}》的 ${prefill.items.length} 个视频，不归集。`
+          : values.groupMode === "existing"
+            ? `已开始上传《${prefill.job_title}》的 ${prefill.items.length} 个视频，跑完会加进你选的合集。`
+            : `已开始上传《${prefill.job_title}》的 ${prefill.items.length} 个视频，逐个投完后会自动归入同一个合集。`
         : `已开始上传《${values.metadata.title}》，跑完这里会变成「已上传」。`
     );
   }
@@ -603,7 +633,11 @@ export default function App() {
         <BiliUploadDialog
           prefill={biliDialog.prefill}
           isCollection={biliDialog.isCollection}
-          onCancel={() => setBiliDialog(null)}
+          seasons={seasonList}
+          onCancel={() => {
+            setBiliDialog(null);
+            setSeasonList(null);
+          }}
           onSubmit={handleBiliSubmit}
         />
       )}

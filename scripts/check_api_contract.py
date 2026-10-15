@@ -78,6 +78,11 @@ SCHEMA_PAIRS: dict[str, str | None] = {
     "BiliJobUploadsSummary": "BiliJobUploadsSummaryRead",
     "BiliRetry": "BiliRetryRead",
     "BiliSeasonRetry": "BiliSeasonRetryRead",
+    # 合集目录（`GET /api/bilibili/seasons`）。前端叫 `BiliSeason` 的是**本机这次投稿
+    # 归集到哪里的记录**（`BiliSeasonRead`），这两个是**平台上已存在的合集**，故另起名。
+    # 两个都要登记：少登记一个，删字段就没人发现。
+    "BiliSeasonOption": "BiliSeasonOption",
+    "BiliSeasonList": "BiliSeasonListRead",
 }
 
 HTTP_METHODS = ("get", "post", "put", "patch", "delete", "options", "head")
