@@ -25,7 +25,7 @@
 详情：
 
 - `subprocess.run([ffmpeg, ...])` 使用固定参数列表（[system_open.py](../backend/app/system_open.py#L67)、[ytdlp_service.py](../backend/app/ytdlp_service.py#L628)）
-- `subprocess.Popen([biliup, ...])` 用 list 形式启动投稿进程、不经 shell；`biliup` 的路径来自候选探测或配置，标题/简介/标签等内容作为**独立 argv 元素**传入（[bili_bin.py](../backend/app/bili_bin.py#L222)）
+- `subprocess.Popen([biliup, ...])` 用 list 形式启动投稿进程、不经 shell；`biliup` 的路径来自候选探测或配置，标题/简介/标签等内容作为**独立 argv 元素**传入（[bili_bin.py](../backend/app/bili_bin.py#L230)）
 - `subprocess.run([taskkill, ...])` 使用已知固定命令（[browser_cookies.py](../backend/app/browser_cookies.py#L141)）
 - `subprocess.Popen([edge, --remote-debugging-port=..., ...])` 参数由常量或系统路径构成，非用户可控（[browser_cookies.py](../backend/app/browser_cookies.py#L157)）
 - `subprocess.run(["netstat", ...])` / `(["tasklist", "/FI", f"PID eq {pid}", ...])` 用于识别端口占用者：命令名与参数都是常量，`pid` 由 [parse_listening_pids](../backend/app/dev_server.py#L71) 用 `int()` 从 `netstat` 输出解析、解析失败即跳过，因此无法注入（[dev_server.py](../backend/app/dev_server.py#L119)）
@@ -54,7 +54,7 @@
 
 - 所有查询通过 `session.exec(select(...))` 执行，使用 SQLModel 的声明式查询
 - [_ensure_columns](../backend/app/db.py#L43) 使用 f-string 构建 `ALTER TABLE` 语句，但表名和列名来自硬编码字典，非用户输入
-- [checkpoint_wal](../backend/app/db.py#L82) 的 `PRAGMA wal_checkpoint(...)` 同样由常量与函数默认参数构成
+- [checkpoint_wal](../backend/app/db.py#L89) 的 `PRAGMA wal_checkpoint(...)` 同样由常量与函数默认参数构成
 - 无原始 SQL 拼接
 
 ## 4. 跨站脚本攻击（XSS）
@@ -236,7 +236,7 @@
 | 变更 | 位置 | 初步判断 | 需要复核的点 |
 | --- | --- | --- | --- |
 | 停滞看门狗 | [stall_guard.py](../backend/app/stall_guard.py) | 新增模块只读 progress payload 并在超时后抛异常，不接触文件系统、网络或数据库；无用户输入。 | 超时抛错是否会与取消/暂停语义冲突，导致任务状态异常。 |
-| WAL checkpoint | [db.py](../backend/app/db.py#L82) | `PRAGMA wal_checkpoint(TRUNCATE)` 由常量构成，失败只记日志。 | 与并发写入的交互、被强杀时的数据完整性。 |
+| WAL checkpoint | [db.py](../backend/app/db.py#L89) | `PRAGMA wal_checkpoint(TRUNCATE)` 由常量构成，失败只记日志。 | 与并发写入的交互、被强杀时的数据完整性。 |
 | 进度落库节流 | [progress_persist.py](../backend/app/progress_persist.py) | 纯内存节流，无 I/O。 | 节流是否会导致终态进度丢失。 |
 | 上传的 `.env` / 配置注入面 | [config.py](../backend/app/config.py#L19) | 新增 `YTDL_ARIA2C_PATH` 作为外部下载器可执行路径，会被交给 yt-dlp 作为 `external_downloader` 执行。**本机配置文件可控，非远端输入**，因此按本项目的威胁模型仍是低风险。 | 是否需要在文档中明确"该变量只应由本机使用者设置"；是否存在从 UI 可达的写入路径。 |
 | SQLite 补列 | [db.py](../backend/app/db.py#L43) | 仍是硬编码列名字典 + f-string，未引入外部输入。 | 无新增风险。 |
@@ -265,8 +265,8 @@
 | 变更 | 位置 | 初步判断 | 需要复核的点 |
 | --- | --- | --- | --- |
 | B站 凭据文件读写 | [bili_auth.py](../backend/app/bili_auth.py#L268)、`POST/DELETE /api/bilibili/cookies` | 只读写 `data/bili_cookies.json`（路径由 [bili_cookie_path](../backend/app/config.py#L82) 给出）。`GET /api/bilibili/status` 与导入响应只回传**键名与计数**，不回传值、不回传前缀；导入时会用 [is_cookie_tracked_by_git](../backend/app/bili_auth.py#L380) 检查该文件是否被 git 跟踪并把结论显示出来。`data/` 已在 `.gitignore` 内（实测 `git check-ignore` 命中）。文件里除 cookies 外还写入 `token_info`（长期投稿令牌 + 刷新令牌 + `mid`）与 `platform: "BiliTV"` —— 这三项对 `biliup` 是必需的（缺了它连投稿请求都不会发，见 [011](../ai/bug-fix/011-biliup-refuses-a-token-less-cookie-file.md)），但**令牌本身等价于一次账号登录**，泄露面与 cookies 同级。 | 这是**与下载 cookies 完全独立的第二份账号态**：确认没有接口能把 `SESSDATA` / `bili_jct` / `access_token` / `refresh_token` 的值带出来（包括错误响应与日志）。`log_safety.py` 的 `_SECRET_NAMES` 覆盖了 `access_token` / `refresh_token`，本次还补上了它们的 **JSON 形态**（`"name":"value"`）—— 此前只认 `name=value`，实测 `{"access_token":"X"}` 会被原样放行（见 [011](../ai/bug-fix/011-biliup-refuses-a-token-less-cookie-file.md) 的附带修复）。清洗器管的是「进日志」，管不到「被写进文件」：后一条靠的是 `data/` 被 `.gitignore` 覆盖加「不回显」，所以要确认 `git check-ignore` 之外没有别的路径会把它写进仓库。 |
-| 扫码登录 | [bili_auth.py](../backend/app/bili_auth.py#L199)、`POST /api/bilibili/login/qrcode` + `.../poll` | 请求 `passport.bilibili.com` 的二维码生成与轮询接口，轮询由**服务端**发起、频率固定；凭据从回调 query 与 `Set-Cookie` 取，取到后落盘到上面那个文件。二维码 SVG 由纯 Python 的 `qrcode` 生成（不引入 Pillow，不联网渲染）。 | 轮询是**持续的外发请求**：确认有上限与超时、不会因为前端反复刷新而无限叠加；确认二维码本身（含 `qrcode_key`）不会进日志。 |
+| 扫码登录 | [bili_auth.py](../backend/app/bili_auth.py#L166)、`POST /api/bilibili/login/qrcode` + `.../poll` | 请求 `passport.bilibili.com` 的二维码生成与轮询接口，轮询由**服务端**发起、频率固定；凭据从回调 query 与 `Set-Cookie` 取，取到后落盘到上面那个文件。二维码 SVG 由纯 Python 的 `qrcode` 生成（不引入 Pillow，不联网渲染）。 | 轮询是**持续的外发请求**：确认有上限与超时、不会因为前端反复刷新而无限叠加；确认二维码本身（含 `qrcode_key`）不会进日志。 |
 | 换取投稿令牌（TV 端） | [`exchange_tv_token`](../backend/app/bili_auth.py#L142)，经 `BiliManager.save_login` / `ensure_upload_token` 触发 | 三步都发往 `passport.bilibili.com`（申请二维码 → 用 cookies 确认 → 轮询取 `token_info`），与扫码登录同一宿主。**第二步把用户自己的 `SESSDATA` + `bili_jct` 放进 `Cookie` 请求头**，此外只带 `Referer`；请求体按与 `biliup` 逐字节一致的规则签名。拿到的长期令牌写进上面那个凭据文件。 | 本次新增的**外发请求家族**，也是第一次把账号凭据放进请求头发出去。需复核：① 三个端点都是模块级常量、只指向 `passport.bilibili.com`，Cookie 头不会随重定向跑到别的域；② 三步都有超时，轮询有次数上限（`TV_POLL_ATTEMPTS`）而不是死循环；③ 失败文案只拼 `code` / `message`，不含响应正文 —— 否则成功响应里的令牌就有一次进日志的机会；④ **导入 cookies 这条路径会自动触发它**，等于用户点「导入」就顺带同意了一次联网换取令牌，这个副作用要在界面文案里说清。 |
 | B站 业务请求 | [bili_http.py](../backend/app/bili_http.py#L66)、[bili_api.py](../backend/app/bili_api.py) | 标准库 `urllib`，端点全部是模块级常量（稿件列表 / 稿件详情 / 合集创建与归集 / 评论），请求体只由元数据与 aid/cid 组成。**显式清空 `ProxyHandler`**：B站 侧一律直连，不走用户配置的 YouTube 代理，也避免代理把凭据转交给第三方。4xx/5xx 也带回正文与 `Set-Cookie` 供归类，但正文经 [sanitize_log_message](../backend/app/log_safety.py#L20) 后才进日志与记录的 `log_tail`。 | 「直连」是一个刻意的行为差异：确认它在代理环境下不会静默失败成「B站 上传永远连不上」而不给提示。另需确认响应正文不会被原样回显到界面。 |
-| 投稿子进程 | [bili_bin.py](../backend/app/bili_bin.py#L222)、[bili_bin.py](../backend/app/bili_bin.py#L284) | `subprocess.Popen(list(argv))` —— list 形式、不经 shell（见第 1 节）；可执行文件路径来自候选探测（含 WinGet 目录）或配置项，标题/简介/标签作为独立 argv 元素传入。读取放在后台线程 + 有界 join，超时分支必 `kill()`。 | `biliup` 路径可由配置指定，等价于「本机执行一个用户可指向的可执行文件」——与该仓库既有的 `YTDL_ARIA2C_PATH` 同类，需确认它不会被网页侧驱动。抽帧走 ffmpeg，输出写到 `data/bili_covers/`（同样在 `.gitignore` 内）。 |
+| 投稿子进程 | [bili_bin.py](../backend/app/bili_bin.py#L230)、[bili_bin.py](../backend/app/bili_bin.py#L292) | `subprocess.Popen(list(argv))` —— list 形式、不经 shell（见第 1 节）；可执行文件路径来自候选探测（含 WinGet 目录）或配置项，标题/简介/标签作为独立 argv 元素传入。读取放在后台线程 + 有界 join，超时分支必 `kill()`。**`--copyright` / `--source` 也是独立 argv 元素**：来源链接是用户可填的自由文本，与标题同属「不经 shell、不拼字符串」这条约束的适用范围；`effective_source` 决定自制稿不带 `--source`。 | `biliup` 路径可由配置指定，等价于「本机执行一个用户可指向的可执行文件」——与该仓库既有的 `YTDL_ARIA2C_PATH` 同类，需确认它不会被网页侧驱动。抽帧走 ffmpeg，输出写到 `data/bili_covers/`（同样在 `.gitignore` 内）。 |
 | 上传记录落库 | [models.py](../backend/app/models.py#L114) 的 `BiliUpload` / `#L150` 的 `BiliSeason` | 新增两张表，字段里保存**提交的元数据快照**与平台返回的标识；`log_tail` 只存末若干行且写入前过清洗。**不保存任何凭据**。 | 确认 `log_tail` 不会因为清洗漏项而带上 URL query 或 cookie。**已发现一处未处理的缺口：删任务不会连带删这两张表的行**（`JobManager.delete` 只删 `JobEvent` / `JobItem` / `Job`），因此 `GET /api/bilibili/uploads/summary` 会继续为已不存在的任务回记录。见 [ai/bug-fix 候选](../ai/feature/bilibili-upload/03-implementation.md#5-已知限制)。 |

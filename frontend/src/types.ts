@@ -284,6 +284,15 @@ export interface BiliMetadata {
   desc: string;
   tags: string;
   tid: string;
+  /** 版权：`"1"` 自制 / `"2"` 转载。与 B站 接口同值域，所以不需要翻译层。 */
+  copyright: string;
+  /**
+   * 转载来源链接。
+   *
+   * **合集模板上它恒为空**：合集里每条视频的来源是各自的原始链接，由服务端逐条渲染时填。
+   * 界面因此只在**单视频**场景显示这个输入框。
+   */
+  source: string;
 }
 
 export interface BiliLimits {
@@ -333,6 +342,11 @@ export interface BiliUpload {
   tags: string;
   tid: string;
   tid_label: string;
+  /** 实际提交出去的版权（`"1"` 自制 / `"2"` 转载）与来源链接（提交时的快照）。
+   *  界面显示「转载 / 自制」用它，也是「重试没有把稿件悄悄换成自制」可被核对的那一份证据。 */
+  copyright: string;
+  copyright_label: string;
+  source: string;
   status: string;
   status_text: string;
   badge: BiliBadge;

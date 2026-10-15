@@ -8,22 +8,29 @@
 | 层 | 文件 | 用例数 |
 | --- | --- | --- |
 | 纯工具（文案/状态折合） | `backend/tests/test_bili_policy.py` | 28 |
-| 纯工具（模板/标签/硬限） | `backend/tests/test_bili_meta.py` | 44 |
+| 纯工具（模板/标签/硬限/**版权与来源**） | `backend/tests/test_bili_meta.py` | 59 |
 | 基础设施（HTTP 接缝、扫码会话） | `backend/tests/test_bili_auth.py` | 56 |
-| 基础设施（`biliup` 探测/命令/进度/执行） | `backend/tests/test_bili_bin.py` | 42 |
+| 基础设施（`biliup` 探测/命令/进度/执行） | `backend/tests/test_bili_bin.py` | 44 |
 | 领域（会员态接口） | `backend/tests/test_bili_api.py` | 63 |
-| 领域（单次上传编排） | `backend/tests/test_bili_upload.py` | 65 |
+| 领域（单次上传编排） | `backend/tests/test_bili_upload.py` | 67 |
 | 编排（队列/落账/收敛/预填） | `backend/tests/test_bili_manager.py` | 64 |
 | 编排（读模型与徽标聚合） | `backend/tests/test_bili_read_model.py` | 47 |
 | 入口（13 个 operation 的状态码） | `backend/tests/test_api_bilibili.py` | 39 |
 | 共享替身 | `backend/tests/bili_fakes.py` | — |
-| **合计** | **9 个文件** | **448** |
+| **合计** | **9 个文件** | **467** |
 
-数字取自 `pytest --collect-only`（逐文件），与 `backend/tests` 全集 **804** 减去既有 **356** 相符。
-缺陷 [`011`](../../bug-fix/011-biliup-refuses-a-token-less-cookie-file.md) 修复后本表由 420 更新为 448：
-`test_bili_auth.py` **+17**（TV 三步令牌交换、签名冻结值、`build_login_info`/`read_login_token`）、
-`test_bili_manager.py` **+6**（投稿令牌前置条件与体检档）、`test_bili_policy.py` **+3**（`-400`/`61000` 分类）、
-`test_bili_upload.py` **+2**（失败原文进日志）。
+数字取自 `pytest --collect-only`（逐文件），与 `backend/tests` 全集减去既有基线相符。
+缺陷 [`011`](../../bug-fix/011-biliup-refuses-a-token-less-cookie-file.md) 修复合入时本表由 420 → 448
+（`test_bili_auth.py` **+17**、`test_bili_manager.py` **+6**、`test_bili_policy.py` **+3**、
+`test_bili_upload.py` **+2**）；
+本次「自制 / 转载 + 原视频链接」再由 448 → **467**（`test_bili_meta.py` 44 → **59**、
+`test_bili_bin.py` 42 → **44**、`test_bili_upload.py` 65 → **67**）。
+
+`test_bili_meta.py` 那 **+15** 条集中在三组判据：`normalize_copyright` 的回退方向（读不出合法值时
+**回退转载而不是自制** —— 标成自制是替用户声明一件他没说过的事）、`effective_source`
+（自制稿即便带着来源也不提交）、`validate` 对「转载缺来源」的拦截。
+`test_bili_bin.py` 那 +2 条锁的是**实发参数**：`--copyright` 跟着元数据走、
+`--source` 只在转载时出现 —— 这两条错了会让落库快照与实际提交不一致。
 
 本功能合入前后端既有 **354** 项（22 个文件）保持全绿、前端 **69** 项（11 个文件）保持全绿；
 两处随后各自增长（011 给 `test_log_safety.py` 加了 2 项，本功能给前端加了 `bili-upload.test.tsx`），
@@ -72,6 +79,14 @@
 | 5 | 合集简介一直是**空串**发给平台 | 简介是必填项，留空等于把「能不能过」交给平台猜；界面上又没有这个字段 | 补 `default_season_desc()` + schema + `types.ts` + 前端回传 |
 | 6 | 弹窗焦点副作用依赖 `onCancel` | SSE 每来一条事件 App 就换一次函数身份 → 用户打字途中被全选 | 改为挂载时只跑一次（`cancelRef` 承载回调） |
 
+### 3.1.1 「自制 / 转载 + 原视频链接」这一轮新发现的两条
+
+| # | 缺陷 | 后果 | 判据 |
+| --- | --- | --- | --- |
+| 7 | **`BiliMetadata` 加字段后，两个精确断言用例没跟** | 提交体少了 `copyright` / `source`，而服务端靠它们重建元数据 —— 重投时稿件可能从转载悄悄变成自制 | `vitest` 报 2 例失败。这两条用例本来是 `toEqual` 精确比对整个请求体，正好是锁定「前端原样回传」的地方；改成 `expect.objectContaining` 就能过，但那样它们再也不会发现这类偏差 |
+| 8 | **新用例写成 `.metadata.copyright`，而 harness 的 body 类型是 `Record<string, unknown>`** | 运行时全绿、`tsc --noEmit` 报 `TS2571: Object is of type 'unknown'` —— 断言过了但类型是错的 | 先取出 `metadata` 再断言字段。**这一条只有类型检查能发现，vitest 一路绿灯** |
+
+
 ### 3.2 测试自身的缺陷（用例改了）
 
 - **「显式传 None」无法表达**（§2 第 1 条）；
@@ -106,6 +121,22 @@
 前端自动测试是 `vitest + jsdom`，而 **jsdom 不做布局**（`getBoundingClientRect()` 一律返回 0）。
 所以「两个盒子是否共线」「文本有没有溢出」这类判据**永远无法单测**，自动化上限是
 「样式源文不变式」（见 `frontend/src/styles.test.ts`）。真判据是 CDP 探针 + 截图。
+
+「自制 / 转载」那两档单选的选中态靠 `.bili-choice-option:has(input:checked)` 上色。
+这里有一条**纠正过一次**的判断（写错过，记下来免得再错一遍）：初稿以为「jsdom 不支持 `:has()`，
+所以配色无法断言」。实测（`vite.config.ts` 已开 `test.css = true`，用例 `import "./styles.css"`）：
+
+```
+stylesheets = 1
+matches(':has(input:checked)') = true
+borderColor      = "rgb(251, 114, 153)"   ← #fb7299
+backgroundColor  = "rgb(255, 241, 245)"   ← #fff1f5
+```
+
+所以 `:has()` 的选中态**可以**用 `getComputedStyle` 断言，那条用例已加进去。
+（探针第一次跑出空值，是因为那次没 import 样式，`document.styleSheets.length = 0` ——
+**「读不到样式」与「选择器不支持」是完全不同的两件事**，前者只说明样式表没加载。）
+不变的边界仍然是 §4.2 那条：jsdom 不做布局，所以「两档是否共线」「边框有没有被挤变形」测不了。
 
 ### 4.3 平台侧时序
 

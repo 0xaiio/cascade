@@ -390,7 +390,15 @@ export const biliPrefillSinglePayload: BiliPrefill = {
   job_title: "Unsupported resolution",
   kind: "single",
   comment: "本视频由个人工作流同步上传，欢迎在评论区交流。",
-  metadata: { title: "Unsupported resolution", desc: "简介", tags: "编程,数据库", tid: "122" },
+  metadata: {
+    title: "Unsupported resolution",
+    desc: "简介",
+    tags: "编程,数据库",
+    tid: "122",
+    // 与服务端 `default_single` 的默认一致：转载 + 预填该条视频自己的原始链接。
+    copyright: "2",
+    source: "https://youtu.be/format"
+  },
   template: null,
   items: [
     {
@@ -419,7 +427,15 @@ export const biliPrefillCollectionPayload: BiliPrefill = {
   kind: "collection",
   comment: "本视频由个人工作流同步上传，欢迎在评论区交流。",
   metadata: null,
-  template: { title: "{job} · 第 {index}/{count} 集", desc: "{title}\n原视频：{source}", tags: "编程", tid: "122" },
+  template: {
+    title: "{job} · 第 {index}/{count} 集",
+    desc: "{title}\n原视频：{source}",
+    tags: "编程",
+    tid: "122",
+    copyright: "2",
+    // 合集模板上**没有**共用来源：逐条渲染时各取该条视频自己的原始链接。
+    source: ""
+  },
   items: [
     {
       index: 1,
@@ -461,6 +477,10 @@ export const biliUploadPayload: BiliUpload = {
   tags: "编程,数据库",
   tid: "122",
   tid_label: "野生技术协会",
+  // 提交时的快照：转载 + 那条视频自己的原始链接。与服务端 `default_single` 的默认一致。
+  copyright: "2",
+  copyright_label: "转载",
+  source: "https://youtu.be/format",
   status: "published",
   status_text: "已上传",
   badge: "uploaded",

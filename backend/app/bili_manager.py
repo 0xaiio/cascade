@@ -55,11 +55,14 @@ from .bili_http import Transport, default_transport
 from .bili_meta import (
     MetadataTemplate,
     UploadMetadata,
+    copyright_label,
     default_collection_template,
     default_comment,
     default_season_desc,
     default_single,
+    effective_source,
     limits as bili_limits,
+    normalize_copyright,
     partition_options,
     validate as validate_metadata,
     validate_comment,
@@ -267,12 +270,23 @@ def _metadata_model(value: UploadMetadata | MetadataTemplate) -> BiliMetadata:
     """`UploadMetadata` 与 `MetadataTemplate` 都投影成同一个线上模型 ——
     单视频的「一组值」与合集的「模板」在界面上是**同一个表单**，只是标题/简介的语义不同。"""
     if isinstance(value, UploadMetadata):
-        return BiliMetadata(title=value.title, desc=value.desc, tags=value.tags, tid=value.tid)
+        return BiliMetadata(
+            title=value.title,
+            desc=value.desc,
+            tags=value.tags,
+            tid=value.tid,
+            copyright=normalize_copyright(value.copyright),
+            source=effective_source(value.copyright, value.source),
+        )
     return BiliMetadata(
         title=value.title_template,
         desc=value.desc_template,
         tags=value.tags,
         tid=value.tid,
+        copyright=normalize_copyright(value.copyright),
+        # 模板上没有共用来源（每条视频各用各的原始链接）。**留空而不是回填第一条**：
+        # 回填一个看着像「所有条目都用它」的值，正是这条设计要避免的误导。
+        source="",
     )
 
 
@@ -626,6 +640,10 @@ class BiliManager:
         row.desc = meta.desc
         row.tags = meta.tags
         row.tid = meta.tid
+        # 版权与来源一起落库：重投时 `_load_request` 用它们重建要提交的元数据，
+        # 而 worker 是在**另一次请求之后**才跑的 —— 只活在请求对象里的选项会静默丢失。
+        row.copyright = normalize_copyright(meta.copyright)
+        row.source = effective_source(meta.copyright, meta.source)
         row.video_path = str(video_path)
         row.cover_path = None
         row.make_cover = make_cover
@@ -874,7 +892,14 @@ class BiliManager:
                 video_path=Path(row.video_path),
                 item_id=row.item_id,
             )
-            meta = UploadMetadata(title=row.title, desc=row.desc, tags=row.tags, tid=row.tid)
+            meta = UploadMetadata(
+                title=row.title,
+                desc=row.desc,
+                tags=row.tags,
+                tid=row.tid,
+                copyright=normalize_copyright(row.copyright),
+                source=effective_source(row.copyright, row.source),
+            )
             return target, meta, bool(row.make_cover), row.comment or ""
 
     def _context(self, *, on_progress: Callable[[float], None] | None = None) -> UploadContext:

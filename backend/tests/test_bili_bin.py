@@ -35,7 +35,7 @@ from app.bili_bin import (
     run_command,
     upload,
 )
-from app.bili_meta import UploadMetadata
+from app.bili_meta import COPYRIGHT_REPRINT, COPYRIGHT_SELF, UploadMetadata
 from app.bili_policy import TIMEOUT_MARKER
 
 # ---------------------------------------------------------------- 夹具
@@ -62,6 +62,9 @@ def make_meta(**overrides) -> UploadMetadata:
         "tid": "122",
         "tags": "编程,教程",
         "desc": "一段简介",
+        # 默认跟产品一致：转载 + 来源。
+        "copyright": COPYRIGHT_REPRINT,
+        "source": "https://youtu.be/demo",
     }
     base.update(overrides)
     return UploadMetadata(**base)
@@ -242,10 +245,35 @@ def test_build_upload_argv_always_asks_for_web_submit(tmp_path):
     assert argv[argv.index("--submit") + 1] == "web"
 
 
-def test_build_upload_argv_declares_original_content(tmp_path):
-    """`--copyright 1` = 自制。少了它，稿件会被当成转载。"""
+def test_build_upload_argv_carries_the_reprint_source(tmp_path):
+    """默认是**转载**，于是来源必须跟着命令走。
+
+    上游把整个 `Studio`（含 `copyright` / `source`）当 JSON body 发给 `x/vu/app/add`，
+    所以这两个参数是逐字段生效的 —— 漏了 `--source`，B站 会用 `21004` 退回这条转载稿。
+    """
     argv = build_upload_argv("biliup.exe", "c.json", "v.mp4", make_meta())
-    assert argv[argv.index("--copyright") + 1] == "1"
+    assert argv[argv.index("--copyright") + 1] == COPYRIGHT_REPRINT
+    assert argv[argv.index("--source") + 1] == "https://youtu.be/demo"
+
+
+def test_build_upload_argv_omits_the_source_for_a_self_made_video(tmp_path):
+    """自制稿**不发** `--source`。
+
+    「自制稿不该带来源」这条判据只有 `bili_meta.effective_source` 一处，这里钉住
+    「命令组装层确实走的是它」—— 否则界面切了自制、命令里却还带着来源，
+    两边对不上而没人看得出来。
+    """
+    argv = build_upload_argv(
+        "biliup.exe", "c.json", "v.mp4", make_meta(copyright=COPYRIGHT_SELF)
+    )
+    assert argv[argv.index("--copyright") + 1] == COPYRIGHT_SELF
+    assert "--source" not in argv
+
+
+def test_build_upload_argv_falls_back_to_reprint_for_an_unusable_copyright(tmp_path):
+    """读不出来的版权值回退成转载，而不是把 `--copyright 公开` 原样发给平台。"""
+    argv = build_upload_argv("biliup.exe", "c.json", "v.mp4", make_meta(copyright="公开"))
+    assert argv[argv.index("--copyright") + 1] == COPYRIGHT_REPRINT
 
 
 def test_build_upload_argv_carries_every_field_from_the_metadata():

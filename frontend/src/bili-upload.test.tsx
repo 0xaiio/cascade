@@ -2,6 +2,9 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 import App from "./App";
+// 必须 import：否则 `getComputedStyle` 一律返回空串，选中态的配色断言会静默地
+// 变成「断言一个空值不等于某个颜色」—— 两种情况都能过，测试却是空的。
+import "./styles.css";
 import {
   biliJobUploadsPayload,
   biliPrefillCollectionPayload,
@@ -209,7 +212,16 @@ describe("App · B站 上传表单（单视频）", () => {
       // `job_id` 取自**服务端的预填结果**（不是界面自己拼的 job），`item_id` 取自点的那一条。
       job_id: "job-format-failed",
       item_id: "item-running",
-      metadata: { title: "换过的标题", desc: "简介", tags: "编程,数据库", tid: "122" },
+      // 版权与来源是**服务端预填的默认值原样回传**（转载 + 那条视频自己的原始链接），
+      // 界面上没动过就不该被前端改写。
+      metadata: {
+        title: "换过的标题",
+        desc: "简介",
+        tags: "编程,数据库",
+        tid: "122",
+        copyright: "2",
+        source: "https://youtu.be/format"
+      },
       make_cover: false,
       comment: ""
     });
@@ -244,6 +256,83 @@ describe("App · B站 上传表单（单视频）", () => {
     // 「只报错不截断」：静默截断会让用户以为发出去的是完整内容。
     expect(title).toHaveValue(tooLong);
     expect(within(dialog).getByRole("button", { name: "开始上传" })).toBeDisabled();
+  });
+
+  test("defaults to 转载 and prefills the original link of that very video", async () => {
+    const { dialog } = await openSingleDialog();
+
+    // 默认转载：这个工作流搬的都是从别处下载来的视频，默认「自制」会把每一单都填成假信息。
+    expect(within(dialog).getByRole("radio", { name: "转载" })).toBeChecked();
+    expect(within(dialog).getByRole("radio", { name: "自制" })).not.toBeChecked();
+    // 来源不是让用户从零敲的 —— 那条视频本来就是从哪个链接下来的，我们知道。
+    expect(within(dialog).getByLabelText(/原视频链接/)).toHaveValue("https://youtu.be/format");
+  });
+
+  test("hides the source box for 自制 and brings it back on switching back", async () => {
+    const { user, dialog } = await openSingleDialog();
+
+    await user.click(within(dialog).getByRole("radio", { name: "自制" }));
+
+    // 自制稿没有「出处」这回事。留着输入框只会让人填一个不会被提交的值。
+    expect(within(dialog).queryByLabelText(/原视频链接/)).not.toBeInTheDocument();
+    expect(within(dialog).getByText("自制：这条视频是你自己的作品，不需要填出处。")).toBeInTheDocument();
+    // 切走时**不清空**来源：用户来回切一下不该把已经打好的链接弄丢。
+    // 真提交时带不带由服务端 `effective_source` 决定（自制稿恒不提交）。
+    await user.click(within(dialog).getByRole("radio", { name: "转载" }));
+    expect(within(dialog).getByLabelText(/原视频链接/)).toHaveValue("https://youtu.be/format");
+  });
+
+  test("marks the picked 版权 with the accent colour through :has()", async () => {
+    const { user, dialog } = await openSingleDialog();
+
+    // 选中态是 `.bili-choice-option:has(input:checked)` 上色的。这条断言能成立的前提是
+    // 「用例 import 了样式表」—— 没 import 时 `getComputedStyle` 一律返回空串，
+    // 读到的空值与「选择器不支持」是两回事（已在 ai/feature 的 04-testing §4.2 记下这个坑）。
+    const labelOf = (name: "自制" | "转载") =>
+      within(dialog).getByRole("radio", { name }).closest(".bili-choice-option") as HTMLElement;
+    const accent = "rgb(251, 114, 153)"; // #fb7299
+    expect(getComputedStyle(labelOf("转载")).borderColor).toBe(accent);
+    expect(getComputedStyle(labelOf("自制")).borderColor).not.toBe(accent);
+
+    await user.click(within(dialog).getByRole("radio", { name: "自制" }));
+
+    // 换档之后配色跟着换 —— 只断言「选中项有颜色」不够，那样两档同时亮着也会过。
+    expect(getComputedStyle(labelOf("自制")).borderColor).toBe(accent);
+    expect(getComputedStyle(labelOf("转载")).borderColor).not.toBe(accent);
+  });
+
+  test("sends 自制 with no source when the user switches to it", async () => {
+    const user = userEvent.setup();
+    mockState.jobs = [downloadedJob()];
+    mockState.biliSubmitResult = jobUploads();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /上传到 B 站 Running video/ }));
+    const dialog = await screen.findByRole("dialog");
+
+    await user.click(within(dialog).getByRole("radio", { name: "自制" }));
+    await user.click(within(dialog).getByRole("button", { name: "开始上传" }));
+
+    await waitFor(() => expect(mockState.biliUploadBodies).toHaveLength(1));
+    // `biliUploadBodies` 的类型是 `Record<string, unknown>`，先取出来再断言字段 ——
+    // 直接写 `.metadata.copyright` 会被 tsc 判成 `unknown`（运行时过得去，类型上是错的）。
+    const metadata = mockState.biliUploadBodies[0].metadata as Record<string, unknown>;
+    expect(metadata.copyright).toBe("1");
+    // 来源字段确实还在 state 里（界面不清空它），但服务端 `effective_source` 会把它收成空串。
+    expect(metadata.source).toBe("https://youtu.be/format");
+  });
+
+  test("blocks the submit when 转载 has no source at all", async () => {
+    const { user, dialog } = await openSingleDialog();
+
+    const source = within(dialog).getByLabelText(/原视频链接/);
+    await user.clear(source);
+
+    // 这是平台的硬要求（会被 B站 退回来），所以在输入框旁边就报，而不是让用户点了提交吃 400。
+    expect(
+      within(dialog).getByText("选了「转载」但没填原视频链接（转载稿必须填来源，留空会被 B站 退回来）")
+    ).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "开始上传" })).toBeDisabled();
+    expect(mockState.biliUploadBodies).toHaveLength(0);
   });
 
   test("keeps a rejected submit open so the message stays next to the form", async () => {
@@ -316,6 +405,15 @@ describe("App · B站 上传表单（合集）", () => {
     expect(within(dialog).getByRole("button", { name: "开始上传全部" })).toBeDisabled();
   });
 
+  test("shows the 版权 choice but no shared source box for a collection", async () => {
+    const { dialog } = await openCollectionDialog();
+
+    // 合集里每条视频的出处都不一样，一个共用的来源框在语义上就是错的 ——
+    // 逐条来源由服务端渲染时各填各的（每条的原始链接）。
+    expect(within(dialog).getByRole("radio", { name: "转载" })).toBeChecked();
+    expect(within(dialog).queryByLabelText(/原视频链接/)).not.toBeInTheDocument();
+  });
+
   test("submits the template plus the season fields the server prefill provided", async () => {
     const { user, dialog } = await openCollectionDialog();
 
@@ -334,7 +432,16 @@ describe("App · B站 上传表单（合集）", () => {
     await waitFor(() => expect(mockState.biliCollectionBodies).toHaveLength(1));
     expect(mockState.biliCollectionBodies[0]).toEqual({
       job_id: "job-playlist",
-      template: { title: "{job} · 第 {index}/{count} 集", desc: "{title}\n原视频：{source}", tags: "编程", tid: "122" },
+      template: {
+        title: "{job} · 第 {index}/{count} 集",
+        desc: "{title}\n原视频：{source}",
+        tags: "编程",
+        tid: "122",
+        // 合集模板回传版权，但**没有**共用来源：逐条渲染时各取该条视频自己的原始链接，
+        // 所以这里恒为空串（界面上也没有这个输入框）。
+        copyright: "2",
+        source: ""
+      },
       // 合集名与简介界面上没有输入框：它们不该让用户填，直接用服务端给的值。
       season_title: "Playlist batch",
       season_desc: "Playlist batch（共 2 个视频，由本机下载工作流自动上传）",

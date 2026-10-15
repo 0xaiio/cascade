@@ -60,6 +60,19 @@ PARTITIONS: tuple[tuple[str, str], ...] = (
 
 PARTITION_LABELS: dict[str, str] = {tid: label for label, tid in PARTITIONS}
 
+# ---------------------------------------------------------------- 版权（自制 / 转载）
+# 取值直接沿用 `biliup --copyright 1-自制 2-转载`（也就是 B站 接口的 `copyright` 字段），
+# 所以界面上的选择不需要任何翻译层，原样能拼进命令。
+COPYRIGHT_SELF = "1"
+COPYRIGHT_REPRINT = "2"
+# **默认转载**：这个工作流搬的是从别的平台下载下来的视频，绝大多数稿件都不是自己拍的；
+# 默认「自制」会把每一单都填成假信息，而 B站 对「把转载标成自制」是有处置的。
+DEFAULT_COPYRIGHT = COPYRIGHT_REPRINT
+COPYRIGHT_LABELS: dict[str, str] = {
+    COPYRIGHT_SELF: "自制",
+    COPYRIGHT_REPRINT: "转载",
+}
+
 # ---------------------------------------------------------------- 模板占位符
 PLACEHOLDERS: tuple[str, ...] = ("index", "title", "count", "job", "source")
 PLACEHOLDER_RE = re.compile(r"\{(" + "|".join(PLACEHOLDERS) + r")\}")
@@ -99,6 +112,33 @@ def normalize_tid(value: str | None) -> str:
     return text if text.isdigit() else DEFAULT_TID
 
 
+def normalize_copyright(value: str | None) -> str:
+    """把界面上的选择收敛成 `1` 或 `2`。其余一律回退**默认的转载**。
+
+    回退到「转载」而不是「自制」是有意的：字段读不出来时，把稿件标成自制是**替用户
+    声明了一件他没说过的事**，而标成转载最多只是让用户改一下。
+    """
+    text = str(value).strip() if value is not None else ""
+    return text if text in COPYRIGHT_LABELS else DEFAULT_COPYRIGHT
+
+
+def copyright_label(value: str | None) -> str:
+    return COPYRIGHT_LABELS[normalize_copyright(value)]
+
+
+def effective_source(copyright_value: str | None, source: str | None) -> str:
+    """**真正会提交出去**的来源链接。
+
+    单一判据在这里，三处调用（`render` / `default_single` / `bili_bin.build_upload_argv`）：
+    只有转载稿才有来源 —— 自制稿即便带着值也不提交。不这么收口的话，
+    「界面上有值」与「命令里带了这个参数」会各写一遍，迟早出现落库的快照与实发参数不一致
+    （`B站` 那边「来源」是转载稿专有字段，自制稿带了反而可能被判成误标）。
+    """
+    if normalize_copyright(copyright_value) != COPYRIGHT_REPRINT:
+        return ""
+    return (source or "").strip()
+
+
 def derive_tags(*texts: str, limit: int = TAG_MAX_COUNT) -> str:
     """从标题里派生一组标签。**不追求准，追求「不至于空白且能一键改」。**"""
     seen: list[str] = []
@@ -129,20 +169,34 @@ def trim_tags(tags: str, *, limit_total: int = TAG_MAX) -> str:
 
 @dataclass(frozen=True)
 class UploadMetadata:
-    """一次投稿真正要提交的四个字段。"""
+    """一次投稿真正要提交的字段。
+
+    `copyright` + `source` 是后来加的（原先 `bili_bin` 把 `--copyright` 写死成 `1`）：
+    B站 的转载稿要求填来源，而本工作流搬的视频本来就都有原始链接，所以这一项要跟着元数据走，
+    不能由命令组装层自己决定。两个字段都带默认值，既有构造点不需要跟着改。
+    """
 
     title: str
     desc: str
     tags: str
     tid: str
+    copyright: str = DEFAULT_COPYRIGHT
+    source: str = ""
 
 
 @dataclass(frozen=True)
 class MetadataTemplate:
+    """合集模板。
+
+    **刻意只有一个 `copyright`、没有 `source`**：合集里的每条视频各自的原始链接都不同，
+    写一个共用的来源是错的。逐条渲染时来源取该条自己的 `source_url`（`render_collection` 里传）。
+    """
+
     title_template: str
     desc_template: str
     tags: str
     tid: str
+    copyright: str = DEFAULT_COPYRIGHT
 
 
 def render(
@@ -162,11 +216,14 @@ def render(
         "job": job or "",
         "source": source or "",
     }
+    copyright_value = normalize_copyright(template.copyright)
     return UploadMetadata(
         title=PLACEHOLDER_RE.sub(lambda m: mapping[m.group(1)], template.title_template).strip(),
         desc=PLACEHOLDER_RE.sub(lambda m: mapping[m.group(1)], template.desc_template).strip(),
         tags=trim_tags(template.tags),
         tid=normalize_tid(template.tid),
+        copyright=copyright_value,
+        source=effective_source(copyright_value, source),
     )
 
 
@@ -242,27 +299,46 @@ def validate(meta: UploadMetadata) -> list[str]:
         problems.append(f"标签总长超出 {len(meta.tags) - TAG_MAX} 个字（上限 {TAG_MAX} 字）")
     if not meta.tid.isdigit():
         problems.append("分区不是一个有效的编号")
+    if meta.copyright not in COPYRIGHT_LABELS:
+        problems.append("版权只能是「自制」或「转载」")
+    elif meta.copyright == COPYRIGHT_REPRINT and not (meta.source or "").strip():
+        # 这条不是「我们觉得应该填」，而是平台的硬要求：转载稿没有来源会被退回来
+        # （`21004 Missing source for reprint`，见 01-requirements F16）。
+        # 在表单里就地拦住，比让用户点了提交再吃一个 400（而且提示语里只有一串错误码）好。
+        problems.append("选了「转载」但没填原视频链接（转载稿必须填来源，留空会被 B站 退回来）")
     return problems
 
 
 def default_single(*, job_title: str, item_title: str, source_url: str) -> UploadMetadata:
-    """单视频的预填值。标题取视频标题，简介带出来源链接（B站 简介里的 URL 是可点击的）。"""
+    """单视频的预填值。标题取视频标题，简介带出来源链接（B站 简介里的 URL 是可点击的）。
+
+    版权默认「转载」并**把这条视频自己的原始链接预填进来源** —— 这是本工作流里唯一
+    已知为真的取值（视频就是从那个链接下来的）；用户改成自制时来源会自动清空
+    （`effective_source`）。
+    """
     desc = f"{job_title}\n原视频：{source_url}" if source_url else job_title
     return UploadMetadata(
         title=(item_title or job_title)[:TITLE_MAX],
         desc=desc[:DESC_MAX],
         tags=trim_tags(derive_tags(item_title, job_title)),
         tid=DEFAULT_TID,
+        copyright=DEFAULT_COPYRIGHT,
+        source=effective_source(DEFAULT_COPYRIGHT, source_url),
     )
 
 
 def default_collection_template(job_title: str) -> MetadataTemplate:
-    """合集的默认模板。标签取合集名派生，逐条渲染时会各自叠加视频标题的派生标签。"""
+    """合集的默认模板。标签取合集名派生，逐条渲染时会各自叠加视频标题的派生标签。
+
+    只给 `copyright`，**不给来源**：合集里每条视频的原始链接都不一样，
+    逐条渲染时各取自己的 `source_url`（见 `MetadataTemplate` 的说明）。
+    """
     return MetadataTemplate(
         title_template=DEFAULT_TITLE_TEMPLATE,
         desc_template=DEFAULT_DESC_TEMPLATE,
         tags=trim_tags(derive_tags(job_title)),
         tid=DEFAULT_TID,
+        copyright=DEFAULT_COPYRIGHT,
     )
 
 

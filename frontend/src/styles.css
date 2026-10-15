@@ -1521,6 +1521,53 @@ th {
 
 /* 覆盖全局 `table { min-width: 620px }`：那个宽度是按主栏的宽表定的，
    这张只有三列，带进弹窗会白白多出一条横向滚动条。 */
+/* 「自制 / 转载」的两档单选。用 `label` 包住 `input` 而不是给 input 套样式：
+   这样点击整块文字都能选中，键盘 Tab 也只占一个停靠点（两个 radio 分开排会占两格）。
+   选中态交给 `:has()`：它是这条规则唯一需要的能力，而 `appearance: none` 那套要额外维护
+   假按钮的对齐与边框，收益不抵成本。 */
+.bili-choice {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.bili-choice-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 14px;
+  border: 1px solid #cfd7e6;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.bili-choice-option:hover {
+  background: #f8fbff;
+}
+
+.bili-choice-option:has(input:checked) {
+  border-color: #fb7299;
+  background: #fff1f5;
+  color: #a4133c;
+}
+
+.bili-choice-option:has(input:focus-visible) {
+  outline: 2px solid #1f6feb;
+  outline-offset: 2px;
+}
+
+.bili-choice-option input {
+  width: auto;
+  margin: 0;
+  accent-color: #fb7299;
+}
+
+/* 覆盖全局 `table { min-width: 620px }`：那个宽度是按主栏的宽表定的，
+   这张只有三列，带进弹窗会白白多出一条横向滚动条。 */
 .bili-preview-table {
   min-width: 0;
 }

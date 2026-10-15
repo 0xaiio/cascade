@@ -26,6 +26,7 @@ from sqlmodel import Session
 from app.bili_auth import TvToken, write_cookie_file
 from app.bili_bin import is_pe
 from app.bili_manager import BiliManager
+from app.bili_meta import COPYRIGHT_REPRINT, COPYRIGHT_SELF
 from app.config import AppSettings
 from app.db import create_app_engine, init_db
 from app.events import EventBroker
@@ -363,7 +364,16 @@ def single_payload(client, job_id: str = "job1", item_id: str = "job1-i1", **ove
     payload = {
         "job_id": job_id,
         "item_id": item_id,
-        "metadata": {"title": "单视频任务 第 1 集", "desc": "简介", "tags": "标签", "tid": "122"},
+        "metadata": {
+            "title": "单视频任务 第 1 集",
+            "desc": "简介",
+            "tags": "标签",
+            "tid": "122",
+            # 界面一定会回传这两项（表单默认选中「转载」并把该视频的原始链接预填进去）。
+            # 不带上它们，服务端会按「转载没填来源」拒掉 —— 那是**对的**行为（见 F16）。
+            "copyright": COPYRIGHT_REPRINT,
+            "source": "https://youtu.be/demo",
+        },
         "make_cover": False,
         "comment": "置顶评论",
     }
@@ -437,7 +447,14 @@ def test_create_upload_404s_for_an_unknown_item(client):
 def collection_payload(job_id: str = "job2", **overrides) -> dict:
     payload = {
         "job_id": job_id,
-        "template": {"title": "{title}", "desc": "{job} 第 {index}/{count} 集", "tags": "合集标签", "tid": "122"},
+        "template": {
+            "title": "{title}",
+            "desc": "{job} 第 {index}/{count} 集",
+            "tags": "合集标签",
+            "tid": "122",
+            # 模板只带版权，**不带共用来源**：每条视频各用自己的原始链接（服务端逐条填）。
+            "copyright": COPYRIGHT_REPRINT,
+        },
         "season_title": "合集任务",
         "season_desc": "合集说明",
         "make_cover": False,
@@ -507,7 +524,17 @@ def test_retry_upload_reports_none_for_a_published_record(client):
     client.seed_job("job1", "任务", 1)
     created = client.client.post(
         "/api/bilibili/uploads",
-        json=single_payload(client, metadata={"title": "演示标题", "desc": "", "tags": "", "tid": "122"}),
+        json=single_payload(
+            client,
+            metadata={
+                "title": "演示标题",
+                "desc": "",
+                "tags": "",
+                "tid": "122",
+                "copyright": COPYRIGHT_REPRINT,
+                "source": "https://youtu.be/demo",
+            },
+        ),
     ).json()
     upload_id = created["uploads"][0]["id"]
     assert client.wait_until_finished(upload_id) == "published"

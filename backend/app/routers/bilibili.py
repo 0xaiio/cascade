@@ -223,6 +223,9 @@ async def bili_create_collection(
         desc_template=payload.template.desc,
         tags=payload.template.tags,
         tid=payload.template.tid,
+        # 合集模板上没有共用来源：逐条渲染时各取该条视频自己的原始链接
+        # （`render_collection` 传 `target.source_url`），所以这里刻意不接 `payload.template.source`。
+        copyright=payload.template.copyright,
     )
     problems = validate_collection(template, targets, job_title=job.title)
     _reject_problems(problems + validate_comment(payload.comment))
@@ -263,7 +266,14 @@ async def bili_retry_season(season_record_id: str, ctx: ContextDep) -> BiliSeaso
 
 # ---------------------------------------------------------------- 内部工具
 def _meta_from(payload: BiliMetadata) -> UploadMetadata:
-    return UploadMetadata(title=payload.title, desc=payload.desc, tags=payload.tags, tid=payload.tid)
+    return UploadMetadata(
+        title=payload.title,
+        desc=payload.desc,
+        tags=payload.tags,
+        tid=payload.tid,
+        copyright=payload.copyright,
+        source=payload.source,
+    )
 
 
 def _reject_problems(problems: list[str]) -> None:

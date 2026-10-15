@@ -11,7 +11,7 @@
 | 模块 | 层 | 职责 | 不做什么 |
 | --- | --- | --- | --- |
 | `backend/app/bili_policy.py` | L5 纯工具 | 文案表、状态折合、失败分类 | 不含任何判定逻辑 |
-| `backend/app/bili_meta.py` | L5 纯工具 | 模板渲染、标签派生、平台硬限校验 | 不碰进程、不碰网络 |
+| `backend/app/bili_meta.py` | L5 纯工具 | 模板渲染、标签派生、**版权与来源的收口（`normalize_copyright` / `effective_source`）**、平台硬限校验 | 不碰进程、不碰网络 |
 | `backend/app/bili_http.py` | L4 基础设施 | 唯一 HTTP 接缝（`Transport` 协议 + 标准库实现） | 不含业务码判断 |
 | `backend/app/bili_auth.py` | L3 领域 | 扫码登录会话、**TV 端三步令牌交换**、cookie 文件读写与摘要 | 不落盘策略（由 manager 决定） |
 | `backend/app/bili_api.py` | L3 领域 | 会员态接口：对账、稿件详情、合集、置顶评论 | 不实现上传封面（见 §5.2） |
@@ -28,9 +28,9 @@
 | 文件 | 改了什么 |
 | --- | --- |
 | `config.py` | `biliup_path` / `bili_cookie_filename` / `bili_upload_gap_seconds`（默认 20.0）+ `bili_cookie_path` / `bili_cover_dir` 两个派生路径 |
-| `models.py` | `BiliUploadStatus`（8 态）、`BiliSeasonStatus`（4 态）、`BiliUpload` / `BiliSeason` 两张表 |
+| `models.py` | `BiliUploadStatus`（8 态）、`BiliSeasonStatus`（4 态）、`BiliUpload` / `BiliSeason` 两张表。**`BiliUpload` 另含 `copyright` / `source` 两列** —— 重投时靠它们重建要提交的元数据，不存就会出现「重试一次，稿件从转载变成了自制」这种没人发现得了的偏差。 |
 | `db.py` | `_ensure_columns` 给 `bili_upload` 补 `make_cover` / `comment` 两列 |
-| `schemas.py` | 整段 B站 线上模型（含 `BiliPrefillRead.season_desc`） |
+| `schemas.py` | 整段 B站 线上模型（含 `BiliPrefillRead.season_desc`；`BiliMetadata` 含 `copyright` / `source`） |
 | `log_safety.py` | `_SECRET_NAMES` 扩展 B站 凭据（`sessdata` / `bili_jct` / `dedeuserid` / `buvid3` / `csrf` …） |
 | `api_context.py` / `routers/__init__.py` / `main.py` | 装配 `ctx.bili`；lifespan 里 `bili.start()` + `resume_interrupted()` |
 | `job_read_model.py` | `_elapsed_seconds` → `elapsed_seconds`（公开名，两个读模型共用一条「未结束时取当前时间」的规则） |
@@ -43,7 +43,7 @@
 
 - `BiliIcon.tsx` —— 内联 SVG 图标，`currentColor` 上色，随 tone 变化；
 - `BiliUploadButton.tsx` —— 「B站图标 + 上传」按钮，5 档 tone（idle / busy / ok / warn / bad）；
-- `BiliUploadDialog.tsx` —— 预填表单弹窗，含逐条预览与本地校验；
+- `BiliUploadDialog.tsx` —— 预填表单弹窗，含逐条预览与本地校验。**含「自制 / 转载」两档单选与来源输入框**：默认转载；来源框只在「转载 + 单视频」时出现（合集的逐条来源由服务端渲染时各填各的，见 [02-design §7.1](02-design.md)）。
 - `BiliLoginSection.tsx` —— 设置面板里的登录区（扫码 + 导入 cookies）；
 - `BiliJobStatus.tsx` —— 条目级状态行（含「重新核对」「重试上传」入口）。
 

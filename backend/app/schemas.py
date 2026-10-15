@@ -329,12 +329,19 @@ class BiliLoginPollRead(BaseModel):
 
 
 class BiliMetadata(BaseModel):
-    """投稿的四个可编辑字段。合集场景下它同时充当**模板**（标题/简介可含占位符）。"""
+    """投稿的可编辑字段。合集场景下它同时充当**模板**（标题/简介可含占位符）。"""
 
     title: str = ""
     desc: str = ""
     tags: str = ""
     tid: str = ""
+    # 版权：`1` 自制 / `2` 转载，与 B站 接口的 `copyright` 同值域。
+    # 默认值是 `2`（转载）—— 与 `bili_meta.normalize_copyright` 的回退一致；
+    # 界面一定会显式回传（表单里那个选择默认就选中转载）。
+    copyright: str = "2"
+    # 转载来源链接。**合集模板上它恒为空**：合集里每条视频的来源是各自的原始链接，
+    # 由服务端在逐条渲染时填（`bili_upload.render_collection`），界面没有共用的来源输入框。
+    source: str = ""
 
 
 class BiliLimits(BaseModel):
@@ -420,6 +427,11 @@ class BiliUploadRead(BaseModel):
     tags: str = ""
     tid: str = ""
     tid_label: str = ""
+    # 实际提交出去的版权与来源（提交时的快照）。界面要用它显示「转载 / 自制」，
+    # 也是「重试没有把稿件悄悄换成自制」这件事可被核对的那一份证据。
+    copyright: str = ""
+    copyright_label: str = ""
+    source: str = ""
     status: str
     status_text: str = ""
     # 单条记录的徽标：由同一套 `derive_badge` 折算（`[这条记录] + 无合集`），

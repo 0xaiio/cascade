@@ -19,7 +19,7 @@ from collections.abc import Sequence
 
 from sqlmodel import Session, select
 
-from .bili_meta import partition_label
+from .bili_meta import copyright_label, partition_label
 from .bili_policy import (
     BADGE_FAILED,
     BADGE_NONE,
@@ -103,6 +103,9 @@ def read_upload(upload: BiliUpload, *, index: int = 1) -> BiliUploadRead:
         tags=upload.tags,
         tid=upload.tid,
         tid_label=partition_label(upload.tid),
+        copyright=upload.copyright or "",
+        copyright_label=copyright_label(upload.copyright),
+        source=upload.source or "",
         status=upload.status,
         status_text=upload_status_text(upload.status),
         badge=badge,

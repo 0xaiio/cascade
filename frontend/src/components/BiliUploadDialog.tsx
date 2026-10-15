@@ -4,6 +4,16 @@ import type { BiliMetadata, BiliPrefill } from "../types";
 import { BiliIcon } from "./BiliIcon";
 
 /**
+ * 版权取值。与 B站 接口的 `copyright` 字段同值域，也与服务端 `bili_meta.COPYRIGHT_*` 一致。
+ *
+ * **默认转载**：这个工作流搬的是从别的平台下载下来的视频，绝大多数稿件都不是自己拍的。
+ * 默认「自制」会把每一单都填成假信息，而 B站 对「把转载标成自制」是有处置的。
+ * 理由写在 `backend/app/bili_meta.py` 的 `DEFAULT_COPYRIGHT` 旁边，两边都要改。
+ */
+export const COPYRIGHT_SELF = "1";
+export const COPYRIGHT_REPRINT = "2";
+
+/**
  * 上传表单弹窗。**单视频与合集共用这一个组件**，只是标题与提示词不同：
  *
  * - 单视频：标题/简介就是最终提交的内容；
@@ -22,6 +32,13 @@ import { BiliIcon } from "./BiliIcon";
  *    发出去的是完整内容。
  * 3. **未就绪的条目要显示出来**：合集里只要有一条还没下载好，服务端就会拒绝整批；
  *    在这里先标出来，比让用户点了确认再吃一个 409 有用。
+ *
+ * 「自制 / 转载」这一项的两条规则：
+ *
+ * - **默认转载**，因为这个工作流搬的是从别处下载来的视频。
+ * - **来源输入框只在「转载 + 单视频」时出现**。合集里每条视频的出处都不一样，
+ *   一个共用的来源框在语义上就是错的 —— 逐条的来源由服务端在渲染时各填各的
+ *   （`bili_upload.render_collection`）。所以这里不是「藏起来」，是**根本没有这个字段**。
  */
 export function BiliUploadDialog({
   prefill,
@@ -38,7 +55,11 @@ export function BiliUploadDialog({
     title: "",
     desc: "",
     tags: "",
-    tid: prefill.partitions[0]?.tid ?? ""
+    tid: prefill.partitions[0]?.tid ?? "",
+    // 兜底值与服务端 `DEFAULT_COPYRIGHT` 一致（转载）。走 `??` 而不是写死，
+    // 是为了让「服务端改默认值」这件事不需要在这里跟着改一遍。
+    copyright: COPYRIGHT_REPRINT,
+    source: ""
   };
   const [metadata, setMetadata] = useState<BiliMetadata>(initial);
   const [makeCover, setMakeCover] = useState(prefill.make_cover);
@@ -75,6 +96,10 @@ export function BiliUploadDialog({
     () => metadata.tags.split(",").reduce((longest, item) => (item.trim().length > longest.length ? item.trim() : longest), ""),
     [metadata.tags]
   );
+  // 转载稿缺来源是**平台的硬要求**（会被 B站 退回来），所以就地拦住 ——
+  // 与服务端 `bili_meta.validate` 同一条判据，写两遍是为了让用户在输入框旁边就看到。
+  // 合集场景没有这个输入框（每条各用各的原始链接），由服务端逐条渲染时保证，不在这里查。
+  const sourceRequired = !isCollection && metadata.copyright === COPYRIGHT_REPRINT;
   const localProblems = useMemo(
     () => [
       ...(metadata.title.trim() ? [] : [isCollection ? "标题模板渲染后不能是空的" : "标题不能是空的"]),
@@ -85,9 +110,12 @@ export function BiliUploadDialog({
       ...(longestTag.length > limits.tag_item
         ? [`「${longestTag.length > 12 ? `${longestTag.slice(0, 12)}…` : longestTag}」这个标签有 ${longestTag.length} 个字，单个标签最多 ${limits.tag_item} 个字`]
         : []),
-      ...(comment.length > limits.comment ? [`评论超出 ${comment.length - limits.comment} 个字`] : [])
+      ...(comment.length > limits.comment ? [`评论超出 ${comment.length - limits.comment} 个字`] : []),
+      ...(sourceRequired && !metadata.source.trim()
+        ? ["选了「转载」但没填原视频链接（转载稿必须填来源，留空会被 B站 退回来）"]
+        : [])
     ],
-    [comment.length, isCollection, limits, longestTag, metadata, tagCount]
+    [comment.length, isCollection, limits, longestTag, metadata, sourceRequired, tagCount]
   );
   const notReady = prefill.items.filter((item) => !item.ready);
   const blocked = localProblems.length > 0 || notReady.length > 0;
@@ -162,6 +190,54 @@ export function BiliUploadDialog({
               ))}
             </select>
           </div>
+
+          <div className="field">
+            <span className="field-label" id="bili-copyright-label">
+              视频来源
+            </span>
+            <div className="bili-choice" role="radiogroup" aria-labelledby="bili-copyright-label">
+              <label className="bili-choice-option">
+                <input
+                  type="radio"
+                  name="bili-copyright"
+                  value={COPYRIGHT_REPRINT}
+                  checked={metadata.copyright === COPYRIGHT_REPRINT}
+                  onChange={() => setMetadata({ ...metadata, copyright: COPYRIGHT_REPRINT })}
+                />
+                <span>转载</span>
+              </label>
+              <label className="bili-choice-option">
+                <input
+                  type="radio"
+                  name="bili-copyright"
+                  value={COPYRIGHT_SELF}
+                  checked={metadata.copyright === COPYRIGHT_SELF}
+                  onChange={() => setMetadata({ ...metadata, copyright: COPYRIGHT_SELF })}
+                />
+                <span>自制</span>
+              </label>
+            </div>
+            <p className="hint">
+              {metadata.copyright === COPYRIGHT_REPRINT
+                ? "转载：这条视频不是你自己拍的，要填它原来的出处。"
+                : "自制：这条视频是你自己的作品，不需要填出处。"}
+            </p>
+          </div>
+
+          {!isCollection && metadata.copyright === COPYRIGHT_REPRINT && (
+            <div className="field">
+              <label className="field-label" htmlFor="bili-source">
+                原视频链接（转载必填）
+              </label>
+              <input
+                id="bili-source"
+                value={metadata.source}
+                onChange={(event) => setMetadata({ ...metadata, source: event.target.value })}
+                placeholder="https://www.youtube.com/watch?v=…"
+              />
+              <p className="hint">B站 要求转载稿必须标明来源，留空会被直接退回来。</p>
+            </div>
+          )}
 
           <div className="field">
             <label className="field-label" htmlFor="bili-tags">

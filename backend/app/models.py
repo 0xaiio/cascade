@@ -123,6 +123,13 @@ class BiliUpload(SQLModel, table=True):
     desc: str = ""
     tags: str = ""
     tid: str = ""
+    # 版权（`1` 自制 / `2` 转载）与转载来源链接。**必须落库**：
+    # 重投时 `_load_request` 靠这两列重建要提交的元数据，不存就会出现「重试一次，
+    # 稿件从转载变成了自制」这种没人发现得了的偏差。
+    # 这里的字面量是**产品默认值**（默认转载，理由见 `bili_meta`），
+    # 而 `db._ensure_columns` 给**历史行**补的默认值是 `1` —— 那是改动之前的实际行为，两者不一样。
+    copyright: str = "2"
+    source: str = ""
     video_path: str = ""
     cover_path: Optional[str] = None
     cover_url: Optional[str] = None

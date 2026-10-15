@@ -11,6 +11,9 @@ import pytest
 
 from app.bili_meta import (
     COMMENT_MAX,
+    COPYRIGHT_REPRINT,
+    COPYRIGHT_SELF,
+    DEFAULT_COPYRIGHT,
     DEFAULT_TID,
     DESC_MAX,
     PARTITIONS,
@@ -22,13 +25,16 @@ from app.bili_meta import (
     TITLE_MAX,
     MetadataTemplate,
     UploadMetadata,
+    copyright_label,
     default_collection_template,
     default_comment,
     default_season_desc,
     default_single,
     derive_tags,
+    effective_source,
     limits,
     merge_item_tags,
+    normalize_copyright,
     normalize_tid,
     partition_label,
     partition_options,
@@ -38,6 +44,23 @@ from app.bili_meta import (
     validate,
     validate_comment,
 )
+
+# 一份**能通过校验**的元数据。
+#
+# 为什么需要它：默认版权是「转载」，而转载稿必须有来源（`validate` 里那条平台硬要求）。
+# 下面多数用例只想测长度/个数/标签，不该被版权规则带偏 —— 但如果每个构造点都手写一遍
+# `source=`，规则一变就会满屏红，而且没人分得清哪些红是真信号。
+# 要测版权本身，请显式传 `copyright=` / `source=`（文件末尾那一组）。
+def meta(**overrides) -> UploadMetadata:
+    base = {
+        "title": "标题",
+        "desc": "简介",
+        "tags": "a,b",
+        "tid": "122",
+        "source": "https://youtu.be/x",
+    }
+    base.update(overrides)
+    return UploadMetadata(**base)
 
 
 # ---------------------------------------------------------------- 分区词表
@@ -140,31 +163,31 @@ def test_limits_matches_the_constants():
 
 
 def test_validate_accepts_a_normal_metadata():
-    assert validate(UploadMetadata(title="标题", desc="简介", tags="a,b", tid="122")) == []
+    assert validate(meta()) == []
 
 
 def test_validate_reports_the_excess_length_instead_of_truncating():
     """**不许静默截断**：超了要报出「超几个字」，让界面能指到具体位置。"""
-    problems = validate(UploadMetadata(title="标" * (TITLE_MAX + 6), desc="", tags="", tid="122"))
+    problems = validate(meta(title="标" * (TITLE_MAX + 6), desc="", tags=""))
     assert problems == [f"标题超出 6 个字（上限 {TITLE_MAX} 字）"]
 
 
 def test_validate_rejects_an_empty_title_before_the_length_rule():
-    assert validate(UploadMetadata(title="   ", desc="", tags="", tid="122")) == ["标题是空的"]
+    assert validate(meta(title="   ", desc="", tags="")) == ["标题是空的"]
 
 
 @pytest.mark.parametrize(
-    ("meta", "expected_fragment"),
+    ("meta_value", "expected_fragment"),
     [
-        (UploadMetadata(title="t", desc="简" * (DESC_MAX + 3), tags="", tid="122"), "简介超出 3 个字"),
-        (UploadMetadata(title="t", desc="", tags=",".join(f"t{i}" for i in range(TAG_MAX_COUNT + 2)), tid="122"), f"最多 {TAG_MAX_COUNT} 个"),
+        (meta(desc="简" * (DESC_MAX + 3), tags=""), "简介超出 3 个字"),
+        (meta(desc="", tags=",".join(f"t{i}" for i in range(TAG_MAX_COUNT + 2))), f"最多 {TAG_MAX_COUNT} 个"),
         # 十个 20 字的标签 = 200 字 + 9 个逗号 = 209，超的是**总长**，单项都没超。
-        (UploadMetadata(title="t", desc="", tags=",".join("t" * TAG_ITEM_MAX for _ in range(TAG_MAX_COUNT)), tid="122"), "标签总长超出"),
-        (UploadMetadata(title="t", desc="", tags="", tid="分区"), "分区不是一个有效的编号"),
+        (meta(desc="", tags=",".join("t" * TAG_ITEM_MAX for _ in range(TAG_MAX_COUNT))), "标签总长超出"),
+        (meta(desc="", tags="", tid="分区"), "分区不是一个有效的编号"),
     ],
 )
-def test_validate_reports_each_hard_limit(meta, expected_fragment):
-    problems = validate(meta)
+def test_validate_reports_each_hard_limit(meta_value, expected_fragment):
+    problems = validate(meta_value)
     assert any(expected_fragment in problem for problem in problems), problems
 
 
@@ -176,7 +199,7 @@ def test_validate_reports_a_single_over_long_tag():
     一个 150 字的标签能通过全部校验、到平台才被拒。`limits()` 却一直在对外公布 `tag_item`。
     """
     over = "标" * (TAG_ITEM_MAX + 5)
-    problems = validate(UploadMetadata(title="t", desc="", tags=f"正常,{over}", tid="122"))
+    problems = validate(meta(desc="", tags=f"正常,{over}"))
     assert any(f"「{over}」这个标签有 {TAG_ITEM_MAX + 5} 个字" in problem for problem in problems), problems
 
 
@@ -187,28 +210,28 @@ def test_validate_shows_a_moderately_long_tag_in_full():
     而超限的标签至少有 21 个字 —— 那就是一段死代码（与 ai/ui/003 同一类盲区）。
     """
     over = "标" * (TAG_ITEM_MAX + 1)
-    problems = validate(UploadMetadata(title="t", desc="", tags=over, tid="122"))
+    problems = validate(meta(desc="", tags=over))
     assert any(over in problem for problem in problems), problems
 
 
 def test_validate_truncates_the_preview_of_an_absurdly_long_tag():
     """真有人贴一整段话进标签时，报错信息里不能把那一整段回显出来。"""
     over = "标" * 150
-    problems = validate(UploadMetadata(title="t", desc="", tags=over, tid="122"))
+    problems = validate(meta(desc="", tags=over))
     (problem,) = [item for item in problems if "这个标签有 150 个字" in item]
     assert over not in problem
     assert f"{'标' * TAG_PREVIEW_MAX}…" in problem
 
 
 def test_validate_accepts_a_tag_exactly_at_the_item_limit():
-    assert validate(UploadMetadata(title="t", desc="", tags="标" * TAG_ITEM_MAX, tid="122")) == []
+    assert validate(meta(desc="", tags="标" * TAG_ITEM_MAX)) == []
 
 
 def test_validate_never_mutates_the_metadata():
     """校验只读。改坏原值会让「用户改一个字再提交」这条路径静默丢内容。"""
-    meta = UploadMetadata(title="标" * (TITLE_MAX + 6), desc="d", tags="a", tid="122")
-    validate(meta)
-    assert len(meta.title) == TITLE_MAX + 6
+    value = meta(title="标" * (TITLE_MAX + 6), desc="d", tags="a")
+    validate(value)
+    assert len(value.title) == TITLE_MAX + 6
 
 
 def test_validate_comment_uses_the_comment_limit():
@@ -260,17 +283,32 @@ def test_merge_item_tags_keeps_template_tags_and_dedupes():
 
 # ---------------------------------------------------------------- 默认值
 def test_default_single_uses_the_item_title_and_carries_the_source_link():
-    meta = default_single(job_title="任务名", item_title="视频名", source_url="https://youtu.be/x")
-    assert meta.title == "视频名"
-    assert "原视频：https://youtu.be/x" in meta.desc
-    assert meta.tid == DEFAULT_TID
+    value = default_single(job_title="任务名", item_title="视频名", source_url="https://youtu.be/x")
+    assert value.title == "视频名"
+    assert "原视频：https://youtu.be/x" in value.desc
+    assert value.tid == DEFAULT_TID
+
+
+def test_default_single_defaults_to_reprint_and_prefills_this_video_s_link():
+    """**默认转载，并把这条视频自己的原始链接预填进来源。**
+
+    默认自制会把每一单都填成假信息（这个工作流搬的视频都不是自己拍的），
+    而把链接留给用户去翻 —— 那是一份现成的、一定为真的数据。
+    """
+    value = default_single(job_title="任务名", item_title="视频名", source_url="https://youtu.be/x")
+    assert DEFAULT_COPYRIGHT == COPYRIGHT_REPRINT
+    assert value.copyright == COPYRIGHT_REPRINT
+    assert value.source == "https://youtu.be/x"
+    assert validate(value) == []
 
 
 def test_default_single_truncates_a_title_that_is_already_too_long():
     """生成侧可以在边界上收敛（这是**我们**造的默认值），用户手填则报错不截断。"""
-    meta = default_single(job_title="j", item_title="标" * (TITLE_MAX + 20), source_url="")
-    assert len(meta.title) == TITLE_MAX
-    assert validate(meta) == []
+    value = default_single(
+        job_title="j", item_title="标" * (TITLE_MAX + 20), source_url="https://youtu.be/x"
+    )
+    assert len(value.title) == TITLE_MAX
+    assert validate(value) == []
 
 
 def test_default_single_falls_back_to_the_job_title():
@@ -282,6 +320,7 @@ def test_default_collection_template_shape():
     assert template.title_template == "{title}"
     assert "{job}" in template.desc_template and "{index}" in template.desc_template and "{count}" in template.desc_template
     assert template.tid == DEFAULT_TID
+    assert template.copyright == COPYRIGHT_REPRINT
 
 
 def test_default_season_desc_is_never_empty():
@@ -294,3 +333,76 @@ def test_default_season_desc_is_never_empty():
 def test_default_comment_includes_the_source_only_when_given():
     assert "原视频" not in default_comment()
     assert "原视频：https://youtu.be/x" in default_comment(source_url="https://youtu.be/x")
+
+
+# ---------------------------------------------------------------- 版权（自制 / 转载）
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("1", COPYRIGHT_SELF),
+        ("2", COPYRIGHT_REPRINT),
+        (" 1 ", COPYRIGHT_SELF),
+        # 读不出来的值一律回退**转载**，不是自制：把别人的稿子标成自制是替用户
+        # 声明了一件他没说过的事，而标成转载最多只是让他改一下。
+        ("3", COPYRIGHT_REPRINT),
+        ("", COPYRIGHT_REPRINT),
+        (None, COPYRIGHT_REPRINT),
+    ],
+)
+def test_normalize_copyright_only_accepts_the_two_platform_values(raw, expected):
+    assert normalize_copyright(raw) == expected
+
+
+def test_copyright_label_matches_the_platform_wording():
+    assert copyright_label("1") == "自制"
+    assert copyright_label("2") == "转载"
+    assert copyright_label("看不懂") == "转载"
+
+
+def test_effective_source_only_applies_to_reprints():
+    """**单一判据**：自制稿即便带着来源也不提交出去。"""
+    assert effective_source(COPYRIGHT_REPRINT, "https://youtu.be/x") == "https://youtu.be/x"
+    assert effective_source(COPYRIGHT_REPRINT, "  https://youtu.be/x  ") == "https://youtu.be/x"
+    assert effective_source(COPYRIGHT_SELF, "https://youtu.be/x") == ""
+    assert effective_source(COPYRIGHT_REPRINT, "") == ""
+    assert effective_source(COPYRIGHT_REPRINT, None) == ""
+
+
+def test_render_carries_the_template_copyright_and_the_items_own_source():
+    """合集模板只有一个 `copyright`，来源逐条取该条视频自己的链接。"""
+    template = MetadataTemplate("{title}", "{title}\n来源：{source}", "标签", "122", COPYRIGHT_REPRINT)
+    rendered = render(template, index=1, title="视频甲", count=2, job="合集", source="https://youtu.be/甲")
+    assert rendered.copyright == COPYRIGHT_REPRINT
+    assert rendered.source == "https://youtu.be/甲"
+    assert "来源：https://youtu.be/甲" in rendered.desc
+
+
+def test_render_drops_the_source_when_the_template_is_self_made():
+    """切成自制之后，来源不能再跟着走 —— 否则实发参数与界面上的选择会互相矛盾。"""
+    template = MetadataTemplate("{title}", "{title}\n来源：{source}", "标签", "122", COPYRIGHT_SELF)
+    rendered = render(template, index=1, title="视频甲", count=1, job="合集", source="https://youtu.be/甲")
+    assert rendered.copyright == COPYRIGHT_SELF
+    assert rendered.source == ""
+
+
+def test_render_reports_an_unusable_copyright_as_reprint_instead_of_failing():
+    template = MetadataTemplate("{title}", "{title}", "标签", "122", "自制还是转载？")
+    rendered = render(template, index=1, title="t", count=1, job="j", source="https://youtu.be/x")
+    assert rendered.copyright == COPYRIGHT_REPRINT
+
+
+def test_validate_rejects_a_reprint_without_a_source():
+    """平台的硬要求（`21004 Missing source for reprint`），在表单里就地拦。"""
+    problems = validate(meta(copyright=COPYRIGHT_REPRINT, source=""))
+    assert any("选了「转载」但没填原视频链接" in problem for problem in problems), problems
+
+
+def test_validate_accepts_a_self_made_video_without_a_source():
+    assert validate(meta(copyright=COPYRIGHT_SELF, source="")) == []
+
+
+def test_validate_rejects_a_copyright_outside_the_two_values():
+    problems = validate(meta(copyright="公开"))
+    assert any("版权只能是" in problem for problem in problems), problems
+    # 版权非法时不再叠一条「没填来源」：那是同一个问题的两种说法，两条并列只会让人迷惑。
+    assert not any("没填原视频链接" in problem for problem in problems), problems

@@ -22,7 +22,13 @@ import pytest
 
 from app.bili_bin import CommandResult
 from app.bili_http import HttpError
-from app.bili_meta import MetadataTemplate, UploadMetadata, default_collection_template, default_single
+from app.bili_meta import (
+    COPYRIGHT_SELF,
+    MetadataTemplate,
+    UploadMetadata,
+    default_collection_template,
+    default_single,
+)
 from app.bili_policy import SEASON_CREATE_FAILED, SEASON_EPISODES_FAILED
 from app.bili_upload import (
     COMMENT_MARKER,
@@ -632,8 +638,8 @@ def test_validate_collection_points_at_the_offending_item(tmp_path):
     """只报「有 N 条不合格」是不够的：用户面对几十条视频，需要知道改哪一条。"""
     template = MetadataTemplate(title_template="{title}", desc_template="{title}", tags="标签", tid="122")
     targets = [
-        UploadTarget(1, "正常", write_video(tmp_path / "a.mp4")),
-        UploadTarget(2, "超" * 90, write_video(tmp_path / "b.mp4")),
+        UploadTarget(1, "正常", write_video(tmp_path / "a.mp4"), source_url="https://youtu.be/a"),
+        UploadTarget(2, "超" * 90, write_video(tmp_path / "b.mp4"), source_url="https://youtu.be/b"),
     ]
     problems = validate_collection(template, targets, job_title="任务")
     assert len(problems) == 1
@@ -642,13 +648,37 @@ def test_validate_collection_points_at_the_offending_item(tmp_path):
 
 def test_validate_collection_accepts_a_clean_batch(tmp_path):
     template = default_collection_template("合集")
-    targets = [UploadTarget(1, "第一集", write_video(tmp_path / "a.mp4"))]
+    targets = [UploadTarget(1, "第一集", write_video(tmp_path / "a.mp4"), source_url="https://youtu.be/a")]
     assert validate_collection(template, targets, job_title="合集") == []
+
+
+def test_validate_collection_blames_the_items_that_have_no_source(tmp_path):
+    """合集是**逐条**判的：默认转载，于是每一条都要有自己的原始链接。
+
+    这条链上的失败长这样：某条视频不是从链接下来的（来源为空）→ 服务端把整批拒掉。
+    泛泛说一句「有 1 条不合格」等于让用户在几十条里自己找，所以必须指到条目上。
+    """
+    template = default_collection_template("合集")
+    targets = [
+        UploadTarget(1, "有来源", write_video(tmp_path / "a.mp4"), source_url="https://youtu.be/a"),
+        UploadTarget(2, "没来源", write_video(tmp_path / "b.mp4")),
+    ]
+    problems = validate_collection(template, targets, job_title="合集")
+    assert len(problems) == 1
+    assert problems[0].startswith("第 2 条「没来源」：")
+    assert "没填原视频链接" in problems[0]
+
+
+def test_validate_collection_is_clean_when_the_template_is_self_made(tmp_path):
+    """切成自制之后，来源为空不再是问题 —— 否则用户会看到一个摘不掉的错误。"""
+    template = MetadataTemplate("{title}", "{title}", "标签", "122", COPYRIGHT_SELF)
+    targets = [UploadTarget(1, "自己拍的", write_video(tmp_path / "a.mp4"))]
+    assert validate_collection(template, targets, job_title="任务") == []
 
 
 def test_validate_collection_reports_unknown_placeholders(tmp_path):
     template = MetadataTemplate(title_template="{title} {date}", desc_template="{title}", tags="标签", tid="122")
-    targets = [UploadTarget(1, "甲", write_video(tmp_path / "a.mp4"))]
+    targets = [UploadTarget(1, "甲", write_video(tmp_path / "a.mp4"), source_url="https://youtu.be/a")]
     problems = validate_collection(template, targets, job_title="任务")
     assert len(problems) == 1
     assert "{date}" in problems[0] and "占位符" in problems[0]

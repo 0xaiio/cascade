@@ -23,7 +23,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from .bili_meta import UploadMetadata
+from .bili_meta import UploadMetadata, effective_source, normalize_copyright
 from .bili_policy import TIMEOUT_MARKER
 
 # biliup 上传大文件可能耗时数分钟；上限只兜住「卡死不返回」，不限制正常上传。
@@ -161,6 +161,11 @@ def build_upload_argv(
     —— 只找得到 `x/vu/app/add`。所以实际提交永远走 App 接口。
     早先这里写着「`--submit web` 是必须的，因为 cookie 登录拿不到 access_token」，**那两句都不对**：
     真正拦住投稿的不是提交接口，是 `login_by_cookies` 在开工前那次令牌校验（见 `bili_auth`）。
+
+    `--copyright` 取自元数据（**默认 2＝转载**），`--source` 只在转载稿上出现 ——
+    两者的判据都在 `bili_meta.effective_source`，这里不另写一遍。
+    上游把整个 `Studio`（含 `copyright` / `source`）当 JSON body 发给 `x/vu/app/add`，
+    所以这两个参数是**逐字段生效**的，不是 biliup 只在本地用一下。
     """
     argv: list[str] = [
         exe,
@@ -179,8 +184,11 @@ def build_upload_argv(
         "--desc",
         meta.desc,
         "--copyright",
-        "1",
+        normalize_copyright(meta.copyright),
     ]
+    source = effective_source(meta.copyright, meta.source)
+    if source:
+        argv += ["--source", source]
     if cover_path and Path(cover_path).is_file():
         argv += ["--cover", str(cover_path)]
     return argv
