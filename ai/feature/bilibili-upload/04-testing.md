@@ -9,18 +9,18 @@
 | --- | --- | --- |
 | 纯工具（文案/状态折合） | `backend/tests/test_bili_policy.py` | 28 |
 | 纯工具（模板/标签/硬限/**版权与来源**/**归集方式**） | `backend/tests/test_bili_meta.py` | 71 |
-| 基础设施（HTTP 接缝、扫码会话） | `backend/tests/test_bili_auth.py` | 56 |
+| 基础设施（HTTP 接缝、扫码会话） | `backend/tests/test_bili_auth.py` | 59 |
 | 基础设施（`biliup` 探测/命令/进度/执行） | `backend/tests/test_bili_bin.py` | 44 |
-| 领域（会员态接口） | `backend/tests/test_bili_api.py` | 63 |
+| 领域（会员态接口） | `backend/tests/test_bili_api.py` | 77 |
 | 领域（单次上传编排） | `backend/tests/test_bili_upload.py` | 67 |
-| 编排（队列/落账/收敛/预填/**归集决策**） | `backend/tests/test_bili_manager.py` | 76 |
-| 编排（读模型与徽标聚合） | `backend/tests/test_bili_read_model.py` | 47 |
+| 编排（队列/落账/收敛/预填/**归集决策**） | `backend/tests/test_bili_manager.py` | 82 |
+| 编排（读模型与徽标聚合） | `backend/tests/test_bili_read_model.py` | 60 |
 | 入口（13 个 operation 的状态码） | `backend/tests/test_api_bilibili.py` | 55 |
 | 共享替身 | `backend/tests/bili_fakes.py` | — |
-| **合计** | **9 个文件** | **507** |
+| **合计** | **9 个文件** | **543** |
 
 数字取自 `pytest --collect-only`（逐文件），与 `backend/tests` 全集减去既有基线相符：
-**507 + 356 = 863**，而 `backend/tests` 全集正是 **863**。
+**543 + 356 = 899**，而 `backend/tests` 全集正是 **899**。
 （那 356 是 `main` 的既有 354 加 [`011`](../../bug-fix/011-biliup-refuses-a-token-less-cookie-file.md)
 给 `test_log_safety.py` 加的 2 项 —— **B站 之外的部分一行没动**。）
 
@@ -31,6 +31,18 @@
 `test_api_bilibili.py` +7、`test_bili_meta.py` +2）= **507**。两轮的增量现在都在表里了。
 **教训：逐文件表与正文的「+N」是两份，改完一轮要一起核** —— 否则它会安静地停在某个历史快照上，
 而它恰恰是「凭什么算测过了」最容易被引用的一份。
+
+**紧随其后的「质量提升轮」再 +36 = 543**（`test_bili_auth.py` +3、`test_bili_api.py` +14、
+`test_bili_manager.py` +6、`test_bili_read_model.py` +13，其余五个文件一行没动）。这轮的增量集中在**边界**：
+建合集回包 `id` 的四种平台形态与 10 种坏形状、合集 `upload_ids` 列的七种内容形态加 `null` 列、
+两处「条目列表」解析必须逐字一致、`limits()` 每个字段都要与常量一致
+（`tag_preview` 漏了前端就会自己写死 12，见 [012](../../bug-fix/012-preflight-contradicts-itself-and-the-server.md)），
+以及「成功 / 失败 / 在途三组集合**恰好归类一次**」的不相交性。
+**核对等式：表内合计 + 356 = `backend/tests` 全集**（356 是 `main` 的既有基线）。
+
+前端同步在涨：这一轮从 12 个文件 / 119 passed 到 **15 个文件 / 172 passed**，
+新增的三份全是**不挂载组件**的纯函数测试（`biliForm.test.ts` 35、`biliStatus.test.ts` 14、
+`errors.test.ts` 4）—— 判断被抽成纯函数之后，边界才测得动。
 
 `test_bili_meta.py` 里与版权 / 来源有关的那批集中在三组判据：`normalize_copyright` 的回退方向
 （读不出合法值时**回退转载而不是自制** —— 标成自制是替用户声明一件他没说过的事）、
