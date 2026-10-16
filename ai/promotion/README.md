@@ -1,0 +1,117 @@
+# cascade 推广物料
+
+本目录存放 cascade（YouTube Downloader）的对外推广物料。**展示的界面与命令全部来自真实运行**，
+不是示意图；逐镜旁白与字幕脚本见 [promo-script.md](promo-script.md)。
+
+| 文件 | 说明 |
+| --- | --- |
+| [promo-script.md](promo-script.md) | 宣传文稿：要点覆盖、成片规格、分镜表、逐镜旁白/字幕、可复现的演示操作清单 |
+| [cascade-promo.mp4](cascade-promo.mp4) | 成片，1920×1080 / 30 fps / H.264 + AAC |
+| [cascade-promo.srt](cascade-promo.srt) | 外挂字幕（与片内硬字幕同源） |
+
+## 成片参数（实测）
+
+| 项 | 值 |
+| --- | --- |
+| 时长 | 362.6 秒（6 分 03 秒） |
+| 画面 | 1920×1080，30 fps，H.264（CRF 21） |
+| 音频 | AAC 192 kbps / 48 kHz 立体声，响度归一至 −15 LUFS，真峰值 −1.3 dBTP |
+| 字幕 | 81 条，硬字幕烧录；句子边界取自 TTS 的词级时间戳 |
+| 体积 | 约 40.7 MB |
+
+用 `ffprobe` 复核：
+
+```bash
+ffprobe -v error -show_entries format=duration,size \
+  -show_entries stream=codec_name,width,height,r_frame_rate,channels \
+  -of default=nw=1 ai/promotion/cascade-promo.mp4
+```
+
+## 逐镜时长（旁白音频实测值）
+
+| 镜 | 场景 | 时长 | 镜 | 场景 | 时长 |
+| --- | --- | --- | --- | --- | --- |
+| S0 | 片头 | 12.4s | S7 | 下载选项 | 41.1s |
+| S1 | 项目定位 | 17.2s | S8 | 加入队列与任务中心 | 35.0s |
+| S2 | 目标用户与边界 | 23.3s | S9 | 设置与运行环境 | 37.5s |
+| S3 | 克隆仓库 | 13.3s | S10 | 代理与 cookies | 37.4s |
+| S4 | 一键启动 | 24.7s | S11 | 辅助说明 | 17.6s |
+| S5 | 打开首页 | 22.6s | S12 | B站 投稿 | 50.2s |
+| S6 | 解析链接 | 19.4s | S13 | 片尾 | 11.0s |
+
+合计 362.5 秒；各镜时长由旁白音频长度决定，画面被裁/补到同一长度，因此字幕、解说、画面三者严格对齐。
+
+## 制作方式
+
+1. **旁白**：`edge-tts`（`zh-CN-YunyangNeural`，男声，语速 −4%）逐镜合成，同时抓取 `WordBoundary`
+   事件；字幕行按词级时间戳回填，不做人工估时。
+2. **画面**：
+   - 界面场景：本机真实运行 cascade，用 CDP 驱动一个无头 Edge（1440×810 @2x）真实点击/输入/滚动，
+     同时抓截屏流，按帧时间戳编码成片段。
+   - 终端场景：真实执行 `git clone` 与 `init\start.ps1`，把命令与输出逐行重放到浏览器里渲染的终端界面。
+   - 片头片尾：HTML 渲染的标题卡。
+3. **合成**：ffmpeg 归一化各镜 → 拼接 → 烧录 ASS 字幕 → 混入旁白与低电平音床 → 响度归一。
+
+## 保真度说明（重要）
+
+为了透明，以下处理必须写明；它们都不改变「界面上看到的内容是真的」这一点。
+
+1. **界面全部真实**。S5–S12 的画面来自真实运行的应用：真实解析、真实创建下载任务、真实进度与速度、
+   真实的任务库、真实的 B站 环境体检（本机已装 `biliup` 且已登录）。
+2. **S6「解析」的响应到达时刻被固定**。本机 `yt-dlp` 解析一个视频的耗时实测在 5～29 秒之间波动，
+   直接录无法保证「结果出现」恰好落在对应旁白处。因此录制时用 CDP 的 `Fetch` 域拦截
+   `/api/analyze`，只接管**响应到达的时刻**（固定约 6 秒）；**响应体取自同一后端真实解析结果的原始
+   JSON**，点击与渲染都是真实的。
+3. **终端场景是真实输出的重放**。S3/S4 的命令与输出逐行取自真实执行的 transcript
+   （见下方「录屏为何不走控制台窗口」）。为了让画面稳定，重放发生在浏览器渲染的终端里，
+   而不是直接录控制台窗口。
+4. **跳剪而非加速伪造**。本机到 GitHub 的一次完整克隆实测 288 秒（SSH）、启动脚本实测约 20 秒；
+   成片用跳剪呈现「开始 → 完成」，中间等待被剪掉。
+5. **克隆使用 SSH**：`git@github.com:0xaiio/cascade.git`。片头/片尾卡显示的是网页地址
+   `github.com/0xaiio/cascade`（供观看者直接访问），两者用途不同。
+6. **启动脚本录制加了 `-NoProfile`**：本机 PowerShell 配置文件里有一条与项目无关的 `opam`
+   报错，加该开关只为不把这条噪声录进成片；命令语义不变。
+7. **终端提示符做了简写**：显示为 `D:\projects`，实际工作目录是
+   `tmp_acceptance/promo/demo_ws/`。
+8. **没有向 B站 提交任何内容**：S12 只打开投稿表单，没有点击「开始上传」，也没有产生任何真实投稿。
+9. **演示素材**：下载/投稿演示使用公开视频 *C++ Weekly - Ep 25 C++17's Aggregate Initializations*，
+   仅用于展示解析、下载与投稿界面。
+
+### 录屏为何不走控制台窗口
+
+原计划直接把控制台窗口录下来。实测本机控制台宿主存在两处不可控行为：
+
+1. `SetCurrentConsoleFontEx` 会触发宿主**异步**重排窗口，量到的客户区尺寸与真正绘制的区域不一致；
+2. `SetConsoleScreenBufferSize` / `SetConsoleWindowInfo` 在请求超出屏幕可容纳格数时返回失败，
+   但随后的 `MoveWindow` 仍会把窗口拉大 —— 结果是窗口很大、控制台只画左上角，其余露出桌面
+   （实测请求 172 列、系统上限 170 列时必现）。
+
+两条都表现为「录出来的画面里混进桌面」。因此终端场景改为：真实执行命令 → 记录 transcript →
+在浏览器里按同一时序重放。命令与输出文本没有改动。
+
+## 复现步骤
+
+工具链（Windows）：
+
+```text
+1) edge-tts：pip install edge-tts
+2) 浏览器：Microsoft Edge（CDP 无头驱动）
+3) ffmpeg / ffprobe：需含 libass、libx264
+```
+
+流程（中间产物都落在 `tmp_acceptance/promo/`，该目录不进入 Git）：
+
+```text
+python make_narration.py        # 合成旁白 + 词级字幕时间轴 -> out/narration/
+python record_browser.py        # 录界面场景 -> out/frames/<ID>/
+python record_terminal_web.py   # 录终端场景 -> out/frames/TERM_<ID>/
+python build_video.py           # 归一化 + 拼接 + 字幕 + 混音 + 响度归一 -> ../ai/promotion/
+```
+
+`record_browser.py` 需要一个已在运行的后端（默认 `http://127.0.0.1:8010`），可用
+`python -m app --port 8010` 在 `backend/` 下启动。
+
+## 维护
+
+改动界面或调整旁白后，需要**重跑受影响的镜**再重新合成；只改旁白的镜头无需重录画面。
+`promo-script.md` 与成片必须同步：分镜表的时长、旁白文本、字幕都是同一份数据的三种呈现。
