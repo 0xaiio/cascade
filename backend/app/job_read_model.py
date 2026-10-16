@@ -35,7 +35,7 @@ def read_job(session: Session, job_id: str) -> JobRead | None:
         updated_at=job.updated_at,
         started_at=job.started_at,
         finished_at=job.finished_at,
-        elapsed_seconds=_elapsed_seconds(job.started_at, job.finished_at),
+        elapsed_seconds=elapsed_seconds(job.started_at, job.finished_at),
         items=[_read_job_item(item, job.download_dir) for item in items],
     )
 
@@ -71,7 +71,7 @@ def _read_job_item(item: JobItem, job_download_dir: str | None) -> JobItemRead:
         updated_at=item.updated_at,
         started_at=item.started_at,
         finished_at=item.finished_at,
-        elapsed_seconds=_elapsed_seconds(item.started_at, item.finished_at),
+        elapsed_seconds=elapsed_seconds(item.started_at, item.finished_at),
     )
 
 
@@ -125,7 +125,9 @@ def _job_error(job: Job, items: list[JobItem]) -> str | None:
     return job.error
 
 
-def _elapsed_seconds(started_at: datetime | None, finished_at: datetime | None) -> int:
+def elapsed_seconds(started_at: datetime | None, finished_at: datetime | None) -> int:
+    """已用时（秒）。**公开名**：`bili_read_model` 也用它算「这次上传跑了多久」——
+    两处各写一遍的话，「未结束时取当前时间」这条规则迟早会在其中一处漏掉。"""
     if not started_at:
         return 0
     start = _as_aware_utc(started_at)

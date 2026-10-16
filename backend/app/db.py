@@ -41,6 +41,17 @@ def init_db(engine: Engine) -> None:
 
 
 def _ensure_columns(engine: Engine) -> None:
+    """追加式补列。**只登记「表已经存在之后才加上的列」** —— 新表由 `create_all` 建全，
+    在这里再抄一遍等于把列定义变成两处真相。
+
+    `bili_upload.create /*` 这两列属于前一种：`bili_upload` 表本身是随 B站 上传功能一起建的，
+    但「是否生成封面」与「置顶评论文案」是在它建出来之后才补上的。
+
+    `bili_upload.copyright` 的 DDL 默认值是 **`'1'`（自制）**，不是产品默认值 —— 理由：
+    这一列补上时，库里已有的那些行**当时确实是按 `--copyright 1` 发出去的**（那时它写死在
+    `bili_bin` 里）。默认值对齐历史行为，这些旧记录才不会在界面上突然变成「转载」；
+    改动之后新建的行一律由 `BiliManager._upsert_upload` 显式写入，用不到这个默认值。
+    """
     additions = {
         "job": {
             "speed": "FLOAT",
@@ -59,6 +70,12 @@ def _ensure_columns(engine: Engine) -> None:
             "requested_resolution": "TEXT",
             "fallback_resolution": "TEXT",
             "fallback_reason": "TEXT",
+        },
+        "bili_upload": {
+            "make_cover": "BOOLEAN DEFAULT 1",
+            "comment": "TEXT DEFAULT ''",
+            "copyright": "TEXT DEFAULT '1'",
+            "source": "TEXT DEFAULT ''",
         },
     }
     with engine.begin() as connection:

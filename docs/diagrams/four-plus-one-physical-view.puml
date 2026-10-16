@@ -10,15 +10,18 @@ node "User workstation" as Workstation {
   node "Python process\npython -m app" as Python {
     component "FastAPI API + SSE" as API
     component "JobManager workers" as Workers
+    component "BiliManager\n(one upload worker)" as BiliWorker
     component "yt-dlp Python API" as YTDLP
   }
 
   database "SQLite\n data/app.sqlite3" as SQLite
   folder "Downloads\n downloads/" as Downloads
   folder "Cookies\n data/cookies.txt" as CookiesFile
+  folder "Bilibili cookies\n data/bili_cookies.json" as BiliCookiesFile
   component "Installed browsers\nEdge/Chrome/Firefox" as Browsers
   component "ffmpeg / imageio-ffmpeg" as FFMPEG
   component "Optional aria2c" as Aria2
+  component "Optional biliup\n(writes to Bilibili)" as Biliup
   component "System opener\nExplorer/player" as Opener
 
   node "Documentation toolchain" as DocsToolchain {
@@ -31,11 +34,14 @@ node "User workstation" as Workstation {
 }
 
 cloud "YouTube" as YouTube
+cloud "Bilibili" as Bilibili
 
 UI --> API : HTTP + SSE\n127.0.0.1, port from YTDL_API_PORT
 API --> Workers : enqueue/control
+API --> BiliWorker : enqueue upload
 API --> SQLite : jobs/settings/events
 Workers --> SQLite : progress/status
+BiliWorker --> SQLite : upload/season rows
 Workers --> YTDLP : metadata/download
 YTDLP --> YouTube : HTTPS metadata/media
 YTDLP --> Downloads : video/subtitles/sidecar
@@ -45,6 +51,12 @@ API --> Browsers : import cookies
 API --> CookiesFile : read/write cookies
 API --> Downloads : delete known outputs
 API --> Opener : play/open folder
+BiliWorker --> BiliCookiesFile : read cookie jar
+BiliWorker --> Biliup : run upload command
+BiliWorker --> Downloads : read video / write cover frame
+BiliWorker --> Bilibili : HTTPS archive list, season, reply
+Bilibili --> Biliup : receives the uploaded video
+Biliup --> FFMPEG : extract cover frame
 DocsScript --> PlantUMLCache : download + SHA-256 verify
 DocsScript --> DocsRuntime : render
 DocsScript --> DiagramSources : read UML sources

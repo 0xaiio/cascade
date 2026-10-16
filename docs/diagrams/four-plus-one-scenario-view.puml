@@ -19,6 +19,10 @@ rectangle "YouTube Downloader" {
   usecase "Delete task only" as DeleteTask
   usecase "Delete task and\nrelated files" as DeleteFiles
   usecase "Inspect diagnostics" as Diagnostics
+  usecase "Upload one video\nto Bilibili" as UploadSingle
+  usecase "Upload a collection\nto Bilibili" as UploadCollection
+  usecase "Log in / import\nBilibili cookies" as BiliLogin
+  usecase "Retry failed or\nunverified upload" as UploadRetry
 }
 
 User --> Analyze
@@ -34,6 +38,10 @@ User --> OpenFolder
 User --> DeleteTask
 User --> DeleteFiles
 User --> Diagnostics
+User --> UploadSingle
+User --> UploadCollection
+User --> BiliLogin
+User --> UploadRetry
 
 CreateVideo ..> Analyze : requires metadata
 CreatePlaylist ..> Analyze : requires entries
@@ -45,4 +53,9 @@ Play ..> Monitor : requires output path
 OpenFolder ..> Monitor : requires output directory
 DeleteFiles ..> DeleteTask : includes
 Diagnostics ..> ImportCookies : guides troubleshooting
+UploadSingle ..> Play : requires a downloaded file
+UploadCollection ..> Monitor : needs every item finished
+UploadCollection ..> UploadSingle : uploads each, then groups
+UploadRetry ..> Monitor : reflects new state
+BiliLogin ..> Diagnostics : preflight checks
 @enduml

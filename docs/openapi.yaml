@@ -58,6 +58,32 @@ tags:
       network or the filesystem: they prove that the resolved proxy really
       works and that the local cookie jar really logs in. All of them are
       read-only - none of them writes settings or cookies.
+  - name: bilibili
+    description: |
+      Optional bilibili.com upload of the videos this console already
+      downloaded. It is a *second* account and a *second* credential store:
+      the bilibili login lives in `data/bilibili/cookies.json` and is never
+      shared with the YouTube cookies above.
+
+      Uploading is inherently different from downloading, so a few rules are
+      not expressible in the schema and are stated here instead:
+
+      * **A zero exit code does not mean "published".** After `biliup` exits,
+        the backend re-reads the account's archive list and compares titles.
+        A record that the platform has not accepted yet stays `unverified`
+        ("待核对") rather than being reported as success.
+      * **One upload at a time, with a gap.** A single worker drains the
+        queue and waits `gap_seconds` between two uploads; uploading faster
+        than the account is allowed to trips a platform-side throttle.
+      * **Collections are submitted one video at a time.** Each video becomes
+        its own submission; a separate, audited call groups them into one
+        bilibili "season" (合集) afterwards. A failed grouping leaves the
+        submissions published and retryable on their own.
+      * Interface state is **computed by the backend**, not by the frontend:
+        the badge shown next to a task comes from
+        `GET /api/bilibili/uploads/summary`.
+      * Bilibili may require manual review before a submission becomes public.
+        Uploading never bypasses DRM, membership, region or age limits.
 
 paths:
   /health:
@@ -1131,6 +1157,669 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /api/bilibili/status:
+    get:
+      tags: [bilibili]
+      operationId: getBiliStatus
+      summary: Bilibili upload readiness
+      description: |
+        One call that answers "can this machine upload right now": is the
+        `biliup` tool present and executable, is `ffmpeg` available for cover
+        extraction, is there a usable bilibili login, and what are the
+        partition table and field limits the dialog should enforce.
+
+        `blockers` is the user-facing short list; it is empty exactly when
+        `ready` is true. `probe_account=false` keeps the call fully offline -
+        nothing is sent to bilibili.com, so it still works without network.
+      parameters:
+        - name: probe_account
+          in: query
+          required: false
+          description: Ask bilibili.com for the account name behind the login file.
+          schema:
+            type: boolean
+            default: true
+      responses:
+        "200":
+          description: Current readiness and field limits.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BiliStatusRead"
+              example:
+                ready: false
+                biliup:
+                  found: true
+                  path: C:\Users\me\AppData\Local\Microsoft\WinGet\Links\biliup.exe
+                  version: biliup 0.2.4
+                  problem: null
+                  advice: null
+                ffmpeg:
+                  found: true
+                  path: C:\tools\ffmpeg\bin\ffmpeg.exe
+                  version: ffmpeg version 7.1
+                  problem: null
+                  advice: null
+                login:
+                  present: false
+                  cookie_count: 0
+                  names: []
+                  missing_required: [SESSDATA, bili_jct]
+                  missing_recommended: [DedeUserID]
+                  tracked_by_git: false
+                  account: null
+                  account_checked: false
+                blockers:
+                  - message: 还没有登录 B站
+                    advice: 点「扫码登录」用 B站 App 扫码，或导入一份已登录的 cookies.json
+                partitions:
+                  - tid: "122"
+                    label: 知识 · 野生技术协会
+                  - tid: "231"
+                    label: 科技 · 计算机技术
+                limits:
+                  title: 80
+                  desc: 250
+                  tags: 200
+                  tag_count: 10
+                  tag_item: 20
+                  comment: 1000
+                gap_seconds: 60
+                uploads_in_flight: 0
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/bilibili/tools/repair:
+    post:
+      tags: [bilibili]
+      operationId: repairBiliTool
+      summary: Repair a broken biliup install, then re-check
+      description: |
+        Rewrites the `biliup.exe` **0-byte stub** that WinGet leaves in
+        `%LOCALAPPDATA%\Microsoft\WinGet\Links\` when developer mode is off.
+
+        That stub is worth its own endpoint because it fails in a misleading
+        way: `shutil.which` finds it, so the tool looks installed, but
+        `CreateProcess` refuses to run it. The resulting error ("not a valid
+        application for this OS platform") points nowhere near the real cause,
+        and reinstalling by the message text does not help. The response is the
+        same readiness payload as `GET /api/bilibili/status`.
+      responses:
+        "200":
+          description: Readiness after the repair attempt.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BiliStatusRead"
+
+  /api/bilibili/login/qrcode:
+    post:
+      tags: [bilibili]
+      operationId: createBiliLoginQrcode
+      summary: Start a QR-code login
+      description: |
+        Returns the QR payload as **inline SVG text** (not a bitmap) so the UI
+        can drop it straight into the DOM. The SVG's intrinsic unit is
+        millimetres, so the frontend must set an explicit width/height.
+
+        `qrcode_key` is the handle for `GET /api/bilibili/login/poll`; it is
+        held in memory only and is dropped as soon as a login is confirmed or a
+        login file is imported.
+      responses:
+        "200":
+          description: QR code created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BiliQrcodeRead"
+              example:
+                qrcode_key: 5f1e2c9a1b7d4e83a6c05d2f9b314e70
+                url: https://www.bilibili.com/h5/login?qrcode_key=5f1e2c9a1b7d4e83a6c05d2f9b314e70
+                svg: '<svg xmlns="http://www.w3.org/2000/svg" ...></svg>'
+                note: null
+                expires_in: 180
+        "502":
+          description: bilibili.com could not be reached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                detail: 生成二维码失败
+
+  /api/bilibili/login/poll:
+    get:
+      tags: [bilibili]
+      operationId: pollBiliLogin
+      summary: Poll a QR-code login
+      description: |
+        Reads the current state of a pending scan. Only `confirmed` writes the
+        login file; every other state is reported back unchanged so the UI can
+        keep waiting or restart with a fresh code.
+
+        `state` is one of `waiting` (not scanned yet), `scanned` (the phone
+        confirmed the code but the user has not accepted on it), `expired`, or
+        `confirmed`. When `confirmed` is returned, `logged_in` is true and
+        `account` carries the account name.
+      parameters:
+        - name: qrcode_key
+          in: query
+          required: true
+          description: Value returned by `POST /api/bilibili/login/qrcode`.
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        "200":
+          description: Current scan state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BiliLoginPollRead"
+              examples:
+                waiting:
+                  value:
+                    state: waiting
+                    message: 等待扫码
+                    logged_in: false
+                    account: null
+                confirmed:
+                  value:
+                    state: confirmed
+                    message: 登录成功
+                    logged_in: true
+                    account:
+                      mid: 12345678
+                      name: 示例账号
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "502":
+          description: bilibili.com could not be reached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/bilibili/cookies:
+    post:
+      tags: [bilibili]
+      operationId: importBiliCookies
+      summary: Import an existing bilibili login file
+      description: |
+        Replaces `data/bilibili/cookies.json` with the uploaded bytes.
+
+        **The format is not validated here** (same rule as `POST /api/cookies`):
+        the file is stored first and the returned readiness payload says what
+        was actually read and which fields are missing. Rejecting the upload
+        instead would strand the user with a file that neither works nor can be
+        inspected. Importing also discards any pending QR login.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: A biliup-compatible cookies.json (SESSDATA + bili_jct).
+      responses:
+        "200":
+          description: File stored; readiness reflects what was readable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BiliStatusRead"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    delete:
+      tags: [bilibili]
+      operationId: deleteBiliCookies
+      summary: Forget the bilibili login
+      description: |
+        Removes the login file. **Idempotent**: deleting when nothing is stored
+        still returns the current readiness payload instead of a `404`.
+      responses:
+        "200":
+          description: Login removed (or already absent).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BiliStatusRead"
+
+  /api/bilibili/prefill:
+    get:
+      tags: [bilibili]
+      operationId: getBiliPrefill
+      summary: Prefill the upload form
+      description: |
+        Builds the form the user is about to see, from data the console already
+        has. `kind=single` (job with no `item_id`, or a single-video job)
+        returns one `metadata`; `kind=collection` returns a `template` plus one
+        `items[]` preview entry per downloaded video.
+
+        `problems` is the part worth reading before submitting: it names the
+        entries whose rendered title/description/tags already exceed a platform
+        limit, so a batch can be fixed **before** the first upload starts rather
+        than failing halfway through.
+      parameters:
+        - name: job_id
+          in: query
+          required: true
+          description: Task to prefill from.
+          schema:
+            type: string
+        - name: item_id
+          in: query
+          required: false
+          description: Item to prefill from; omit for a whole-task (collection) prefill.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Prefilled form values.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BiliPrefillRead"
+              example:
+                job_id: 6f1a3d2c-9f4b-4a1e-8c2d-0b7e5a91c3aa
+                job_title: 示例播放列表
+                kind: collection
+                comment: 这是合集里的第 {index} 集。
+                metadata: null
+                template:
+                  title: "{title}"
+                  desc: "{job} · 第 {index}/{count} 集"
+                  tags: 编程, 教程
+                  tid: "122"
+                items:
+                  - index: 1
+                    item_id: 0f8b1c44-2a55-4c31-9c0a-7d1e6f3b2a10
+                    source_title: 第一集：环境搭建
+                    source_url: https://www.youtube.com/watch?v=aaaaaaaaaaa
+                    title: 第一集：环境搭建
+                    desc: 示例播放列表 · 第 1/2 集
+                    tags: 编程, 教程
+                    ready: true
+                problems: []
+                partitions:
+                  - tid: "122"
+                    label: 知识 · 野生技术协会
+                limits:
+                  title: 80
+                  desc: 250
+                  tags: 200
+                  tag_count: 10
+                  tag_item: 20
+                  comment: 1000
+                make_cover: true
+                make_comment: true
+                season_desc: ""
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/bilibili/uploads:
+    get:
+      tags: [bilibili]
+      operationId: getJobBiliUploads
+      summary: Upload state of one task
+      description: |
+        Item-level detail plus the task-level badge, for the upload icon shown
+        on a single task row. Tasks with no upload records at all are reported
+        as an empty `uploads` list and the `none` badge.
+      parameters:
+        - name: job_id
+          in: query
+          required: true
+          description: Task to read.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Badge plus per-item records.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BiliJobUploadsRead"
+              example:
+                job_id: 6f1a3d2c-9f4b-4a1e-8c2d-0b7e5a91c3aa
+                badge: uploading
+                badge_text: 上传中
+                badge_tone: busy
+                uploads:
+                  - id: 3c9a1e77-5b2d-4f60-9a1c-8e74b0d5f213
+                    job_id: 6f1a3d2c-9f4b-4a1e-8c2d-0b7e5a91c3aa
+                    item_id: 0f8b1c44-2a55-4c31-9c0a-7d1e6f3b2a10
+                    index: 1
+                    title: 第一集：环境搭建
+                    desc: 示例播放列表 · 第 1/2 集
+                    tags: 编程, 教程
+                    tid: "122"
+                    tid_label: 知识 · 野生技术协会
+                    status: uploading
+                    status_text: 上传中
+                    badge: uploading
+                    badge_text: 上传中
+                    badge_tone: busy
+                    progress: 42.5
+                    bvid: null
+                    aid: null
+                    video_url: null
+                    cover_path: null
+                    verified_state: null
+                    verified_note: null
+                    error: null
+                    advice: null
+                    attempt: 1
+                    created_at: "2026-10-05T09:12:03Z"
+                    updated_at: "2026-10-05T09:14:31Z"
+                    started_at: "2026-10-05T09:12:04Z"
+                    finished_at: null
+                    elapsed_seconds: 147
+                season: null
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    post:
+      tags: [bilibili]
+      operationId: createBiliUpload
+      summary: Upload one video
+      description: |
+        Queues a single submission and returns **the whole task's** upload state,
+        because the UI only has one icon per task and must render it completely
+        from this response.
+
+        The job item is checked before the request is accepted, so `409` is the
+        normal answer for "not ready yet" rather than a task that fails later:
+        the video file must already exist on disk, the `biliup` tool must be
+        usable, and a login must be present. Metadata that exceeds a platform
+        limit is a `400`, with the offending field named in `detail`.
+
+        Uploading itself is asynchronous - poll the read endpoints or watch the
+        SSE stream for progress.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BiliUploadCreate"
+            example:
+              job_id: 6f1a3d2c-9f4b-4a1e-8c2d-0b7e5a91c3aa
+              item_id: 0f8b1c44-2a55-4c31-9c0a-7d1e6f3b2a10
+              metadata:
+                title: 第一集：环境搭建
+                desc: 示例播放列表 · 第 1/2 集
+                tags: 编程, 教程
+                tid: "122"
+              make_cover: true
+              comment: 有问题欢迎在评论区留言。
+      responses:
+        "200":
+          description: Accepted; the whole task's upload state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BiliJobUploadsRead"
+        "400":
+          description: Metadata or comment exceeds a platform limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                detail: 标题太长（87 > 80）
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            Not ready: the video file is missing, the tool is not usable, or
+            nobody is logged in. `detail` says which.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                detail: 这个视频还没有下载好，没有可以上传的文件
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/bilibili/uploads/summary:
+    get:
+      tags: [bilibili]
+      operationId: getAllBiliUploads
+      summary: Upload badges for every task that has one
+      description: |
+        Every task row in the queue shows a bilibili icon, and the frontend
+        re-reads after each SSE event. Asking per task would mean N requests per
+        event, so this returns the badges for **all** tasks that have upload
+        records in one call. Tasks without records are simply absent - the
+        frontend renders those as "not uploaded" by default.
+      responses:
+        "200":
+          description: One entry per task that has upload records.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BiliJobUploadsSummaryRead"
+              example:
+                jobs:
+                  - job_id: 6f1a3d2c-9f4b-4a1e-8c2d-0b7e5a91c3aa
+                    badge: uploaded
+                    badge_text: 已上传
+                    badge_tone: ok
+                    uploads: []
+                    season:
+                      id: 8a2f5c31-77e0-4d9b-b1a4-2c6f0e93d548
+                      job_id: 6f1a3d2c-9f4b-4a1e-8c2d-0b7e5a91c3aa
+                      title: 示例播放列表
+                      desc: ""
+                      season_id: 456789
+                      status: grouped
+                      status_text: 已提交归集（B站 需人工审核）
+                      upload_ids: []
+                      error: null
+                      advice: null
+
+  /api/bilibili/seasons:
+    get:
+      tags: [bilibili]
+      operationId: listBiliSeasons
+      summary: Collections that already exist on the account
+      description: |
+        Powers the "join an existing collection" option in the submission dialog.
+        Rows without a usable `season_id` are dropped (they cannot be submitted
+        against); rows missing a title keep a `合集 #<id>` placeholder.
+
+        **A logged-out account also returns 200**, with an empty list and the
+        reason in `error`/`advice`. Distinguishing "could not read" from "really
+        has none" matters: an empty list renders as "this account has no
+        collections yet", which would send the user off to build a duplicate.
+
+        `total` is the collection's current size on the platform. It is display
+        only and never feeds a decision.
+      responses:
+        "200":
+          description: The account's collections, or the reason they could not be read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BiliSeasonListRead"
+              example:
+                seasons:
+                  - season_id: 456789
+                    title: C++ Weekly
+                    desc: 每周一更
+                    cover_url: https://i0.hdslb.com/bfs/archive/example.jpg
+                    total: 22
+                error: ""
+                advice: ""
+
+  /api/bilibili/uploads/{upload_id}/retry:
+    post:
+      tags: [bilibili]
+      operationId: retryBiliUpload
+      summary: Retry one upload record
+      description: |
+        Which action is taken depends on where the record stopped, and the
+        chosen action is reported back in `action`:
+
+        * `reupload` - the previous attempt really failed, so the upload is
+          queued again from scratch;
+        * `reverify` - the command had already succeeded, only the platform
+          listing could not confirm it yet, so the archive list is re-read and
+          **nothing is re-uploaded**;
+        * `none` - the record is already published, or an attempt is still in
+          flight; there is nothing to do.
+
+        Re-queuing a failed record reuses the same row, so retries never pile up
+        duplicate entries in the UI.
+      parameters:
+        - name: upload_id
+          in: path
+          required: true
+          description: Upload record identifier.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The action that was taken.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BiliRetryRead"
+              examples:
+                reverified:
+                  value:
+                    action: reverify
+                    message: 已重新核对
+                    upload: null
+                published:
+                  value:
+                    action: none
+                    message: 这条稿件已经发布，不需要重试
+                    upload: null
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/bilibili/collections:
+    post:
+      tags: [bilibili]
+      operationId: createBiliCollection
+      summary: Upload a task as a collection
+      description: |
+        Renders the `template` once per downloaded item, queues every rendered
+        submission, then groups them into one bilibili "season" once all of them
+        are confirmed published.
+
+        Each video still becomes its own submission - there is no batch publish
+        API - so the sequence is: submit all, wait for the archive list to
+        confirm them, then create the season and add the episodes. A failure in
+        the grouping step leaves the submissions published; the season row then
+        carries its own error/advice pair and can be retried on its own through
+        `POST /api/bilibili/collections/{season_record_id}/group`.
+
+        `problems` is checked before anything is queued: a template or a
+        rendered entry that breaks a limit is a `400` naming the entry, so a
+        batch never starts and dies halfway.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BiliCollectionCreate"
+            example:
+              job_id: 6f1a3d2c-9f4b-4a1e-8c2d-0b7e5a91c3aa
+              template:
+                title: "{title}"
+                desc: "{job} · 第 {index}/{count} 集"
+                tags: 编程, 教程
+                tid: "122"
+              season_title: 示例播放列表
+              season_desc: ""
+              make_cover: true
+              comment: 这是合集里的第 {index} 集。
+      responses:
+        "200":
+          description: Accepted; the whole task's upload state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BiliJobUploadsRead"
+        "400":
+          description: >
+            Nothing was queued: a template or rendered entry exceeds a limit, or
+            the task has fewer than two downloadable videos.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                detail: "第 3 条：标题太长（92 > 80）"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            Not ready: some videos are not downloaded yet, the tool is not
+            usable, or nobody is logged in. `detail` lists what is missing.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                detail: 还有 2 个视频没有下载好：第一集、第二集
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/bilibili/collections/{season_record_id}/group:
+    post:
+      tags: [bilibili]
+      operationId: retryBiliSeasonGroup
+      summary: Retry the grouping step of a collection
+      description: |
+        Re-runs the season step for a collection whose grouping did not finish.
+
+        **It never creates a second season.** When the record already carries a
+        `season_id`, only the missing episodes are appended - which is the
+        common case, because the failure usually happens after the season itself
+        was created.
+      parameters:
+        - name: season_record_id
+          in: path
+          required: true
+          description: Season record identifier (from `season.id` in the task read model).
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Outcome of the retry, plus the updated season record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BiliSeasonRetryRead"
+              example:
+                message: 已重新尝试归集
+                season:
+                  id: 8a2f5c31-77e0-4d9b-b1a4-2c6f0e93d548
+                  job_id: 6f1a3d2c-9f4b-4a1e-8c2d-0b7e5a91c3aa
+                  title: 示例播放列表
+                  desc: ""
+                  season_id: 456789
+                  status: grouped
+                  status_text: 已提交归集（B站 需人工审核）
+                  upload_ids: []
+                  error: null
+                  advice: null
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
   /:
     get:
       tags: [health]
@@ -2068,3 +2757,602 @@ components:
               type:
                 type: string
               input: {}
+
+    BiliAdvice:
+      type: object
+      required: [message, advice]
+      description: >
+        One problem stated twice: what happened, and what the user should do next.
+        The split is deliberate - the screenshot-worthy half and the actionable
+        half, so the UI never has to compose advice itself.
+      properties:
+        message:
+          type: string
+          example: 还没有登录 B站
+        advice:
+          type: string
+          example: 点「扫码登录」用 B站 App 扫码，或导入一份已登录的 cookies.json
+
+    BiliPartitionRead:
+      type: object
+      required: [tid, label]
+      description: One entry of the bilibili partition table offered in the dialog.
+      properties:
+        tid:
+          type: string
+          example: "122"
+        label:
+          type: string
+          example: 知识 · 野生技术协会
+
+    BiliToolRead:
+      type: object
+      description: >
+        Result of probing one external executable. `found` only means a path was
+        resolved; `problem` is set when the file exists but cannot actually be
+        run - the case that makes a plain "is it installed?" check lie.
+      properties:
+        found:
+          type: boolean
+          default: false
+        path:
+          type: [string, "null"]
+        version:
+          type: [string, "null"]
+        problem:
+          type: [string, "null"]
+          example: 找到的 biliup.exe 是个 0 字节的空壳，无法运行
+        advice:
+          type: [string, "null"]
+
+    BiliAccountRead:
+      type: object
+      description: The account behind the stored login, when bilibili.com answered.
+      properties:
+        mid:
+          type: [integer, "null"]
+          example: 12345678
+        name:
+          type: string
+          default: ""
+          example: 示例账号
+
+    BiliLoginRead:
+      type: object
+      description: >
+        A summary of the stored login file. It reports *names and counts only* -
+        never a cookie value and never even a prefix of one, because the response
+        is rendered in the UI and may be pasted into a bug report.
+      properties:
+        present:
+          type: boolean
+          default: false
+        cookie_count:
+          type: integer
+          default: 0
+        names:
+          type: array
+          items:
+            type: string
+        missing_required:
+          type: array
+          items:
+            type: string
+          example: [SESSDATA, bili_jct]
+        missing_recommended:
+          type: array
+          items:
+            type: string
+        tracked_by_git:
+          type: boolean
+          default: false
+          description: >
+            True when the login file is tracked by git, i.e. the credentials are
+            already committed. Reported as a blocker rather than fixed silently.
+        account:
+          oneOf:
+            - $ref: "#/components/schemas/BiliAccountRead"
+            - type: "null"
+        account_checked:
+          type: boolean
+          default: false
+          description: False when the account lookup was skipped or failed; `account` is then unknown, not "logged out".
+
+    BiliLimits:
+      type: object
+      required: [title, desc, tags, tag_count, tag_item, tag_preview, comment]
+      description: >
+        Platform field limits, served by the backend so the dialog does not
+        hardcode them: title/desc/tags/comment are character limits, tag_count
+        the maximum number of tags, tag_item the limit per single tag, and
+        tag_preview how many characters of an over-long tag are echoed back
+        when reporting it (so the dialog and the 400 response word it the same).
+      properties:
+        title:
+          type: integer
+          example: 80
+        desc:
+          type: integer
+          example: 250
+        tags:
+          type: integer
+          example: 200
+        tag_count:
+          type: integer
+          example: 10
+        tag_item:
+          type: integer
+          example: 20
+        tag_preview:
+          type: integer
+          example: 40
+        comment:
+          type: integer
+          example: 1000
+
+    BiliStatusRead:
+      type: object
+      required: [ready, biliup, ffmpeg, login, limits]
+      properties:
+        ready:
+          type: boolean
+          description: True exactly when `blockers` is empty.
+        biliup:
+          $ref: "#/components/schemas/BiliToolRead"
+        ffmpeg:
+          $ref: "#/components/schemas/BiliToolRead"
+        login:
+          $ref: "#/components/schemas/BiliLoginRead"
+        blockers:
+          type: array
+          items:
+            $ref: "#/components/schemas/BiliAdvice"
+        partitions:
+          type: array
+          items:
+            $ref: "#/components/schemas/BiliPartitionRead"
+        limits:
+          $ref: "#/components/schemas/BiliLimits"
+        gap_seconds:
+          type: number
+          default: 0.0
+          description: Pause the queue keeps between two uploads.
+        uploads_in_flight:
+          type: integer
+          default: 0
+
+    BiliQrcodeRead:
+      type: object
+      required: [qrcode_key, url]
+      properties:
+        qrcode_key:
+          type: string
+        url:
+          type: string
+          description: The URL the QR code encodes; shown as a fallback link.
+        svg:
+          type: [string, "null"]
+          description: >
+            Inline SVG markup. Its intrinsic unit is millimetres, so the frontend
+            must set an explicit width and height.
+        note:
+          type: [string, "null"]
+        expires_in:
+          type: integer
+          default: 180
+
+    BiliLoginPollRead:
+      type: object
+      required: [state, message]
+      properties:
+        state:
+          type: string
+          description: One of `waiting`, `scanned`, `expired`, `confirmed`.
+          example: waiting
+        message:
+          type: string
+          example: 等待扫码
+        logged_in:
+          type: boolean
+          default: false
+        account:
+          oneOf:
+            - $ref: "#/components/schemas/BiliAccountRead"
+            - type: "null"
+
+    BiliMetadata:
+      type: object
+      description: >
+        One submission's metadata. The same shape is used as the *template* for a
+        collection, where `title` / `desc` may contain the placeholders
+        `{title}` `{index}` `{count}` `{job}` `{source}`.
+      properties:
+        title:
+          type: string
+          default: ""
+        desc:
+          type: string
+          default: ""
+        tags:
+          type: string
+          default: ""
+          description: Comma-separated. The whole string, the tag count and each individual tag are all limited.
+        tid:
+          type: string
+          default: ""
+          example: "122"
+
+    BiliPrefillItem:
+      type: object
+      required: [index, source_title, title, desc, tags]
+      description: One rendered, ready-to-review submission inside a collection prefill.
+      properties:
+        index:
+          type: integer
+          example: 1
+        item_id:
+          type: [string, "null"]
+        source_title:
+          type: string
+        source_url:
+          type: string
+          default: ""
+        title:
+          type: string
+        desc:
+          type: string
+        tags:
+          type: string
+        ready:
+          type: boolean
+          default: true
+          description: False when this entry is missing something and would be refused at submit time.
+
+    BiliPrefillRead:
+      type: object
+      required: [job_id, job_title, kind, limits]
+      properties:
+        job_id:
+          type: string
+        job_title:
+          type: string
+        kind:
+          type: string
+          enum: [single, collection]
+        comment:
+          type: string
+          default: ""
+        metadata:
+          oneOf:
+            - $ref: "#/components/schemas/BiliMetadata"
+            - type: "null"
+          description: Set for `kind=single`.
+        template:
+          oneOf:
+            - $ref: "#/components/schemas/BiliMetadata"
+            - type: "null"
+          description: Set for `kind=collection`.
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/BiliPrefillItem"
+        problems:
+          type: array
+          items:
+            type: string
+          description: >
+            Entries that already break a limit, named by position. Present so a
+            batch can be corrected before the first upload starts.
+        partitions:
+          type: array
+          items:
+            $ref: "#/components/schemas/BiliPartitionRead"
+        limits:
+          $ref: "#/components/schemas/BiliLimits"
+        make_cover:
+          type: boolean
+          default: true
+        make_comment:
+          type: boolean
+          default: true
+        season_desc:
+          type: string
+          default: ""
+        default_group_mode:
+          type: string
+          default: "none"
+          enum: [none, existing, new]
+          description: >
+            Initial selection for the grouping radio group. Differs per `kind`:
+            `new` for a collection (that was the pre-change behaviour), `none`
+            for a single video (a single video never joined a collection before).
+            Served from the server so the two call sites cannot drift.
+
+    BiliUploadCreate:
+      type: object
+      required: [job_id, metadata]
+      properties:
+        job_id:
+          type: string
+          minLength: 1
+        item_id:
+          type: [string, "null"]
+          description: The item to upload; omit only for a single-video task.
+        metadata:
+          $ref: "#/components/schemas/BiliMetadata"
+        make_cover:
+          type: boolean
+          default: true
+          description: Extract a frame with ffmpeg and use it as the cover.
+        comment:
+          type: string
+          default: ""
+          description: Posted and pinned after the submission confirms. Empty means "do not comment".
+        group_mode:
+          type: string
+          default: "none"
+          enum: [none, existing, new]
+          description: >
+            What to do with the video after it publishes. `none` leaves it
+            standalone (the pre-change behaviour for a single video), `existing`
+            appends it to `season_id`, `new` creates a collection named
+            `season_title`. Note the default differs from `BiliCollectionCreate`
+            (which defaults to `new`) on purpose.
+        season_id:
+          type: integer
+          nullable: true
+          description: Required when `group_mode=existing`. Not checked for existence here.
+        season_title:
+          type: string
+          default: ""
+          description: Only meaningful for `group_mode=new`. Falls back to the job title.
+
+    BiliCollectionCreate:
+      type: object
+      required: [job_id, template]
+      properties:
+        job_id:
+          type: string
+          minLength: 1
+        template:
+          $ref: "#/components/schemas/BiliMetadata"
+        season_title:
+          type: string
+          default: ""
+        season_desc:
+          type: string
+          default: ""
+        make_cover:
+          type: boolean
+          default: true
+        comment:
+          type: string
+          default: ""
+
+    BiliUploadRead:
+      type: object
+      required: [id, job_id, title, status, created_at, updated_at]
+      description: >
+        One submission. `status` is the backend's own lifecycle
+        (`queued` / `uploading` / `submitted` / `published` / `reviewing` /
+        `rejected` / `unverified` / `failed`); `badge` is the coarser level the
+        UI paints. `unverified` is its own state on purpose: the command
+        succeeded but the platform has not listed the submission yet, which is
+        not the same as either success or failure.
+      properties:
+        id:
+          type: string
+        job_id:
+          type: string
+        item_id:
+          type: [string, "null"]
+        index:
+          type: integer
+          default: 1
+          description: 1-based position within the task.
+        title:
+          type: string
+        desc:
+          type: string
+          default: ""
+        tags:
+          type: string
+          default: ""
+        tid:
+          type: string
+          default: ""
+        tid_label:
+          type: string
+          default: ""
+        status:
+          type: string
+        status_text:
+          type: string
+          default: ""
+        badge:
+          type: string
+          default: none
+        badge_text:
+          type: string
+          default: ""
+        badge_tone:
+          type: string
+          default: idle
+        progress:
+          type: number
+          default: 0.0
+          description: Percent, parsed from the upload tool's own output; monotonic per attempt.
+        bvid:
+          type: [string, "null"]
+        aid:
+          type: [integer, "null"]
+        video_url:
+          type: [string, "null"]
+        cover_path:
+          type: [string, "null"]
+        verified_state:
+          type: [string, "null"]
+        verified_note:
+          type: [string, "null"]
+        error:
+          type: [string, "null"]
+        advice:
+          type: [string, "null"]
+        attempt:
+          type: integer
+          default: 1
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        started_at:
+          type: [string, "null"]
+          format: date-time
+        finished_at:
+          type: [string, "null"]
+          format: date-time
+        elapsed_seconds:
+          type: integer
+          default: 0
+
+    BiliSeasonRead:
+      type: object
+      required: [id, job_id, status]
+      description: >
+        The grouping step of a collection, which is tracked separately from the
+        submissions it contains: bilibili reviews a season manually, so it can
+        lag (or fail) after every video is already published.
+      properties:
+        id:
+          type: string
+        job_id:
+          type: string
+        title:
+          type: string
+          default: ""
+        desc:
+          type: string
+          default: ""
+        season_id:
+          type: [integer, "null"]
+          description: Platform id once created; present even if adding episodes failed, and reused on retry.
+        status:
+          type: string
+          example: grouped
+        status_text:
+          type: string
+          default: ""
+        upload_ids:
+          type: array
+          items:
+            type: string
+        error:
+          type: [string, "null"]
+        advice:
+          type: [string, "null"]
+
+    BiliSeasonOption:
+      type: object
+      required: [season_id, title]
+      description: >
+        One collection that already exists on the account. Distinct from
+        `BiliSeasonRead`, which records where *this* submission is grouped -
+        this one is read from the platform.
+      properties:
+        season_id:
+          type: integer
+          description: Platform id. Rows without a usable one are dropped.
+        title:
+          type: string
+          description: Falls back to `合集 #<id>` when the platform returns no title.
+        desc:
+          type: string
+          default: ""
+          description: Read defensively; `intro` and `desc` are both seen in the wild.
+        cover_url:
+          type: string
+          default: ""
+        total:
+          type: integer
+          default: 0
+          description: Current size on the platform. Display only.
+
+    BiliSeasonListRead:
+      type: object
+      description: >
+        `error` separates "could not be read" from "really has none": both look
+        like an empty list otherwise, and the frontend would then claim the
+        account has no collections, sending the user off to build a duplicate.
+      properties:
+        seasons:
+          type: array
+          items:
+            $ref: "#/components/schemas/BiliSeasonOption"
+        error:
+          type: string
+          default: ""
+        advice:
+          type: string
+          default: ""
+
+    BiliJobUploadsRead:
+      type: object
+      required: [job_id, badge, badge_text, badge_tone]
+      properties:
+        job_id:
+          type: string
+        badge:
+          type: string
+          description: One of `none`, `uploading`, `uploaded`, `unverified`, `partial`, `failed`.
+        badge_text:
+          type: string
+        badge_tone:
+          type: string
+          description: One of `idle`, `busy`, `ok`, `warn`, `bad`.
+        uploads:
+          type: array
+          items:
+            $ref: "#/components/schemas/BiliUploadRead"
+          description: Ordered by `index` within the task; records that no longer match an item come last.
+        season:
+          oneOf:
+            - $ref: "#/components/schemas/BiliSeasonRead"
+            - type: "null"
+
+    BiliJobUploadsSummaryRead:
+      type: object
+      properties:
+        jobs:
+          type: array
+          items:
+            $ref: "#/components/schemas/BiliJobUploadsRead"
+          description: Only tasks that have upload records; sorted by job id.
+
+    BiliRetryRead:
+      type: object
+      required: [action, message]
+      properties:
+        action:
+          type: string
+          enum: [reupload, reverify, none]
+          description: >
+            What the retry actually did. `reverify` in particular means nothing
+            was re-uploaded - only the platform listing was read again.
+        message:
+          type: string
+        upload:
+          oneOf:
+            - $ref: "#/components/schemas/BiliUploadRead"
+            - type: "null"
+
+    BiliSeasonRetryRead:
+      type: object
+      required: [message, season]
+      properties:
+        message:
+          type: string
+          example: 已重新尝试归集
+        season:
+          $ref: "#/components/schemas/BiliSeasonRead"

@@ -1,0 +1,434 @@
+# 设计：视频自动上传 bilibili
+
+适用读者：要判断「这段逻辑该放哪一层」「改动会不会破坏运行时假设」的开发者。
+
+本页假定你已读过 [01-requirements.md](01-requirements.md) 的「技术事实」一节 —— 那里的 F2/F4/F5/F9/F10
+是下面全部取舍的前提。
+
+## 1. 技术选型
+
+### 1.1 提交工具：沿用 `biliup-rs 0.2.4`（不自研上传协议）
+
+| 方案 | 结论 | 依据 |
+| --- | --- | --- |
+| **`biliup-rs 0.2.4`（选定）** | 本机已装、arXiv-daily 已实测成功、命令行契约稳定（F2/F3/F6）。 | 不引入新依赖，风险最低。 |
+| 继任版 `biliup/biliup`（有原生 `season add`） | **不采用。** 无 winget 包（F5），它是一个含服务端与 Web 前端的大型产品，替换会改变部署与运维面；而我们要的「归集」只是 3 个 HTTP 调用，自研成本远低于换工具链。 | F5 |
+| 自研上传协议（直接打 B站 分片上传接口） | **不采用。** 分片上传 + 提交的协议面远大于归集，且 B站 侧频繁变更；重复实现 `biliup` 已解决的工程问题没有收益。 | F1、F3 |
+
+> 判断（非事实）：`biliup-rs` 已归档（上游迁移到 `biliup/biliup`），存在长期失效风险。
+> 风险已登记（requirements R3），并且**所有对 `biliup` 的依赖都收敛在 `bili_bin.py` 一个模块**，
+> 将来换工具只需改这一处与它的单测。
+
+### 1.2 合集归集：自研 3 个 member API 调用
+
+`biliup-rs 0.2.4` 不支持 `season_id`（F4），所以合集只能由本功能自己归集：
+
+| 步骤 | 端点 | 说明 |
+| --- | --- | --- |
+| 创建合集 | `POST /x2/creative/web/season/add` | form-urlencoded：`title/desc/cover/season_price=0/csrf`；返回 `data` = season_id。**按 F9 会先进入人工审核。** |
+| 添加稿件 | `POST /x2/creative/web/season/section/episodes/add?csrf=…` | JSON：`{"sectionId": <int>, "episodes": [{"aid","cid","title","charging_pay":0}]}`。参数名是 `episodes`/`sectionId`（F10）。 |
+| 列出合集（体检/复核用） | `GET /x2/creative/web/seasons?pn=1&ps=30` | 只读，用于把 season_id 反查成人可读的合集标题。 |
+
+**为什么不做「多 P 单稿件」**：多 P 在 Web 端受账号权重限制（F14），且全部条目共享一组元数据，
+与「为每个视频生成元数据」的需求直接冲突。逐个投稿为独立稿件既绕开权重限制，又让每条视频有独立标题与封面。
+
+### 1.3 登录：自建扫码轮询，不用 `biliup login`
+
+`biliup login` 要求交互终端，沙箱与无人值守场景不可用（requirements R6）。
+改为直连 `passport.bilibili.com` 的二维码生成/轮询接口，把 `biliup` 认识的 `LoginInfo` 结构写盘；
+这条链路 arXiv 项目已实测跑通（`tools/bili_qr_login.py`）。
+
+## 2. 总体结构与数据流
+
+```
+前端（任务中心）                         后端
+────────────────────────────────────────────────────────────────
+[B站 图标 + 上传]  ──POST /api/bilibili/uploads──────────┐
+[合集模板弹窗]     ──POST /api/bilibili/collections──────┤
+                                                         ▼
+                                              BiliManager（L2 编排）
+                                              队列 → worker（工作线程）
+                                                         │
+                                    ┌────────────────────┼────────────────────┐
+                                    ▼                    ▼                    ▼
+                            bili_meta（元数据）   bili_bin（biliup 进程）  bili_api（HTTP）
+                                    │                    │                    │
+                                    └────────► bili_upload（L3 单次上传逻辑）◄┘
+                                                         │
+                                              写 BiliUpload / BiliSeason 表
+                                                         │
+                                              EventBroker.publish ──► SSE ──► 前端重拉
+```
+
+**一次合集上传的完整时序**（`bili_upload.run_collection`）：
+
+```
+for 每条视频（串行，条间 sleep gap_seconds）:
+    meta  = bili_meta.render(template, item)          # 生成该视频的标题/简介/标签/分区
+    cover = bili_bin? 否：bili_cover 抽帧（可选）
+    rc, log = bili_bin.upload(video, meta, cover)     # 调 biliup
+    若 rc != 0 → 该条 failed（分类：601 频控 / 未登录 / 其他），继续下一条
+    arc = bili_api.find_archive(title)                # 对账（可能有延迟 → 退避重试 N 次）
+    若对账不到 → 该条 unverified（不谎报成功），继续下一条
+    写 BiliUpload(status=published|reviewing|unverified, aid, bvid, cid)
+
+若至少有 1 条拿到 aid:
+    season_id = bili_api.create_season(title, desc, cover_url)     # 需稿件封面 URL
+    bili_api.add_episodes(season_id, [(aid, cid, title), ...])     # 只加已就绪的
+    写 BiliSeason(status=grouped | pending | failed)
+```
+
+**这里有一条必须说清的语义**：平台对合集有**人工审核**（F9），所以合集能到达的终态是
+「已提交审核」，不是「已通过」。界面文案与文档一律照此表述。
+
+## 3. 模块分层落位
+
+新增模块按下表落位，并**必须**同步登记进 [docs/design.md](../../../docs/design.md) 的模块职责矩阵
+（`scripts/check_layers.py` 会把「未登记」判为失败）。
+
+| 模块 | 层 | 职责 | 不负责 |
+| --- | --- | --- | --- |
+| `bili_bin.py` | L3 领域 | `biliup` 可执行探测（含 winget 0 字节空壳识别）、命令组装、子进程执行、输出解析、错误分类（601 频控等）。 | 不写库、不发 B站 HTTP、不生成元数据。 |
+| `bili_api.py` | L3 领域 | B站 会员态 HTTP 客户端：稿件对账、上传封面、创建合集、添加稿件到合集、列出合集、发/置顶评论。全部经**可注入 transport**。 | 不调 `biliup`、不读库、不决定「该不该归集」。 |
+| `bili_auth.py` | L3 领域 | 扫码登录（生成二维码 / 轮询状态）、cookie 文件读写与三种格式兼容、凭据摘要（**只回传存在性与掩码**）。 | 不发 B站 业务请求、不写库。 |
+| `bili_meta.py` | L3 领域 | 投稿元数据模板（占位符渲染）与平台硬限校验/截断、分区（tid）词表。 | 不计长度之外的事，不读库、不发请求。 |
+| `bili_upload.py` | L3 领域 | **单次上传的领域逻辑**：编排 `bili_bin` + `bili_api` + `bili_meta` + `bili_auth`，返回结构化结果（含状态与下一步文案）。纯函数式，**不写库、不发事件**。 | 不做队列、不做状态持久化。 |
+| `bili_manager.py` | L2 编排 | 上传队列与 worker、串行与间隔、状态写库与收敛、进度事件发布、失败分类落账、重启后状态可读。 | 不直接调 `biliup`（经 `bili_upload`），不解析 B站 内部结构。 |
+| `routers/bilibili.py` | L0 入口 | 声明 B站 相关 HTTP 路由：取参、调辅助、定状态码。 | 不做状态转换，不写领域规则。 |
+| `bili_policy.py` | L3 领域 | B站 上传的**文案与分类常量**：状态码→人话、错误类别→可执行建议。 | 不做判定（判定在 `bili_upload` / `bili_manager`）。 |
+| `bili_http.py` | **L4 基础设施** | B站 请求的 HTTP 接缝：标准库 `urllib` 实现、强制直连、4xx/5xx 也带回正文与 `Set-Cookie`。 | 不知道任何端点的语义（端点在 `bili_api` / `bili_auth`）。 |
+| `bili_read_model.py` | L2 编排 | 把两张表投影成 API 读模型；**「多条记录 → 一档徽标」的聚合规则只此一处**。 | 不写库、不改状态。 |
+
+分层位置与依赖方向：`routers/bilibili` → `bili_manager`（L2）→ `bili_upload`（L3）→
+`bili_bin` / `bili_api` / `bili_auth` / `bili_meta` / `bili_policy`（L3）→ `bili_http`（L4）。
+横向依赖有两组：`bili_upload` → 其余四个 L3 模块（复用而非成环），以及
+`bili_read_model` → `job_read_model`（复用 `elapsed_seconds`），与既有
+`job_manager` → `ytdlp_formats` 的先例同构。两组都逐条登记在
+[docs/design.md](../../../docs/design.md) 的同层横向依赖清单里。
+
+## 4. 数据模型
+
+两张新表，随 `SQLModel.metadata.create_all` 建出（新表不需要 `_ensure_columns` 补列）。
+
+### `bili_upload`（稿件级：一次投稿 = 一行）
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | str PK | 记录 id。 |
+| `job_id` / `item_id` | str / str? | 关联的下载任务与条目（单视频任务的 `item_id` 是其唯一条目）。 |
+| `title` / `desc` / `tags` / `tid` | str | **实际提交**的元数据快照（用于对账与复现）。 |
+| `video_path` / `cover_path` / `cover_url` | str | 视频路径、本地封面、封面在 B站 的 URL。 |
+| `status` | str index | 见 §5。 |
+| `progress` | float | 0~1，`biliup` 输出解析出的粗粒度进度。 |
+| `bvid` / `aid` / `cid` | str?/int?/int? | 对账读回的平台标识。 |
+| `verified_state` / `verified_note` | str? | 平台 `state` 原值 + 人话解释。 |
+| `error` / `advice` | str? | 可读原因 + **下一步**（验收口径要求）。 |
+| `log_tail` | str? | `biliup` 输出尾部（经 `log_safety` 清洗）。 |
+| `attempt` | int | 第几次尝试（重试计数）。 |
+| `created_at` / `updated_at` / `started_at` / `finished_at` | datetime | 时间线。 |
+
+### `bili_season`（合集级：一次归集 = 一行）
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | str PK | 记录 id。 |
+| `job_id` | str index | 被归集的那个下载任务。 |
+| `title` / `desc` / `cover_path` / `cover_url` | str | 合集元数据。 |
+| `season_id` | int? | 平台返回的合集 id。 |
+| `status` | str | `pending` / `grouping` / `grouped` / `failed`。 |
+| `upload_ids_json` | str | 参与归集的稿件记录 id（**保序**，用于重试与展示）。 |
+| `error` / `advice` / `log_tail` | str? | 同稿件表。 |
+| `created_at` / `updated_at` / `started_at` / `finished_at` | datetime | 时间线。 |
+
+**为什么合集状态单独一张表**：稿件的成败与合集的成败是**两个独立生命周期** —— 稿件可以全部成功而归集失败
+（requirements FR-B9）。塞进一行会让「合集图标状态」与「单条视频状态」互相污染。
+
+## 5. 状态机
+
+### 5.1 稿件（`bili_upload.status`）
+
+```
+queued ──► uploading ──► submitted ──┬─► published   对账：已发布/开放浏览
+   │            │                     ├─► reviewing   对账：审核中/仅自己可见等非终态
+   │            │                     ├─► rejected    对账：审核不通过
+   │            │                     └─► unverified  对账查不到（**不谎报成功**）
+   └────────────┴─────────────────────► failed       可分类且带 advice
+```
+
+`unverified` 是刻意引入的一档：`biliup` 返回 0 只说明「命令跑完了」（F7），
+对账查不到时必须停在「待核对」，而不是折进 `published`。
+
+### 5.2 合集（`bili_season.status`）
+
+```
+pending ──► grouping ──┬─► grouped   已提交归集（含平台审核中）
+   ▲                   └─► failed    可重试
+   │                   ┌─► skipped   用户选了「不归集」（终态，不会自动归集）
+   └─────────────────────────── 重试
+```
+
+**`skipped` 为什么必须是终态**：`_maybe_group` 只自动归集 `pending`。留一条 `pending` 的归集记录
+会有两个后果：稿件投完后照样去建合集（于是「不归集」根本不管用），且界面上挂一个永远不会结束的
+「正在归集」徽标。
+
+但**记录照建**只对**合集**成立（不走「什么都不落库」那条路）：不落库的话界面上什么都不显示，
+用户分不清是「没归集」还是「还没开始归」。落成终态 `skipped` 才有一个明确的结论可显示。
+**单视频反过来：一条记录都不建** —— 因为单视频的默认就是「不归集」，建记录等于让此后每个
+单视频任务都在列表上多出一行「合集：未归集」（`create_if_missing=False`）。
+两条路径都**会把已有的 `pending` 停掉**：放着不管，用户选了「不归集」还是会被归集。
+
+### 5.3 界面状态（读模型派生，单一来源在后端）
+
+界面只需要 5 档，由后端读模型算出**状态 + 人话文案**（沿用 `fallback_policy` 的先例，文案留在领域层）：
+
+| 界面状态 | 派生规则 | 文案 |
+| --- | --- | --- |
+| （无） | 没有任何记录 | —— |
+| `uploading` | 存在 `queued/uploading/submitted/grouping` | 上传中 |
+| `uploaded` | 单视频：`published/reviewing`；合集：`grouped` | 已上传 |
+| `unverified` | 全部 `unverified` | 待核对 |
+| `partial` | 有成功也有失败 | 部分失败 |
+| `failed` | 全部失败，或合集 `failed` | 失败 |
+
+## 6. HTTP API
+
+单一来源仍是运行时 `app.openapi()`；`frontend/src/types.ts` 与 `docs/openapi.yaml` 是手写副本，
+由 `scripts/check_api_contract.py` 校验无漂移。新增接口必须同时更新三处。
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/api/bilibili/status` | 环境体检：`biliup` / `ffmpeg` / cookie / 登录态 + 缺项清单（人话）。 |
+| POST | `/api/bilibili/login/qrcode` | 生成登录二维码，返回 `qrcode_key` 与 **SVG** 二维码（内联文本，不是 base64 位图：`qrcode` 的 SVG 工厂不牵入 Pillow，见 §12）。 |
+| GET | `/api/bilibili/login/poll` | 轮询扫码状态（waiting/scanned/confirmed/expired）。 |
+| POST | `/api/bilibili/cookies` | 导入已有 cookies.json（multipart）。 |
+| DELETE | `/api/bilibili/cookies` | 清除登录态。 |
+| GET | `/api/bilibili/prefill` | 预填元数据：单视频给一组值；合集给「模板 + 逐条预览」。两者都带 `default_group_mode`（按路径不同，见 §7.2.2）。 |
+| POST | `/api/bilibili/uploads` | 启动单视频上传（可选按 `group_mode` 归入某个合集）。 |
+| POST | `/api/bilibili/collections` | 启动合集上传（模板驱动，逐个投稿后按 `group_mode` 归集）。 |
+| GET | `/api/bilibili/seasons` | 账号下**已存在**的合集，供界面下拉选择。未登录也返回 200（空列表 + 原因，见 §7.2）。 |
+| GET | `/api/bilibili/uploads` | 按任务读回上传状态（任务级 + 条目级）。 |
+| POST | `/api/bilibili/uploads/{upload_id}/retry` | 重试单条稿件（幂等：已成功的条目不重复投）。 |
+| POST | `/api/bilibili/collections/{season_record_id}/group` | 重试合集归集。 |
+
+失败一律返回可读 `detail`；未登录、`biliup` 缺失等**前置条件不满足**返回 409，参数不合法返回 400
+（与既有 `cookie_import_status_code` 的处置口径一致：状态冲突 409、请求本身不行 400）。
+
+## 7. 元数据模板
+
+合集模板有五个字段，其中标题与简介支持占位符：
+
+| 占位符 | 展开为 |
+| --- | --- |
+| `{index}` | 该视频在合集里的序号（从 1 开始，两位补零：`01`） |
+| `{title}` | 该视频的标题（已去扩展名） |
+| `{count}` | 合集总条数 |
+| `{job}` | 下载任务标题（即合集名） |
+| `{source}` | 该视频自己的原始链接 |
+
+渲染后按平台硬限处理（F13）：标题/简介**超限直接报错而不是静默截断** —— 静默截断会让用户以为发出去了
+完整内容（与 ai/ui 001/003 的「意图不等于实现」是同一类盲区）；界面在提交前就给出「第 N 条超出 X 字」的定位。
+
+单视频不套模板：直接给「标题 = 视频标题」「简介 = 任务标题 + 源链接」、默认标签、默认分区，
+全部可编辑，另加**版权与来源**两项。
+
+分区（`tid`）用**小词表**而非全量分区表：映射「知识 / 科技 / 生活 / 影视 / 音乐 / 游戏 / 其他」等常见分区到 `tid`，
+**默认 `122`（知识 · 野生技术协会）**。词表放 `bili_meta.py`，未知分区回退默认值并如实标注。
+
+> 这里特意写明一条**取数纪律**：`122` 这个数字来自 bilibili-API-collect 的现行分区表，
+> 而不是从 arXiv 项目的注释里抄的 —— 那份注释把「野生技术协会」写成了 `171`，
+> 而现行表里 `171` 是游戏区的「电子竞技」（见 [01-requirements.md F12](01-requirements.md)）。
+> 分区表是会变的，凡引用具体数字都要能指回一张当期表。
+
+### 7.1 版权（自制 / 转载）与来源
+
+这两项是后来补上的（原先 `bili_bin` 把 `--copyright` 写死成 `1`），有三条设计判据：
+
+1. **默认转载。** 这个工作流搬的是从别的平台下载下来的视频，绝大多数稿件都不是自己拍的。
+   默认「自制」会把每一单都填成假信息，而 B站 对「把转载标成自制」是有处置的。
+   反向兜底也一致：`normalize_copyright` 读不出合法值时回退**转载**而非自制 ——
+   标成自制是替用户声明了一件他没说过的事，标成转载最多让他改一下。
+
+2. **合集模板上刻意没有 `source` 字段。** 合集里每条视频的出处都不一样，
+   写一个共用的来源在语义上就是错的。逐条渲染时来源取该条自己的 `source_url`。
+   界面上相应地**只在单视频场景显示来源输入框**（`BiliUploadDialog`），
+   模板的 `_metadata_model` 投影也刻意留空而不是回填第一条 ——
+   回填一个看着像「所有条目都用它」的值，正是这条设计要避免的误导。
+
+3. **「界面上有值」与「命令里带这个参数」必须收在一处。** `effective_source` 是唯一判据
+   （`bili_upload.render` / `bili_meta.default_single` / `bili_bin.build_upload_argv` 三处调用）：
+   只有转载稿才有来源，自制稿即便带着值也不提交。不这么收口的话，
+   落库的快照与实发参数迟早不一致，而「自制稿带了来源」可能被平台判成误标。
+
+**校验拦在提交之前**：转载稿缺来源会被 B站 退回来（`21004 Missing source for reprint`，见 F16），
+所以 `bili_meta.validate` 与界面各写一份同判据的检查 —— 界面那份是为了让用户在输入框旁边就看到，
+服务端那份是权威。写两遍而不是只留一处，是因为界面那份能在**点提交之前**给出定位。
+
+### 7.2 归集方式：新建 / 加入已有 / 不归集（单视频与合集共用）
+
+`bili_api` 里早就有 `list_seasons` 与 `create_season`，`_group_work` 也早就能按
+`existing_season_id` 只补加不重建 —— 但**没有任何生产代码调用过前两个**（原先只有测试直接调），
+界面更是完全不知道有合集这回事。这一节要接的是**露头**，不是新造能力。
+
+**实现上只有一处真正的新逻辑**：「加入已有合集」= **在提交时把平台已有的编号预置进
+`bili_season.season_id`**。`_group_work` 本来就读它当 `existing_season_id` 并据此跳过
+`create_season`，于是「不新建、只补加」自动成立。复用既有的「重试不重复建合集」机制，
+而不是另开一条归集分支 —— 另开一条就要把「建集 + 加集 + 失败重试 + 状态收敛」再实现一遍。
+
+反面同样重要：**`new` 模式下必须让 `season_id` 保持为空**。它一旦被预置成任何值（哪怕是对的 `0`），
+`_group_work` 就会跳过建集、对着一个不存在的编号加视频。所以这个字段不能「顺手填个默认值」。
+
+#### 7.2.1 为什么单视频也要有这一项
+
+第一版只对 playlist 开放，理由是「单视频本来就没有归集这回事」。**这个理由站不住**：
+
+- B站 自己允许把一条新视频放进已有合集，而 `create_season` 也**不需要**先有稿件
+  （F19）—— 接口上完全成立。
+- 归集阶段只看 `bili_season.season_id` 与 `upload_ids`，**不看这批稿件有几条**（F20）。
+  所以「一条」与「N 条」在归集阶段没有区别，不需要第二套实现。
+- 更要紧的是**可达性**：把入口只挂在 playlist 上，「投稿时决定进哪个合集」这个能力
+  就要求用户先下载一整个 playlist。实测本机 12 个任务**全是单视频**，
+  于是这个功能在界面上永远不出现 —— 用户看到的是「根本没有这个选项」。
+
+#### 7.2.2 默认值按路径不同（本节最容易写错的一处）
+
+| 路径 | 默认 | 改动前的实际行为 |
+| --- | --- | --- |
+| 合集（playlist） | `new` | 每次投完自动新建一个合集。 |
+| 单视频 | `none` | `submit_single` 连归集记录都不建，从不进任何合集。 |
+
+**两者都是「保持改动前的行为」，因为反方向都会悄悄改变用户账号里的东西**：单视频用 `new`
+会让此后每条单视频投稿都在账号里多出一个只含它自己的合集；合集用 `none` 会让已有的投稿
+失去归集。两种都不会报错，只能靠用户自己发现。
+
+因此 `normalize_group_mode` 的**回退值是参数**而不是写死的常量 —— 调用方必须按场景传。
+默认值还随预填一起下发（`default_group_mode`），前端直接用，**不再按 `kind` 推一遍**：
+推两份迟早会漂移，而漂移的表现与上面那两种事故完全相同。
+
+#### 7.2.3 「不归集」在两条路径上的落库行为相反
+
+- **合集**：落一条终态 `skipped`。合集本来就有归集记录，留一条是在说明它的去向；
+  不落库会让界面上一片空白，用户分不清是「没归集」还是「还没开始归」。
+- **单视频**：**一条记录都不建**（`create_if_missing=False`）。单视频的默认恰好就是「不归集」，
+  照合集那样建记录等于让此后每个单视频任务都在列表上多出一行「合集：未归集」——
+  **默认路径上多出来的东西必须是零**。
+- 两条路径都**会把已有的 `pending` 记录停掉**。放着不管的话，用户明明选了「不归集」，
+  视频投完还是会被 `_maybe_group` 归集，而界面上看不出任何异常。
+
+四条判据：
+
+1. **默认值见 7.2.2，不能统一。** 与 `normalize_copyright` 同一条原则：
+   回退到不改变既有事实的那一侧 —— 只是「既有事实」本身取决于路径。
+
+2. **`_upsert_season` 的「`season_id` 不清空」要为「换了目标」让路。** 那条规则本来是为了
+   **重试**不重复建合集；照搬到「用户从加入 A 改成加入 B」上，就会静默地继续往 A 里加 ——
+   用户选了什么完全不起作用，而界面上看不出任何异常。所以 `pin_season_id` 是唯一例外：
+   它代表用户**明确选了**目标，必须覆盖。
+
+3. **三条矛盾在提交前各自报错，不静默取其一。** `validate_group_choice` 拦
+   「加入已有却没选编号」「新建却带着编号」「不归集却带着编号」。静默处理（比如
+   「带了编号就当 existing」）的后果是用户选了「新建」却往老合集里塞视频。
+   这也决定了**校验必须看原始输入**：路由里若先 `normalize_group_mode` 再校验，
+   非法值已被修成 `new`，校验永远看不到它，一个手滑写坏的参数会被静默执行。
+   归一只用于**通过校验之后**真正执行的那一步。
+
+4. **「读不到」与「真的没有」是两句话，而且读不到不能阻塞投稿。** `bili_api.list_seasons`
+   自己吞掉网络异常返回空表，接口拿不到这个区别，于是未登录时**由 manager 按登录态判断**
+   并把原因写进 `error` / `advice`。不去伪造那个区别，是因为界面上一旦显示成
+   「这个账号还没有合集」，用户就会跑去新建一个重复的。同理，没有编号的合集整条跳过
+   （归集要按编号提交），缺标题的保留并用编号兜名（丢掉等于让用户少一个可选目标）。
+
+   还有一层是**耦合度**：合集列表只有「加入已有合集」才需要，所以它**只在那一项被选中时
+   才成为提交的前置条件**。把「读到列表」当成整张表单的门槛，会让一次读失败等于
+   「视频传不上去」—— 而用户可能压根不打算归集。读失败也必须是**一句结论**（带原因与下一步）
+   而不是 `null`：`null` 在界面上的含义是「还在读」，于是一次失败会变成一个永远不会结束的
+   「正在读取…」。
+
+**为什么未登录返回 200 而不是 401/409**：这是界面上一个**可选**功能的输入，不是一次必须
+成功的动作。用异常状态码逼前端处理分支，只会让「想归集但没登录」这种最常见的情况
+显示成一句报错，而不是引导去登录。
+
+
+## 8. 可测试性：注入接缝
+
+沿用既有 `create_app(ytdlp_service=…)` 的先例：
+
+- `bili_bin` 的进程执行是一个可替换的 `runner(argv, timeout, on_line) -> CommandResult` 回调
+  （返回的是带 `returncode`/`stdout`/`stderr` 的 dataclass，而不是裸三元组 —— 调用点要读的属性有三个，
+  裸元组会让「第几个是 stderr」变成每处都要重新确认的事）。
+- `bili_api` 的 HTTP 走一个可注入 `transport(method, url, params=…, headers=…, form=…, json_body=…, timeout=…) -> HttpResult`
+  协议，默认实现用**标准库 `urllib`**（不新增依赖，requirements 兼容性一条）。
+- `bili_auth` 的扫码轮询同样经 transport。
+- `bili_upload` 还额外接收可替换的 `sleeper`（对账退避与合集条间隔都用它）——
+  否则「条间必须等 20 秒」这条会被真测成 20×N 秒的真实等待。
+- `create_app(..., bili_manager=None)`：为 `None` 时按真实依赖装配 `BiliManager`；测试传 fake。
+
+于是**全部自动测试离线**：不启动 `biliup`、不联网、不需要账号（requirements R5 说明真实投稿只能人工验收）。
+
+## 9. 错误分类与文案
+
+分类集中在 `bili_policy.py`（判定在 `bili_upload`），`bili_manager` 只落账：
+
+| 类别 | 判定依据 | 文案与下一步 |
+| --- | --- | --- |
+| 未登录 / 登录态过期 | `biliup` 输出含登录关键词，或 cookie 缺 `SESSDATA`/`bili_jct`；对账返回 `code != 0` | 「B站 登录已失效」+「去设置里重新扫码登录」 |
+| 账号频控 601 | 输出含 `601` | 「B站 说这次上传太快了。这是账号侧的临时限流，等几分钟原样重投即可，**不要改参数硬刷**。」（F8） |
+| `biliup` 缺失 | 探测不到可用二进制 | 「没找到投稿工具」+ 具体的 `winget install --id ForgQi.biliup-rs --exact` 命令 |
+| 视频文件不存在 | `video_path` 不存在 / 无 `output_path` | 「视频还没下载好」+「先让下载任务跑完」 |
+| 对账查不到 | `biliup` 返回 0 但 member 列表里没有 | 「已提交，但还没在 B站 看到它」+「去创作中心核对，或稍后重试」 |
+| 归集失败 | `season/add` 或 `episodes/add` 非 0 | 「视频都传上去了，合集没建成」+「可重试归集」 |
+| 其他 | 兜底 | 透传清洗后的原文，不猜测原因 |
+
+**文案约束**（沿用仓库既有约定）：文案里不出现会被上游误分类的裸词（`timed out` / `reset` / `403`）。
+
+## 10. 界面设计
+
+沿用现有语言：卡片式 panel、圆角 8px、`#dce2ee` 描边、`#1f6feb` 主色、`lucide-react` 图标。
+B站 品牌色 `#FB7299` 只用于 B站 图标本身，按钮其余样式与既有 `.icon-button` / `.ghost-button` 一致。
+
+| 位置 | 元素 |
+| --- | --- |
+| 任务行（单视频） | B站 图标按钮，文案「上传」/「已上传」/「上传中」；禁用态给出 title 提示。 |
+| 任务行（合集） | 同上，但走合集模板流程。 |
+| 条目行 | B站 图标按钮，单条上传。 |
+| 弹窗 | 单视频表单（可编辑字段 + 封面开关 + **归集方式**）/ 合集模板表单（模板 + 归集方式 + 逐条预览表）。 |
+| 设置面板 | B站 登录区：环境体检结论、扫码按钮（弹二维码）、导入 cookie 文件。 |
+
+**归集方式的三个控件在两种表单里长得一样，只有三处按场景分岔**（否则会在「顺手复用」时被抹平）：
+
+| 位置 | 单视频 | 合集 |
+| --- | --- | --- |
+| 初始选中项 | `prefill.default_group_mode`（服务端给，单视频是「不归集」） | 同左（合集是「新建合集」） |
+| 说明文案的主语 | 「这条视频」 | 「这些视频」 |
+| 提交后的回执 | 「已开始上传《标题》，不归集 —— 跑完这里会变成「已上传」。」 | 「已开始上传《任务名》的 N 个视频，…」 |
+
+**回执里必须带上归集去向，包括「不归集」**：那是用户刚在表单里做过的一个选择，
+回执不提它，用户就没法确认自己选的那个真的生效了 —— 而「不归集」恰恰是最容易被误以为
+没生效的一项（界面上看不出任何变化）。这一条与 §10 的既定口径一致：界面上不出现
+「没有结论的状态」。
+
+**为什么要用模态弹窗**（与既有 `HelpPopover` 的「非模态」原则相反）：说明浮层是**可选阅读**，
+而上传表单是**必须先填完才能确认**的动作，需要焦点管理。两者性质不同，所以不套用同一条约束；
+但焦点管理要写对：打开时把焦点移到第一个输入、`Esc` 关闭、关闭后焦点还给触发按钮。
+
+## 11. 已知限制与设计债
+
+1. **不承诺「已发布」**：稿件受平台转码与审核影响，合集更是**人工审核**（F9）。本功能只承诺「已提交」+ 对账结论。
+2. **对账有窗口期**：平台侧稿件列表有延迟，投稿后可能短时间内查不到，此时停在 `unverified`。重试即重新对账。
+3. **依赖非公开接口**：`season/*`、`reply/*`、`cover/up` 都不是官方开放接口，B站 变更即失效（R3）。
+4. **`biliup-rs` 已归档**：上游迁移（F5），长期存在失效风险；依赖已收敛在 `bili_bin.py`。
+5. **无「上传中途取消」**：见 requirements 的非目标表。
+6. **单进程单队列**：上传与下载共用同一个 `EventBroker` 但各自的队列，互不阻塞；上传串行是**刻意的**（抗频控），
+   不提供并发度配置 —— 提高并发会直接把 601 频控的概率拉起来（F8）。
+
+## 12. 为什么为二维码破例加了一个依赖
+
+`bili_auth` 需要把登录 URL 变成可扫的二维码。三条路都试过：
+
+| 方案 | 否决理由 |
+| --- | --- |
+| 在仓库里手写 QR 编码器 | QR 的 Reed–Solomon 纠错与掩码选择是**看起来对、错了也看不出来**的那类代码。**离线无法验证「扫得出来」**，等于交付一个自己都没验过的东西 —— 违反「先取证再交付」。 |
+| 只把登录 URL 返给前端、让用户手输 | 该 URL 是为 App 扫码设计的，在手机浏览器里打开无法完成登录；手输 200+ 字符不现实。 |
+| **加 `qrcode>=8.0`（选定）** | 纯 Python、无编译产物；只用 `qrcode.image.svg.SvgPathImage`，**因此不会牵入 Pillow**（`pip install qrcode` 的默认工厂才需要 PIL）。这是本次唯一的运行时依赖新增。 |
+
+代价与兜底：`bili_auth` 对 `qrcode` 的 import 做了容错 —— 装不上时扫码接口返回明确的
+「缺少二维码组件，请改用导入 cookies.json」，而不是让整个设置面板炸掉。

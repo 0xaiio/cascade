@@ -72,10 +72,70 @@ class JobRead {
   +elapsed_seconds: int
 }
 
+class BiliUpload {
+  +id: str <<PK>>
+  +job_id: str <<indexed>>
+  +item_id: str? <<indexed>>
+  +title: str
+  +desc: str
+  +tags: str
+  +tid: str
+  +video_path: str
+  +cover_path: str?
+  +cover_url: str?
+  +make_cover: bool
+  +comment: str
+  +status: str <<indexed>>
+  +progress: float
+  +bvid: str?
+  +aid: int?
+  +cid: int?
+  +verified_state: str?
+  +verified_note: str?
+  +error: str?
+  +advice: str?
+  +log_tail: str?
+  +attempt: int
+  +created_at: datetime
+  +updated_at: datetime
+  +started_at: datetime?
+  +finished_at: datetime?
+}
+
+class BiliSeason {
+  +id: str <<PK>>
+  +job_id: str <<indexed>>
+  +title: str
+  +desc: str
+  +cover_path: str?
+  +cover_url: str?
+  +season_id: int?
+  +status: str <<indexed>>
+  +upload_ids_json: str
+  +error: str?
+  +advice: str?
+  +log_tail: str?
+  +created_at: datetime
+  +updated_at: datetime
+  +started_at: datetime?
+  +finished_at: datetime?
+}
+
 Job "1" --> "*" JobItem : contains
 Job "1" --> "*" JobEvent : emits
 JobItem "0..1" --> "*" JobEvent : item events
 Job --> JobRead : projected by job_read_model
 JobItem --> JobRead : projected by job_read_model
+Job "1" --> "*" BiliUpload : uploads
+JobItem "0..1" --> "*" BiliUpload : item upload
+Job "1" --> "*" BiliSeason : groups
+BiliSeason "1" --> "*" BiliUpload : upload_ids_json\n(ordered, retry input)
+BiliUpload --> BiliJobUploadsRead : projected by bili_read_model
+BiliSeason --> BiliJobUploadsRead : projected by bili_read_model
 Setting ..> Job : download_dir / defaults\napplied on startup
+note bottom
+Credentials never enter the database:
+data/cookies.txt and data/bili_cookies.json
+stay on the filesystem, so only tables are drawn here.
+end note
 @enduml

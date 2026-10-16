@@ -62,9 +62,30 @@ class AppSettings(BaseSettings):
     aria2c_path: str | None = None
     aria2c_connections: int = Field(default=2, ge=1, le=4)
 
+    # ---- B站 上传（见 ai/feature/bilibili-upload/02-design.md）----
+    # biliup 可执行文件。留空时按「PATH -> WinGet 包目录」自动探测；探测实现见 app/bili_bin.py，
+    # 它在每一级命中后都会验一遍 PE 头 —— WinGet 未开开发者模式时会在 Links 目录留下
+    # 0 字节的同名空壳，shutil.which 照样找得到，但 CreateProcess 会报「不是此 OS 平台的有效应用」。
+    biliup_path: str | None = None
+    # 登录态文件名，落在 data/ 下。cookie 等同账号密码：.gitignore 已覆盖 data/，
+    # 体检还会再校验它**未被 git 跟踪**，接口响应只回传掩码后的存在性。
+    bili_cookie_filename: str = "bili_cookies.json"
+    # 合集逐个投稿之间强制留的间隔。B站 对连续上传有账号级频控（错误码 601），
+    # 这个间隔是唯一的抗频控手段 —— 调小它就是在把频控概率往上拉。
+    bili_upload_gap_seconds: float = Field(default=20.0, ge=0)
+
     @property
     def cookies_path(self) -> Path:
         return self.data_dir / self.cookies_filename
+
+    @property
+    def bili_cookie_path(self) -> Path:
+        return self.data_dir / self.bili_cookie_filename
+
+    @property
+    def bili_cover_dir(self) -> Path:
+        """自动生成的封面落在这里。与登录文件同放 `data/` 下 —— 都是本机运行产物，不入库。"""
+        return self.data_dir / "bili_covers"
 
     def ensure_directories(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)

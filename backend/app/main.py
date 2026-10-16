@@ -23,6 +23,7 @@ from sqlmodel import Session
 
 from .api_context import ApiContext
 from .api_support import apply_stored_settings, select_directory_with_tkinter
+from .bili_manager import BiliManager
 from .config import REPO_ROOT, AppSettings, get_settings
 from .db import checkpoint_wal, create_app_engine, init_db
 from .events import EventBroker
@@ -43,6 +44,7 @@ def create_app(
     system_opener: Callable[[Path], None] | None = None,
     video_opener: Callable[[Path, str | None], None] | None = None,
     sanitize_environment_variables: bool = True,
+    bili_manager: BiliManager | None = None,
 ) -> FastAPI:
     app_settings = settings or get_settings()
     app_settings.ensure_directories()
@@ -75,6 +77,9 @@ def create_app(
     with Session(engine) as session:
         apply_stored_settings(session, app_settings, service)
     manager = JobManager(engine, app_settings, service, broker)
+    # B站 上传的编排器与下载的是**两个队列**：上传是串行且带间隔的（抗账号级频控），
+    # 与下载的并发度无关。共用同一个 `EventBroker` 即可，不必共用队列。
+    bili = bili_manager or BiliManager(engine, app_settings, service, broker)
     pick_directory = directory_picker or select_directory_with_tkinter
     open_local_path = system_opener or open_path_with_default_app
     open_video_path = video_opener or (
@@ -85,9 +90,13 @@ def create_app(
     async def lifespan(app: FastAPI):
         await asyncio.to_thread(checkpoint_wal, engine)
         await manager.start()
+        await bili.start()
+        # 上次进程退出时正在投稿的记录必须收敛成一条可读原因，否则界面会永远停在「上传中」。
+        await bili.resume_interrupted()
         try:
             yield
         finally:
+            await bili.stop()
             await manager.stop()
             await asyncio.to_thread(checkpoint_wal, engine)
 
@@ -107,6 +116,7 @@ def create_app(
         settings=app_settings,
         service=service,
         manager=manager,
+        bili=bili,
         pick_directory=pick_directory,
         open_local_path=open_local_path,
         open_video_path=open_video_path,

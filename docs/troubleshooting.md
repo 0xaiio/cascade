@@ -77,12 +77,12 @@ Vite 的代理如果还指着旧端口，`/api` 会静默打到别的程序上�
 **重启后端不会重新加载已打开的标签页。**
 
 单端口模式下前端是一份**构建后的静态产物**：`/` 返回 `frontend/dist/index.html`，`/assets`
-挂的是 `frontend/dist/assets`（见 [main.py](../backend/app/main.py#L117)）。重启服务只是把磁盘上
+挂的是 `frontend/dist/assets`（见 [main.py](../backend/app/main.py#L127)）。重启服务只是把磁盘上
 那批文件换成新的，浏览器里那个标签页手上的 HTML / CSS / JS **仍然是它打开那一刻下载的版本**，
 没有任何机制会替你去拿新的。
 
 而这一条之所以难发现，是因为页面**看起来确实是活的**：`GET /api/events` 是一条 SSE 长连接，
-前端用 `new EventSource("/api/events")` 订阅任务事件（[App.tsx](../frontend/src/App.tsx#L88)），
+前端用 `new EventSource("/api/events")` 订阅任务事件（[App.tsx](../frontend/src/App.tsx#L90)），
 服务重启后浏览器会**自动重连**，进度照旧推送。于是「数据在更新」很容易被当成「页面是新的」，
 两者其实毫无关系 —— 事件流走的是那条长连接，版式走的是打开时下载的那些文件。
 

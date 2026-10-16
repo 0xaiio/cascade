@@ -56,7 +56,7 @@ npm install
 
 ### 普通单端口模式
 
-普通使用和手动验收直接运行 [README 快速启动](../README.md#快速启动) 的 `init/` 一键脚本即可（默认模式）：脚本先构建前端、再启动后端（默认带 `--auto-port` 自动选端口），并自动打开浏览器访问它打印的地址（通常为 `http://127.0.0.1:8000`，被占用时自动顺延）。此时 FastAPI 同时提供页面、静态资源和 `/api` 接口；入口逻辑见 [main.py](../backend/app/main.py#L117)。
+普通使用和手动验收直接运行 [README 快速启动](../README.md#快速启动) 的 `init/` 一键脚本即可（默认模式）：脚本先构建前端、再启动后端（默认带 `--auto-port` 自动选端口），并自动打开浏览器访问它打印的地址（通常为 `http://127.0.0.1:8000`，被占用时自动顺延）。此时 FastAPI 同时提供页面、静态资源和 `/api` 接口；入口逻辑见 [main.py](../backend/app/main.py#L127)。
 
 启动命令是 [`python -m app`](../backend/app/__main__.py)（即 `init/` 脚本底层调用者），它比裸 `python -m uvicorn app.main:app` 多做两件事：**启动前先检查端口**（见 [端口被占用时](#端口被占用时)），以及**把实际监听地址打印出来** —— 因为端口是可配的，不再是一个可以写死在文档里的常量。
 
@@ -85,7 +85,7 @@ Linux/macOS：bash init/start.sh dev
 这里的两个端口是**两件不同的事**，不要混为一谈：
 
 - **后端端口可配**，来源是 `YTDL_API_PORT`；`--port` 可临时覆盖。
-- **前端 dev server 端口不在配置里**，就是命令行 `--port 5173` 给的值。CORS 中间件只放行 `http://127.0.0.1:5173` 与 `http://localhost:5173`（见 [main.py](../backend/app/main.py#L97)）—— 但开发模式下 [api.ts](../frontend/src/api.ts) 用的是相对路径 `/api`，浏览器只与 Vite 同源通信、由 Vite 服务端转发，所以正常流程**不会触发 CORS**。把 dev server 换到别的端口后，只要仍走 Vite 代理也照样能用；CORS 白名单只在某处改成直连后端时才起作用。
+- **前端 dev server 端口不在配置里**，就是命令行 `--port 5173` 给的值。CORS 中间件只放行 `http://127.0.0.1:5173` 与 `http://localhost:5173`（见 [main.py](../backend/app/main.py#L106)）—— 但开发模式下 [api.ts](../frontend/src/api.ts) 用的是相对路径 `/api`，浏览器只与 Vite 同源通信、由 Vite 服务端转发，所以正常流程**不会触发 CORS**。把 dev server 换到别的端口后，只要仍走 Vite 代理也照样能用；CORS 白名单只在某处改成直连后端时才起作用。
 
 ### 端口被占用时
 

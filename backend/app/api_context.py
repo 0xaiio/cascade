@@ -17,6 +17,7 @@ from typing import Annotated
 from fastapi import Depends, Request
 from sqlmodel import Session
 
+from .bili_manager import BiliManager
 from .config import AppSettings
 from .db import session_dependency
 from .job_manager import JobManager
@@ -28,6 +29,7 @@ class ApiContext:
     settings: AppSettings
     service: YtDlpService
     manager: JobManager
+    bili: BiliManager
     pick_directory: Callable[[Path], Path | None]
     open_local_path: Callable[[Path], None]
     open_video_path: Callable[[Path, str | None], None]

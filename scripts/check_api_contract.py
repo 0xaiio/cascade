@@ -57,17 +57,48 @@ SCHEMA_PAIRS: dict[str, str | None] = {
     "EnvironmentRisk": None,
     # 错误响应的 detail 不在运行时的 schemas 里（见 frontend/src/api.ts 的手写解析）。
     "ApiErrorDetail": None,
+    # B站 上传。后端用 `Read` 后缀区分「读模型」，前端只消费读模型；只有 `BiliAdvice` /
+    # `BiliMetadata` / `BiliLimits` / `BiliPrefillItem` 两侧同名。
+    # `BiliBadge` / `BiliBadgeTone` 是 `type` 别名，不进这张表（脚本只比对 `interface`）。
+    "BiliAdvice": "BiliAdvice",
+    "BiliPartition": "BiliPartitionRead",
+    "BiliAccount": "BiliAccountRead",
+    "BiliTool": "BiliToolRead",
+    "BiliLogin": "BiliLoginRead",
+    "BiliStatus": "BiliStatusRead",
+    "BiliQrcode": "BiliQrcodeRead",
+    "BiliLoginPoll": "BiliLoginPollRead",
+    "BiliMetadata": "BiliMetadata",
+    "BiliLimits": "BiliLimits",
+    "BiliPrefillItem": "BiliPrefillItem",
+    "BiliPrefill": "BiliPrefillRead",
+    "BiliUpload": "BiliUploadRead",
+    "BiliSeason": "BiliSeasonRead",
+    "BiliJobUploads": "BiliJobUploadsRead",
+    "BiliJobUploadsSummary": "BiliJobUploadsSummaryRead",
+    "BiliRetry": "BiliRetryRead",
+    "BiliSeasonRetry": "BiliSeasonRetryRead",
+    # 合集目录（`GET /api/bilibili/seasons`）。前端叫 `BiliSeason` 的是**本机这次投稿
+    # 归集到哪里的记录**（`BiliSeasonRead`），这两个是**平台上已存在的合集**，故另起名。
+    # 两个都要登记：少登记一个，删字段就没人发现。
+    "BiliSeasonOption": "BiliSeasonOption",
+    "BiliSeasonList": "BiliSeasonListRead",
 }
 
 HTTP_METHODS = ("get", "post", "put", "patch", "delete", "options", "head")
 
 # `docs/openapi.yaml` 是**手写**的对外文档，它在两处刻意不跟随 FastAPI 的自动命名：
 #   1) 错误响应用领域化的 `Error` / `CookieImportError`，而不是 FastAPI 生成的 `HTTPValidationError`；
-#   2) 文件上传的请求体写成显式 requestBody，不暴露 `Body_upload_*` 这种由函数签名拼出来的 schema。
+#   2) 文件上传的请求体写成显式 requestBody，不暴露 `Body_upload_*` 这种由函数签名拼出来的 schema
+#      （`/api/cookies` 与 `/api/bilibili/cookies` 两处）。
 # 这是**有意**的差异，登记在这里；一旦集合再变化（多一个或少一个），校验就会失败，
 # 要求人过一遍 —— 而不是让它成为「反正一直红着，没人看」的噪音。
 DOCUMENT_SCHEMA_SURPLUS = {"CookieImportError", "Error"}
-RUNTIME_SCHEMA_SURPLUS = {"Body_upload_cookies_api_cookies_post", "HTTPValidationError"}
+RUNTIME_SCHEMA_SURPLUS = {
+    "Body_upload_cookies_api_cookies_post",
+    "Body_bili_import_cookies_api_bilibili_cookies_post",
+    "HTTPValidationError",
+}
 TS_INTERFACE = re.compile(r"^export interface (?P<name>\w+)\s*\{(?P<body>.*?)^\}", re.M | re.S)
 TS_FIELD = re.compile(r"^\s*(?P<name>\w+)\??\s*:", re.M)
 

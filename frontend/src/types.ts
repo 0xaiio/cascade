@@ -194,6 +194,11 @@ export interface ApiErrorDetail {
   code?: string;
   browser?: string | null;
   message?: string;
+  /**
+   * 「下一步该怎么办」。B站 上传的前置条件失败（409）会带上它 ——
+   * 只报结论不给动作的提示在验收口径里算未完成，所以界面必须把它显示出来。
+   */
+  advice?: string | null;
   raw_detail?: string | null;
 }
 
@@ -203,4 +208,255 @@ export interface ResolutionFallback {
   reason: string | null;
   restart_resolution: string | null;
   message: string;
+}
+
+/** B站 上传的界面状态档位（后端派生，前端只映射颜色）。 */
+export type BiliBadge = "none" | "uploading" | "uploaded" | "unverified" | "partial" | "failed";
+export type BiliBadgeTone = "idle" | "busy" | "ok" | "warn" | "bad";
+
+/**
+ * 稿件级上传状态。**取值与服务端 `models.BiliUploadStatus` 一一对应**，写在这里而不是
+ * 让字段是裸 `string`，是为了让「拿一个状态去查表」这类代码在 `tsc` 阶段就被挡住 ——
+ * 不然打错一个字母只有运行时才会发现（而那时它表现为「重试按钮不出现」这种静默现象）。
+ */
+export type BiliUploadStatus =
+  | "queued"
+  | "uploading"
+  | "submitted"
+  | "published"
+  | "reviewing"
+  | "rejected"
+  | "unverified"
+  | "failed";
+
+/** 合集归集状态。`skipped` = 用户在投稿时选了「不归集」，是**终态**。 */
+export type BiliSeasonStatus = "pending" | "grouping" | "grouped" | "failed" | "skipped";
+
+/** 版权取值。与 B站 接口的 `copyright` 同值域，所以界面不需要翻译层。 */
+export type BiliCopyright = "1" | "2";
+
+/**
+ * 「结论 + 下一步」。本功能所有缺项/失败提示都是这个形状 ——
+ * 只报结论不给动作的提示在验收口径里算未完成。
+ */
+export interface BiliAdvice {
+  message: string;
+  advice: string;
+}
+
+export interface BiliPartition {
+  tid: string;
+  label: string;
+}
+
+export interface BiliAccount {
+  mid: number | null;
+  name: string;
+}
+
+export interface BiliTool {
+  found: boolean;
+  path: string | null;
+  version: string | null;
+  problem: string | null;
+  advice: string | null;
+}
+
+export interface BiliLogin {
+  present: boolean;
+  cookie_count: number;
+  names: string[];
+  missing_required: string[];
+  missing_recommended: string[];
+  tracked_by_git: boolean;
+  account: BiliAccount | null;
+  account_checked: boolean;
+}
+
+export interface BiliStatus {
+  ready: boolean;
+  biliup: BiliTool;
+  ffmpeg: BiliTool;
+  login: BiliLogin;
+  blockers: BiliAdvice[];
+  partitions: BiliPartition[];
+  limits: BiliLimits;
+  gap_seconds: number;
+  uploads_in_flight: number;
+}
+
+export interface BiliQrcode {
+  qrcode_key: string;
+  url: string;
+  svg: string | null;
+  note: string | null;
+  expires_in: number;
+}
+
+export interface BiliLoginPoll {
+  state: string;
+  message: string;
+  logged_in: boolean;
+  account: BiliAccount | null;
+}
+
+export interface BiliMetadata {
+  title: string;
+  desc: string;
+  tags: string;
+  tid: string;
+  /** 版权：`"1"` 自制 / `"2"` 转载。与 B站 接口同值域，所以不需要翻译层。 */
+  copyright: BiliCopyright;
+  /**
+   * 转载来源链接。
+   *
+   * **合集模板上它恒为空**：合集里每条视频的来源是各自的原始链接，由服务端逐条渲染时填。
+   * 界面因此只在**单视频**场景显示这个输入框。
+   */
+  source: string;
+}
+
+export interface BiliLimits {
+  title: number;
+  desc: number;
+  tags: number;
+  tag_count: number;
+  tag_item: number;
+  /** 报「某个标签太长」时回显多少个字。**不要在前端另写一个数** —— 那会让弹窗与服务端
+   *  的 400 对同一件事给出两种截断结果。 */
+  tag_preview: number;
+  comment: number;
+}
+
+export interface BiliPrefillItem {
+  index: number;
+  item_id: string | null;
+  source_title: string;
+  source_url: string;
+  title: string;
+  desc: string;
+  tags: string;
+  ready: boolean;
+}
+
+export interface BiliPrefill {
+  job_id: string;
+  job_title: string;
+  kind: "single" | "collection";
+  comment: string;
+  metadata: BiliMetadata | null;
+  template: BiliMetadata | null;
+  items: BiliPrefillItem[];
+  problems: string[];
+  partitions: BiliPartition[];
+  limits: BiliLimits;
+  make_cover: boolean;
+  make_comment: boolean;
+  /** 合集简介的默认值（单视频恒为空）。界面没有这个输入框，提交时原样回传。 */
+  season_desc: string;
+  /**
+   * 「归集方式」的初始选中项。**由服务端给**（合集 `new` / 单视频 `none`）：
+   * 这个默认值按场景而不同，在前端按 `kind` 重推一遍就会有两份真相，
+   * 而漂移的表现是「升级后投稿悄悄多出一批合集」，不会报错。
+   */
+  default_group_mode: BiliGroupMode;
+}
+
+export interface BiliUpload {
+  id: string;
+  job_id: string;
+  item_id: string | null;
+  index: number;
+  title: string;
+  desc: string;
+  tags: string;
+  tid: string;
+  tid_label: string;
+  /** 实际提交出去的版权（`"1"` 自制 / `"2"` 转载）与来源链接（提交时的快照）。
+   *  界面显示「转载 / 自制」用它，也是「重试没有把稿件悄悄换成自制」可被核对的那一份证据。 */
+  copyright: BiliCopyright | "";
+  copyright_label: string;
+  source: string;
+  status: BiliUploadStatus;
+  status_text: string;
+  badge: BiliBadge;
+  badge_text: string;
+  badge_tone: BiliBadgeTone;
+  progress: number;
+  bvid: string | null;
+  aid: number | null;
+  video_url: string | null;
+  cover_path: string | null;
+  verified_state: string | null;
+  verified_note: string | null;
+  error: string | null;
+  advice: string | null;
+  attempt: number;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  elapsed_seconds: number;
+}
+
+export interface BiliSeason {
+  id: string;
+  job_id: string;
+  title: string;
+  desc: string;
+  season_id: number | null;
+  status: BiliSeasonStatus;
+  status_text: string;
+  upload_ids: string[];
+  error: string | null;
+  advice: string | null;
+}
+
+/**
+ * 账号下的一个**已有合集**，供投稿界面下拉选择。
+ *
+ * 与 `BiliSeason` 是两回事：那个是「本机这次投稿归集到哪里」的记录，
+ * 这个是「平台上已经存在的合集」，由 `GET /api/bilibili/seasons` 读回。
+ */
+export interface BiliSeasonOption {
+  season_id: number;
+  title: string;
+  desc: string;
+  cover_url: string;
+  /** 该合集**目前**的视频条数。纯显示用，与「这次要归入几条」无关。 */
+  total: number;
+}
+
+export interface BiliSeasonList {
+  seasons: BiliSeasonOption[];
+  /** 列不出来时的原因（未登录 / 登录信息不完整）。空串表示「确实没有合集」。 */
+  error: string;
+  advice: string;
+}
+
+/** 归入方式。取值与服务端 `bili_meta.GROUP_MODE_*` 一致。 */
+export type BiliGroupMode = "none" | "existing" | "new";
+
+export interface BiliJobUploads {
+  job_id: string;
+  badge: BiliBadge;
+  badge_text: string;
+  badge_tone: BiliBadgeTone;
+  uploads: BiliUpload[];
+  season: BiliSeason | null;
+}
+
+export interface BiliJobUploadsSummary {
+  jobs: BiliJobUploads[];
+}
+
+export interface BiliRetry {
+  action: "reupload" | "reverify" | "none";
+  message: string;
+  upload: BiliUpload | null;
+}
+
+export interface BiliSeasonRetry {
+  message: string;
+  season: BiliSeason;
 }

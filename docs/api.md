@@ -4,7 +4,7 @@
 
 ## 机器可读规范
 
-[openapi.yaml](openapi.yaml) 是本 API 的 OpenAPI 3.1.0 描述，覆盖全部 28 个操作、28 个 schema、复用的路径参数/错误响应组件与逐接口请求/响应示例。它由人工从 [routers/](../backend/app/routers/__init__.py)（路由与状态码）与 [schemas.py](../backend/app/schemas.py)（字段与必填性）编写；**这两个文件仍是唯一事实来源**，规范只做投影。
+[openapi.yaml](openapi.yaml) 是本 API 的 OpenAPI 3.1.0 描述，覆盖全部 41 个操作、48 个 schema、复用的路径参数/错误响应组件与逐接口请求/响应示例。它由人工从 [routers/](../backend/app/routers/__init__.py)（路由与状态码）与 [schemas.py](../backend/app/schemas.py)（字段与必填性）编写；**这两个文件仍是唯一事实来源**，规范只做投影。
 
 可直接用于：
 
@@ -32,19 +32,21 @@
 
 以运行时契约为单一来源，校验两件事：
 
-- `frontend/src/types.ts`：每个接口的**字段名集合**与对应运行时 schema 完全相同（当前 15 个接口）；
-- `docs/openapi.yaml`：**路径 × 方法**集合与 **paths 引用的 schema** 集合（当前 48 个条目）。
+- `frontend/src/types.ts`：每个接口的**字段名集合**与对应运行时 schema 完全相同（当前 33 个接口）；
+- `docs/openapi.yaml`：**路径 × 方法**集合与 **paths 引用的 schema** 集合（当前 72 个条目）。
 
-有意不跟随运行时命名的两处（文档用 `Error` / `CookieImportError`，运行时用 `HTTPValidationError` /
-`Body_upload_*`）在脚本里登记为已知差异，只有**未登记**的差异才会失败。
+有意不跟随运行时命名的两类（文档用领域化的 `Error` / `CookieImportError`，运行时用 `HTTPValidationError`；
+文件上传的请求体在文档里写成显式 `requestBody`，不暴露 `Body_upload_*` / `Body_bili_import_cookies_*`）
+在脚本里登记为已知差异，只有**未登记**的差异才会失败。
 注意它**只比字段名、不比类型**，覆盖边界与已知缺口见 [006](../ai/refactor/006-api-contract-drift.md)。
 
 ## 基本约定
 
-- 后端应用由 [create_app](../backend/app/main.py#L39) 创建；API 默认绑定 `127.0.0.1:8000`（可用仓库根 `.env` 的 `YTDL_API_PORT` 或 `python -m app --port` 覆盖，见 [开发文档](development.md#端口被占用时)），单端口模式下同时托管 `frontend/dist`。
+- 后端应用由 [create_app](../backend/app/main.py#L40) 创建；API 默认绑定 `127.0.0.1:8000`（可用仓库根 `.env` 的 `YTDL_API_PORT` 或 `python -m app --port` 覆盖，见 [开发文档](development.md#端口被占用时)），单端口模式下同时托管 `frontend/dist`。
 - API 返回 JSON；`DELETE /api/jobs/{id}` 与四个本地打开接口成功时返回 `204`。
-- 前端统一请求封装在 [request](../frontend/src/api.ts#L27)，非 2xx 响应会抛出 `ApiError`，并保留结构化 `detail`。
+- 前端统一请求封装在 [request](../frontend/src/api.ts#L39)，非 2xx 响应会抛出 `ApiError`，并保留结构化 `detail`。
 - Cookies 导入锁库错误使用结构化 `detail`，字段见 [BrowserCookieImportError.to_detail](../backend/app/browser_cookies.py#L58)。
+- `/api/bilibili/*` 用的是**另一套**凭据（`data/bilibili/cookies.json`），与 `data/cookies.txt` 互不影响；接口只回传凭据的**名字与计数**，不回传值，也不回传掩码前缀。详见下面「B站 上传」。
 
 ## Endpoint
 
@@ -77,14 +79,28 @@
 | `POST` | `/api/cookies` | 上传 cookies 文件。 | [`CookieStatus`](../backend/app/schemas.py#L193) |
 | `POST` | `/api/cookies/from-browser` | 从浏览器导入 cookies。 | [`BrowserCookieImportRequest`](../backend/app/schemas.py#L201) |
 | `DELETE` | `/api/cookies` | 清除本地 cookies。 | `CookieStatus` |
+| `GET` | `/api/bilibili/status` | B站 投稿环境体检（工具 / ffmpeg / 登录态 / 缺项清单 / 分区表 / 硬限）。 | [`BiliStatusRead`](../backend/app/schemas.py#L301) |
+| `POST` | `/api/bilibili/tools/repair` | 修复 WinGet `Links` 目录下 0 字节的 `biliup.exe` 空壳，然后重新体检。 | `BiliStatusRead` |
+| `POST` | `/api/bilibili/login/qrcode` | 生成扫码登录二维码（返回 **SVG 文本**）。 | [`BiliQrcodeRead`](../backend/app/schemas.py#L315) |
+| `GET` | `/api/bilibili/login/poll` | 轮询扫码状态；**只有 `confirmed` 才落盘登录态**。 | [`BiliLoginPollRead`](../backend/app/schemas.py#L324) |
+| `POST` | `/api/bilibili/cookies` | 导入一份已有的 B站 登录文件（`multipart/form-data`，不校验格式）。 | `BiliStatusRead` |
+| `DELETE` | `/api/bilibili/cookies` | 清除 B站 登录态；幂等，本来没有也返回体检结论。 | `BiliStatusRead` |
+| `GET` | `/api/bilibili/prefill` | 预填上传表单：单视频给一组值，合集给「模板 + 逐条预览 + 超限定位」。 | [`BiliPrefillRead`](../backend/app/schemas.py#L381) |
+| `GET` | `/api/bilibili/seasons` | 账号下**已存在**的合集，供投稿界面下拉选择。**未登录也返回 200**（空列表 + `error` 说明原因）。 | [`BiliSeasonListRead`](../backend/app/schemas.py#L439) |
+| `GET` | `/api/bilibili/uploads` | 按任务读回上传状态（任务级徽标 + 条目级明细 + 合集记录）。 | [`BiliJobUploadsRead`](../backend/app/schemas.py#L515) |
+| `POST` | `/api/bilibili/uploads` | 启动单视频投稿（可选归入某个合集）；返回**整个任务**的上传状态。 | [`BiliUploadCreate`](../backend/app/schemas.py#L407)、`BiliJobUploadsRead` |
+| `GET` | `/api/bilibili/uploads/summary` | **所有有 B站 记录的任务**的徽标汇总（任务中心每行一个图标，逐个问就是 N 个请求）。 | [`BiliJobUploadsSummaryRead`](../backend/app/schemas.py#L530) |
+| `POST` | `/api/bilibili/uploads/{upload_id}/retry` | 重试一条稿件；动作按终态三选一。 | [`BiliRetryRead`](../backend/app/schemas.py#L541) |
+| `POST` | `/api/bilibili/collections` | 启动合集投稿：按模板逐条投稿，全部确认发布后自动归集。 | [`BiliCollectionCreate`](../backend/app/schemas.py#L448)、`BiliJobUploadsRead` |
+| `POST` | `/api/bilibili/collections/{season_record_id}/group` | 重试合集归集；已有 `season_id` 时只补加视频，不重复建合集。 | [`BiliSeasonRetryRead`](../backend/app/schemas.py#L548) |
 
-路由实现集中在 [routers/](../backend/app/routers/__init__.py)。`POST /api/jobs` 成功时返回 `201`，其余返回模型或 `204`。
+路由实现集中在 [routers/](../backend/app/routers/__init__.py)。`POST /api/jobs` 成功时返回 `201`，其余返回模型或 `204`。B站 那一组统一返回 JSON 读模型（没有 `204`）。
 
 ## 关键请求模型
 
 ### AnalyzeRequest
 
-`url` 是待解析链接；`cookies_enabled` 控制解析时是否使用本地 cookies。前端默认传 `true`，见 [analyzeUrl](../frontend/src/api.ts#L61)。
+`url` 是待解析链接；`cookies_enabled` 控制解析时是否使用本地 cookies。前端默认传 `true`，见 [analyzeUrl](../frontend/src/api.ts#L73)。
 
 ### DownloadOptions
 
@@ -155,13 +171,13 @@
 
 ### AnalyzeResponse
 
-包含标题、是否 playlist、条目、格式列表、字幕列表、自动字幕列表和 ffmpeg 状态。格式和字幕映射逻辑见 [extract_metadata](../backend/app/ytdlp_service.py#L342)。
+包含标题、是否 playlist、条目、格式列表、字幕列表、自动字幕列表和 ffmpeg 状态。格式和字幕映射逻辑见 [extract_metadata](../backend/app/ytdlp_service.py#L349)。
 
-`entries` 只在 playlist 场景非空；`formats` 已过滤掉纯 storyboard/图片格式，见 [_map_formats](../backend/app/ytdlp_service.py#L1087)。
+`entries` 只在 playlist 场景非空；`formats` 已过滤掉纯 storyboard/图片格式，见 [_map_formats](../backend/app/ytdlp_service.py#L1094)。
 
 ### JobRead 与 JobItemRead
 
-任务读模型由 [read_job](../backend/app/job_read_model.py#L12) 生成。任务级 `actual_resolution` 和 `actual_format` 是子视频聚合结果；单一值时显示具体值，playlist 不一致时显示 `混合分辨率` 或 `混合格式`，实现见 [job_read_model.py](../backend/app/job_read_model.py#L87)。`elapsed_seconds` 由 `started_at` 与 `finished_at`（未结束时取当前时间）计算，见 [_elapsed_seconds](../backend/app/job_read_model.py#L128)。
+任务读模型由 [read_job](../backend/app/job_read_model.py#L12) 生成。任务级 `actual_resolution` 和 `actual_format` 是子视频聚合结果；单一值时显示具体值，playlist 不一致时显示 `混合分辨率` 或 `混合格式`，实现见 [job_read_model.py](../backend/app/job_read_model.py#L87)。`elapsed_seconds` 由 `started_at` 与 `finished_at`（未结束时取当前时间）计算，见 [elapsed_seconds](../backend/app/job_read_model.py#L128)。
 
 子视频级字段包括：
 
@@ -207,16 +223,103 @@ cookies 体检结果。字段分三层：
 - `requested_resolution_unselectable`
 - `media_stream_blocked`
 
+## B站 上传
+
+这一组接口把**已经下载完成**的视频投稿到 B站。它与下载链路完全解耦：独立账号、独立凭据文件（`data/bilibili/cookies.json`，与 `/api/cookies` 的 YouTube cookies 无关）、独立队列（`BiliManager` 的单 worker）与独立状态。
+
+三条不写在 schema 里、但会直接影响调用方判断的语义：
+
+1. **投稿是异步的**。`POST /api/bilibili/uploads` 与 `/collections` 只负责入队并立刻返回当前读模型，进度要靠 `GET /api/bilibili/uploads`、`/summary` 或 SSE 事件流回读。
+2. **命令返回码 0 不等于已发布**。后端在命令退出后回读账号稿件列表对账（按标题前缀匹配，两侧空白归一），对不上就是 `unverified`（待核对）——它既不是成功也不是失败，界面文案与推荐动作都单独一套（`UPLOAD_UNVERIFIED`）。
+3. **界面状态由后端聚合**。任务级那一档徽标（`none` / `uploading` / `uploaded` / `unverified` / `partial` / `failed`）由 [derive_badge](../backend/app/bili_read_model.py#L60) 现场算出，前端只渲染，不自行推导。
+
+投放限制在服务端统一校验，超限**只报错不截断**（静默截断会让用户以为发出去的是完整内容），合集会把问题定位到第几条。
+
+| 字段 | 上限 |
+| --- | --- |
+| `title` | 80 字符 |
+| `desc` | 250 字符 |
+| `tags` | 逗号分隔总长 < 200，最多 10 个，**单个 ≤ 20** |
+| `comment` | 1000 字符 |
+| `copyright` | 只能取 `1`（自制）或 `2`（转载）。**默认 `2`** |
+| `source` | `copyright=2` 时**必填**；`copyright=1` 时**不提交** |
+
+`copyright` 与 `source` 不在上面这张「长度上限」表里，但同样是提交前的拦截项，判据在 [validate](../backend/app/bili_meta.py#L348)。三点值得调用方注意：
+
+- **读不出合法 `copyright` 时回退 `2`（转载）而不是 `1`**。标成自制是替用户声明一件他没说过的事；标成转载最多让他改一下。
+- **自制稿即便 `source` 带值也不会出现在命令行里**。判据只有一个函数 [effective_source](../backend/app/bili_meta.py#L199) —— 若在别处再写一遍「要不要带来源」，落库快照与实发参数迟早对不上。
+- **合集模板上 `source` 恒为空**，逐条来源由服务端渲染时各取该条自己的来源链接。模板里回填第一条的值会让人误以为「所有条目都用它」，所以刻意不回填。
+
+历史上已入库的稿件，`db._ensure_columns` 补的 `copyright` 是 `1`（那是改动之前的实际行为），与产品默认值 `2` 不同 —— 见 [BiliUpload](../backend/app/models.py#L117) 的注释。
+
+### 归集方式（`group_mode` / `season_id` / `season_title`）
+
+**单视频与合集两条投稿路径共用同一组字段与同一份校验**（[validate_group_choice](../backend/app/bili_meta.py#L439)），
+区别只在默认值：
+
+| 字段 | 说明 |
+| --- | --- |
+| `group_mode` | `none` 不归集 / `existing` 加进 `season_id` 指定的已有合集 / `new` 用 `season_title` 新建一个。 |
+| `season_id` | `group_mode=existing` 时必填。**不校验它是否真存在** —— 那是归集阶段的网络动作，提交前查一次会多一次往返，且账号可能在这之后被登出。 |
+| `season_title` | 只在 `new` 时用得上；留空由路由用任务名兜底（`season_title or job.title`）。 |
+
+**默认值按路径不同，而且方向是反的**，这是改动前后行为都必须保持的结果：
+
+- `POST /api/bilibili/uploads`（单视频）默认 `none`。改动前单视频**从不进任何合集**，
+  默认为 `new` 会让此后每条单视频投稿都在账号里多出一个只含它自己的合集。
+- `POST /api/bilibili/collections`（合集）默认 `new`。改动前就是每次投完自动新建，
+  改成别的会让已有的合集投稿突然失去归集。
+
+两个常量分别在 [DEFAULT_GROUP_MODE](../backend/app/bili_meta.py#L91) 与
+[DEFAULT_SINGLE_GROUP_MODE](../backend/app/bili_meta.py#L92)，
+[normalize_group_mode](../backend/app/bili_meta.py#L96) 的回退值是**参数**而不是写死的 ——
+传错的表现是「升级后一批投稿悄悄多出/失去合集」，不会有任何报错。
+
+三条调用方容易踩到的语义：
+
+- **`group_mode=none` 在两条路径上的落库行为不同**。合集那边有一条归集记录，会落成终态
+  `skipped`（界面上要有一句「未归集」可显示）；单视频那边**一条记录都不建**，
+  因为单视频的默认恰好就是 `none`，建记录等于让每个单视频任务都多出一行噪音。
+  两条路径都**会把上一轮留下的 `pending` 记录停掉**，否则 `_maybe_group` 照样自动归集。
+- **`new` 时交付的 `season_id` 必须为空**。预置任何值（哪怕是对的 0）都会让归集阶段跳过
+  建合集，然后对着一个不存在的编号加视频。`season_id` 只在 `existing` 时才有意义。
+- **校验看的是原始输入**。路由先校验再归一：顺序反过来的话，非法值已被修成合法值，
+  校验永远看不到它，一个手写坏的 `group_mode` 会被静默当成某个合法值执行。
+
+`GET /api/bilibili/prefill` 会返回 `default_group_mode`，界面直接用它做初始选中项 ——
+默认值由服务端算，前端不再按 `kind` 推一遍（推两份迟早会漂移）。
+
+### BiliUploadRead 与 BiliJobUploadsRead
+
+前端真正消费的是 [BiliJobUploadsRead](../backend/app/schemas.py#L515)（任务级读模型）与 [BiliJobUploadsSummaryRead](../backend/app/schemas.py#L530)（全部任务的徽标汇总）。`uploads` 按条目在任务中的位置排序，对不上任何条目的记录排在最后。
+
+条目级 `status` 是后端自己的生命周期，`badge` 是界面用的粗档位：
+
+| `status` | 含义 | 对应 `badge` |
+| --- | --- | --- |
+| `queued` | 已入队，等 worker。 | `uploading` |
+| `uploading` | 投稿命令在跑。 | `uploading` |
+| `submitted` | 命令成功，还在对账。 | `uploading` |
+| `published` | 平台稿件列表已确认存在。 | `uploaded` |
+| `reviewing` | 平台侧「等待审核 / 排队审核 / 转码中」。 | `uploading` |
+| `rejected` | 平台侧审核不通过或已被锁定。 | `failed` |
+| `unverified` | 命令成功，但列表里暂时查不到。 | `unverified` |
+| `failed` | 命令失败或前置条件不满足。 | `failed` |
+
+`verified_state` / `verified_note` 记录**对账结论本身**（平台状态码与它的人话），`error` / `advice` 放**给用户看的那两句**。注意 `unverified` 也会填 `error` / `advice`（「已提交，但还没在 B 站看到它」+「列表有延迟，稍后重新核对」）—— 措辞与 `failed` 刻意不同：前者是「我们还不知道」，后者是「这一步没成」。把两者都说成失败，用户会去重投一条**已经投上去**的稿件。
+
 ## 错误语义
 
 错误响应对齐 FastAPI 默认结构：`{"detail": ...}`。`detail` 通常是字符串，仅在浏览器 cookies 导入失败时是结构化对象（`code` / `browser` / `message` / `raw_detail`）。
 
 | 状态码 | 触发条件 | 典型 `detail` |
 | --- | --- | --- |
-| `400` | URL 解析失败、yt-dlp 抛错、目录选择对话框不可用、系统打开器调用失败。 | yt-dlp 原始错误或本地化说明。 |
-| `404` | 任务或子视频不存在；批量操作没有匹配任务；删除子视频时未命中。 | `Job not found.`、`Job item not found.`、`No matching jobs found.` |
-| `409` | 浏览器 cookies 数据库被占用；单视频专用接口被用于合集；输出文件/目录尚不可用或缺失；找不到可解码播放器。 | `Edge 正在运行，cookies 数据库被锁定。…`、`合集任务请打开具体视频。`、`视频文件尚不可用。`、`找不到可确认能解码当前视频的播放器。…` |
+| `400` | URL 解析失败、yt-dlp 抛错、目录选择对话框不可用、系统打开器调用失败；B站 投稿的元数据/评论超过平台硬限，或合集可投稿的视频不足 2 条。 | yt-dlp 原始错误或本地化说明；`标题太长（87 > 80）`、`第 3 条：标题太长（92 > 80）`。 |
+| `404` | 任务或子视频不存在；批量操作没有匹配任务；删除子视频时未命中；B站 的上传/合集记录不存在。 | `Job not found.`、`Job item not found.`、`No matching jobs found.` |
+| `409` | 浏览器 cookies 数据库被占用；单视频专用接口被用于合集；输出文件/目录尚不可用或缺失；找不到可解码播放器；**B站 投稿前置条件不满足**（视频还没下载好 / 投稿工具不可用 / 未登录）。 | `Edge 正在运行，cookies 数据库被锁定。…`、`合集任务请打开具体视频。`、`视频文件尚不可用。`、`找不到可确认能解码当前视频的播放器。…`、`这个视频还没有下载好，没有可以上传的文件`、`还有 2 个视频没有下载好：第一集、第二集`。 |
 | `422` | 请求体未通过 Pydantic 校验（缺字段、越界、未知枚举值）。 | FastAPI 校验错误数组。 |
+
+`409` 用在这里是刻意的：B站 投稿的前置条件全部是「现在还不满足、但可以补救」的状态（等下载完、装工具、登录），因此做成**请求被拒**而不是「建了个任务然后失败」—— 后者会把一次可解释的拒绝变成一条要用户去清理的失败记录。
 
 对应实现见 [cookie_import_status_code](../backend/app/api_support.py#L129)（锁库错误映射为 `409`）与各路由内的 `HTTPException`。
 

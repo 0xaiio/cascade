@@ -24,13 +24,15 @@ PlantUML 源文件：[four-plus-one-logical-view.puml](diagrams/four-plus-one-lo
 
 自检能力也被拆成「解析」与「证明」两件事：代理来源的**解析**（[proxy.py](../backend/app/proxy.py)）与代理**是否真的通**（[connectivity.py](../backend/app/connectivity.py)）分开，cookies 的**体检**（[cookie_health.py](../backend/app/cookie_health.py)）与 cookies 的**导入**（[browser_cookies.py](../backend/app/browser_cookies.py)）分开。理由与分层规则一致：解析是纯函数，证明要发请求，两者的失败语义和重试代价完全不同 —— 混在一起就会在排障时把「代理坏了」误判成「提取器坏了」。
 
+B站 上传沿用同一套划分：投稿元数据与硬限的**纯计算**在 [bili_meta.py](../backend/app/bili_meta.py)，失败归因与徽标文案的**纯映射**在 [bili_policy.py](../backend/app/bili_policy.py)，两者都不联网、可整链离线单测；真正发请求的分成 [bili_http.py](../backend/app/bili_http.py)（可注入 transport）、[bili_api.py](../backend/app/bili_api.py)（B站 端点）、[bili_auth.py](../backend/app/bili_auth.py)（登录与 cookie 文件）与 [bili_bin.py](../backend/app/bili_bin.py)（外部命令），编排在 [bili_manager.py](../backend/app/bili_manager.py)，状态经 [bili_read_model.py](../backend/app/bili_read_model.py) 折成前端读的值。**「投稿已成功」这个结论只出现在对账之后**：`bili_upload.run_single` 命令返回 0 不算数，必须回读账号稿件列表，读不到就停在 `unverified`。
+
 ## 开发视图
 
 ![4+1 开发视图](assets/diagrams/four-plus-one-development-view.svg)
 
 PlantUML 源文件：[four-plus-one-development-view.puml](diagrams/four-plus-one-development-view.puml)。
 
-开发视图展示源码层依赖。前端由 [App.tsx](../frontend/src/App.tsx) 编排状态与布局，展示职责全部拆到 [components/](../frontend/src/components/)：解析面板 [UrlAnalyzer.tsx](../frontend/src/components/UrlAnalyzer.tsx)、解析结果 [AnalysisPanel.tsx](../frontend/src/components/AnalysisPanel.tsx)、下载选项 [DownloadOptionsPanel.tsx](../frontend/src/components/DownloadOptionsPanel.tsx)、设置 [SettingsPanel.tsx](../frontend/src/components/SettingsPanel.tsx)、任务中心 [JobQueue.tsx](../frontend/src/components/JobQueue.tsx)、cookies 区 [CookieSection.tsx](../frontend/src/components/CookieSection.tsx)、代理区 [ProxySection.tsx](../frontend/src/components/ProxySection.tsx)、可搜索语言选择 [SearchableLanguageSelect.tsx](../frontend/src/components/SearchableLanguageSelect.tsx)，以及基础件 [Toggle.tsx](../frontend/src/components/Toggle.tsx) / [StatusPill.tsx](../frontend/src/components/StatusPill.tsx) 与被多处共用的说明浮层 [HelpPopover.tsx](../frontend/src/components/HelpPopover.tsx)；纯计算在 [quality.ts](../frontend/src/quality.ts)、[formatting.ts](../frontend/src/formatting.ts)、[subtitles.ts](../frontend/src/subtitles.ts) 与 [cookieLock.ts](../frontend/src/cookieLock.ts)，HTTP 边界集中在 [api.ts](../frontend/src/api.ts)。后端由 [main.py](../backend/app/main.py) 装配应用并把 HTTP 路由挂到 [routers/](../backend/app/routers/__init__.py)（按资源分模块：诊断、cookies、解析、任务、任务文件、设置、事件；跨路由复用的支撑在 [api_support.py](../backend/app/api_support.py) 与 [job_artifacts.py](../backend/app/job_artifacts.py)，请求级依赖容器是 [api_context.py](../backend/app/api_context.py)），本地启动入口是 [__main__.py](../backend/app/__main__.py)（端口预检与占用者识别见 [dev_server.py](../backend/app/dev_server.py)），[job_manager.py](../backend/app/job_manager.py) 处理队列和 worker，[ytdlp_service.py](../backend/app/ytdlp_service.py) 隔离 yt-dlp 细节，降级**决策**（降到哪 / 为什么 / 报哪句话）在 [resolution_decisions.py](../backend/app/resolution_decisions.py)，降级**文案表**在 [fallback_policy.py](../backend/app/fallback_policy.py)；进度聚合、落库节流、平均速度、停滞检测、输出路径解析、代理解析与连通性自检各自独立成模块，依赖方向保持「入口 → 编排 → 下载 → 纯工具」，细节见 [组件关系](architecture.md#组件关系) 与 [设计文档](design.md#前端组件边界)。
+开发视图展示源码层依赖。前端由 [App.tsx](../frontend/src/App.tsx) 编排状态与布局，展示职责全部拆到 [components/](../frontend/src/components/)：解析面板 [UrlAnalyzer.tsx](../frontend/src/components/UrlAnalyzer.tsx)、解析结果 [AnalysisPanel.tsx](../frontend/src/components/AnalysisPanel.tsx)、下载选项 [DownloadOptionsPanel.tsx](../frontend/src/components/DownloadOptionsPanel.tsx)、设置 [SettingsPanel.tsx](../frontend/src/components/SettingsPanel.tsx)、任务中心 [JobQueue.tsx](../frontend/src/components/JobQueue.tsx)、cookies 区 [CookieSection.tsx](../frontend/src/components/CookieSection.tsx)、代理区 [ProxySection.tsx](../frontend/src/components/ProxySection.tsx)、可搜索语言选择 [SearchableLanguageSelect.tsx](../frontend/src/components/SearchableLanguageSelect.tsx)，以及基础件 [Toggle.tsx](../frontend/src/components/Toggle.tsx) / [StatusPill.tsx](../frontend/src/components/StatusPill.tsx) 与被多处共用的说明浮层 [HelpPopover.tsx](../frontend/src/components/HelpPopover.tsx)，B站 上传另有 [BiliIcon.tsx](../frontend/src/components/BiliIcon.tsx) / [BiliUploadButton.tsx](../frontend/src/components/BiliUploadButton.tsx) / [BiliUploadDialog.tsx](../frontend/src/components/BiliUploadDialog.tsx) / [BiliJobStatus.tsx](../frontend/src/components/BiliJobStatus.tsx) / [BiliLoginSection.tsx](../frontend/src/components/BiliLoginSection.tsx)；纯计算在 [quality.ts](../frontend/src/quality.ts)、[formatting.ts](../frontend/src/formatting.ts)、[subtitles.ts](../frontend/src/subtitles.ts) 与 [cookieLock.ts](../frontend/src/cookieLock.ts)，B站 上传另有 [biliForm.ts](../frontend/src/biliForm.ts)（表单词汇表与本地预检）、[biliStatus.ts](../frontend/src/biliStatus.ts)（稿件/合集状态判定）与 [errors.ts](../frontend/src/errors.ts)（异常 → 一句人话），HTTP 边界集中在 [api.ts](../frontend/src/api.ts)。后端由 [main.py](../backend/app/main.py) 装配应用并把 HTTP 路由挂到 [routers/](../backend/app/routers/__init__.py)（按资源分模块：诊断、cookies、解析、任务、任务文件、设置、事件、B站 上传；跨路由复用的支撑在 [api_support.py](../backend/app/api_support.py) 与 [job_artifacts.py](../backend/app/job_artifacts.py)，请求级依赖容器是 [api_context.py](../backend/app/api_context.py)），本地启动入口是 [__main__.py](../backend/app/__main__.py)（端口预检与占用者识别见 [dev_server.py](../backend/app/dev_server.py)），[job_manager.py](../backend/app/job_manager.py) 处理队列和 worker，[ytdlp_service.py](../backend/app/ytdlp_service.py) 隔离 yt-dlp 细节，降级**决策**（降到哪 / 为什么 / 报哪句话）在 [resolution_decisions.py](../backend/app/resolution_decisions.py)，降级**文案表**在 [fallback_policy.py](../backend/app/fallback_policy.py)；进度聚合、落库节流、平均速度、停滞检测、输出路径解析、代理解析与连通性自检各自独立成模块，依赖方向保持「入口 → 编排 → 下载 → 纯工具」，细节见 [组件关系](architecture.md#组件关系) 与 [设计文档](design.md#前端组件边界)。
 
 ## 进程视图
 
@@ -40,13 +42,15 @@ PlantUML 源文件：[four-plus-one-process-view.puml](diagrams/four-plus-one-pr
 
 进程视图关注运行中的并发和事件。FastAPI 请求线程负责校验、持久化和发布事件；`JobManager` worker 按当前并发从队列取出 `JobItem`；一个合集的多个子视频可以并行占用多个 worker，而**单视频任务只有一个 `JobItem`，因此不受并发设置影响**。每个子项的 yt-dlp 调用通过 `asyncio.to_thread` 落到工作线程，其进度 hook 使用自己的 SQLite session；[StallGuard](../backend/app/stall_guard.py) 在同一条 hook 链上观测字节峰值，超时即把该子项判为失败。SQLite 使用 WAL，应用启动与停止时各做一次 `wal_checkpoint(TRUNCATE)`，避免 `-wal` 侧车文件无界增长。SSE 只作为刷新信号，前端再读取 `/api/jobs` 的读模型。并发、限速和重试次数属于运行时设置，详见 [技术文档](technical.md#稳定下载策略)。
 
+B站 上传是**另一条队列**：[BiliManager](../backend/app/bili_manager.py) 只有**单 worker**，与 `JobManager` 的并发 worker 分开。原因是平台限的是账号而不是本地并发，把两者塞进同一个队列会逼出一条不属于下载的限速规则。投稿命令与 API 调用都在工作线程里跑，进度靠 biliup 输出里的阶段词做**粗粒度、单调不回退**的估计（宁可粗，也不编一个看着精确却在骗人的百分比）。启动时 [resume_interrupted](../backend/app/bili_manager.py#L370) 把重启前留在 `queued`/`uploading` 的记录折成**可重试的失败**：进程被杀那一刻正跑在 `biliup` 里，本机无从知道那次投稿在平台上到底成没成，所以既不敢判成功，也不敢自动重投（可能产生重复稿件）—— 只给一条「点重试，或先去创作中心确认」的建议。
+
 ## 物理视图
 
 ![4+1 物理视图](assets/diagrams/four-plus-one-physical-view.svg)
 
 PlantUML 源文件：[four-plus-one-physical-view.puml](diagrams/four-plus-one-physical-view.puml)。
 
-物理视图明确本项目是本机单用户应用：浏览器访问 `127.0.0.1` 上的 FastAPI（端口由 `YTDL_API_PORT` 决定，默认 `8000`，启动时会打印实际地址），FastAPI 托管前端并提供 API，SQLite、cookies、下载文件和系统播放器/文件管理器都在同一台用户机器上。**端口是可配的，绑定地址不是** —— 应用只监听 `127.0.0.1`，从不暴露到网络。外部工具依赖为 `ffmpeg`（必需，缺失时高清晰度直接报错）和 `aria2c`（可选，默认关闭，同时需要 `YTDL_ARIA2C_ENABLED=true`）。文档生成环境也作为工程交付物存在于开发机：仓库内脚本管理 PlantUML jar 缓存，并调用 Java 与 Graphviz 生成 SVG。项目不面向公网多用户部署，边界见 [需求分析](requirements.md#约束与边界)。
+物理视图明确本项目是本机单用户应用：浏览器访问 `127.0.0.1` 上的 FastAPI（端口由 `YTDL_API_PORT` 决定，默认 `8000`，启动时会打印实际地址），FastAPI 托管前端并提供 API，SQLite、cookies、下载文件和系统播放器/文件管理器都在同一台用户机器上。**端口是可配的，绑定地址不是** —— 应用只监听 `127.0.0.1`，从不暴露到网络。外部工具依赖为 `ffmpeg`（必需，缺失时高清晰度直接报错）、`aria2c`（可选，默认关闭，同时需要 `YTDL_ARIA2C_ENABLED=true`）和 `biliup`（可选，只在上传 B站 时用到，缺失时界面上只给安装提示、不影响下载）。外部服务除 YouTube 外还有 **B站** 的投稿接口（`member.bilibili.com` 与 `api.bilibili.com`），因此除 `data/cookies.txt` 外本机还会有一个独立的 `data/bili_cookies.json`；两份凭据都**不入库**，下载与投稿互不共用账号态，见 [架构设计](architecture.md#数据模型)。文档生成环境也作为工程交付物存在于开发机：仓库内脚本管理 PlantUML jar 缓存，并调用 Java 与 Graphviz 生成 SVG。项目不面向公网多用户部署，边界见 [需求分析](requirements.md#约束与边界)。
 
 ## 场景视图
 
@@ -54,7 +58,7 @@ PlantUML 源文件：[four-plus-one-physical-view.puml](diagrams/four-plus-one-p
 
 PlantUML 源文件：[four-plus-one-scenario-view.puml](diagrams/four-plus-one-scenario-view.puml)。
 
-场景视图把用户主要用例串联起来：解析链接、选择下载选项、创建单视频或 playlist 任务、监控进度、调整运行时设置、导入 cookies、按建议清晰度重试、配置代理并验证连通、校验 cookies 登录态、查看就近的辅助说明、播放/打开文件夹，以及删除任务或相关文件。每个场景都应能回溯到 API 文档、实现文档和至少一张 UML 图。
+场景视图把用户主要用例串联起来：解析链接、选择下载选项、创建单视频或 playlist 任务、监控进度、调整运行时设置、导入 cookies、按建议清晰度重试、配置代理并验证连通、校验 cookies 登录态、上传到 B站（单个视频改表单直接投 / 合集按模板批量投并自动归集）、查看就近的辅助说明、播放/打开文件夹，以及删除任务或相关文件。每个场景都应能回溯到 API 文档、实现文档和至少一张 UML 图。
 
 ## 持续更新规则
 
