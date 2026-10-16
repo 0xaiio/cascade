@@ -4,6 +4,8 @@ YouTube Downloader 是一个本机单用户下载控制台：FastAPI 后端负�
 
 请只下载你拥有权利或已获得许可的内容。本项目不实现 DRM 绕过，也不面向公网部署或多用户权限场景。
 
+本项目同时托管在两个 GitHub 仓库：开发主仓库 [cascade](https://github.com/0xaiio/cascade)，以及镜像仓库 [hnucjx/Design-and-Implementation-of-Database-Watermarking-Algorithms-Resistant-to-Brute-Force-Attacks](https://github.com/hnucjx/Design-and-Implementation-of-Database-Watermarking-Algorithms-Resistant-to-Brute-Force-Attacks.)。目前开发以 `cascade` 为主，这两个仓库之间会进行同步（`cascade` → `hnucjx`）。
+
 ## 快速启动
 
 普通使用建议走单端口模式：脚本先构建前端，再由 FastAPI 在同一个端口上同时托管页面和 API。
