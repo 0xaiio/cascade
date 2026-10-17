@@ -133,8 +133,8 @@ B站 上传是一条与下载完全解耦的链路，模块划分（详见 [设�
 | [bili_http.py](../backend/app/bili_http.py#L66) | 标准库 `urllib` 的 HTTP 接缝，**强制直连**（清空 `ProxyHandler`），且 4xx/5xx 也把正文与 `Set-Cookie` 带回来。 |
 | [bili_auth.py](../backend/app/bili_auth.py#L75) | 扫码登录（二维码 / 轮询）、**TV 端三步换投稿令牌**、登录文件读写（四形态兼容）、**凭据摘要（只回名字与计数）**、是否被 git 跟踪。 |
 | [bili_bin.py](../backend/app/bili_bin.py#L271) | 投稿工具边界：`biliup` 探测（含 WinGet 0 字节空壳识别/修复）、命令组装、子进程执行、进度解析、ffmpeg 抽封面。 |
-| [bili_api.py](../backend/app/bili_api.py#L111) | B站 会员态客户端：稿件对账、稿件详情（cid）、建合集、归集稿件、列合集、发并置顶评论。全部经可注入 `transport`。 |
-| [bili_upload.py](../backend/app/bili_upload.py#L297) | **单次上传的领域逻辑**：编排上面几个模块，产出「已发布 / 审核中 / 待核对 / 失败」的结论与下一步；含模板批量渲染与逐条校验。纯函数式，可整链离线单测。 |
+| [bili_api.py](../backend/app/bili_api.py#L124) | B站 会员态客户端：稿件对账、稿件详情（cid）、建合集、归集稿件、列合集、发并置顶评论。全部经可注入 `transport`。 |
+| [bili_upload.py](../backend/app/bili_upload.py#L299) | **单次上传的领域逻辑**：编排上面几个模块，产出「已发布 / 审核中 / 待核对 / 失败」的结论与下一步；含模板批量渲染与逐条校验。纯函数式，可整链离线单测。 |
 | [bili_read_model.py](../backend/app/bili_read_model.py#L60) | 把两张表投影成 API 读模型；**「多条记录 → 一档徽标」的聚合规则**只在这里定义。 |
 | [bili_manager.py](../backend/app/bili_manager.py#L328) | 队列与编排：单 worker 串行、投稿间隔、状态写库与收敛、重启收敛、环境体检（含投稿令牌档）、事件发布。 |
 

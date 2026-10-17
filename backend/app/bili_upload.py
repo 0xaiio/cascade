@@ -33,6 +33,7 @@ from .bili_api import (
     create_season,
     fetch_video,
     find_archive,
+    find_season_section,
     send_and_top_comment,
 )
 from .bili_bin import (
@@ -59,6 +60,7 @@ from .bili_policy import (
     SEASON_CREATE_FAILED,
     SEASON_EPISODES_FAILED,
     SEASON_PENDING_NO_EPISODES,
+    SEASON_SECTION_UNRESOLVED,
     SEASON_SUBMITTED_NOTE,
     UNVERIFIED_NOTE,
     UPLOAD_UNVERIFIED,
@@ -399,11 +401,16 @@ def group_into_season(
     season_title: str,
     season_desc: str,
     existing_season_id: int | None = None,
+    sleeper: Callable[[float], None] = time.sleep,
 ) -> SeasonOutcome:
     """把已就绪的稿件归进一个合集。
 
     **重试不会重复建合集**：`existing_season_id` 有值时跳过 `create_season` 只补加视频 ——
     否则一次「合集建好了但归集超时」会让重试产出第二个同名合集，而用户根本不知道多了一个。
+
+    **两条路都要把合集 id 换成分区 id**：`season/add` 只回合集 id，而归集接口的 `sectionId`
+    要的是分区 id。重试走的是「existing」那条路，所以换 id 这一步放在建合集**之外**，
+    重试时同样会执行 —— 这正是「重试能自愈」的前提（见 `find_season_section`）。
     """
     ready = [item for item in uploads if item.episode_ready]
     if not ready:
@@ -438,8 +445,31 @@ def group_into_season(
         {"aid": int(item.aid), "cid": int(item.cid), "title": item.title}
         for item in ready
     ]
+    section = find_season_section(
+        context.transport, context.jar, season_id=int(season_id), sleeper=sleeper
+    )
+    if section is None:
+        # 读不到分区就**到此为止**。拿合集 id 顶上去只会换来 `-404 啥都木有`，
+        # 那条结论对用户没有任何信息量，还让「重试」看起来像没用。
+        logger.warning("bili 读不到合集 %s 的分区，放弃归集", season_id)
+        return SeasonOutcome(
+            status=BiliSeasonStatus.failed.value,
+            season_id=int(season_id),
+            cover_url=cover_url or None,
+            error=SEASON_SECTION_UNRESOLVED[0],
+            advice=SEASON_SECTION_UNRESOLVED[1],
+            log_tail=tail_text(f"合集 season_id={season_id} 的列表里没有可用的分区（sectionId）"),
+        )
+
+    logger.info(
+        "bili 归集：合集 %s → 分区 %s「%s」%s 条",
+        season_id,
+        section["id"],
+        section["title"],
+        len(episodes),
+    )
     try:
-        add_episodes(context.transport, context.jar, season_id=int(season_id), episodes=episodes)
+        add_episodes(context.transport, context.jar, section_id=int(section["id"]), episodes=episodes)
     except Exception as exc:  # noqa: BLE001 - 同上，且必须把 season_id 带回去以支持「只补加」
         logger.warning("bili 归集稿件失败：season=%s %s", season_id, sanitize_log_message(exc))
         return SeasonOutcome(

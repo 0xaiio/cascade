@@ -29,7 +29,7 @@ from app.bili_meta import (
     default_collection_template,
     default_single,
 )
-from app.bili_policy import SEASON_CREATE_FAILED, SEASON_EPISODES_FAILED
+from app.bili_policy import SEASON_CREATE_FAILED, SEASON_EPISODES_FAILED, SEASON_SECTION_UNRESOLVED
 from app.bili_upload import (
     COMMENT_MARKER,
     DEFAULT_COLLECTION_GAP_SECONDS,
@@ -49,7 +49,15 @@ from app.bili_upload import (
     validate_collection,
 )
 from app.models import BiliSeasonStatus, BiliUploadStatus
-from bili_fakes import UNSET, FakeBiliTransport, RecordingSleeper, ScriptedRunner, command_runner, write_video
+from bili_fakes import (
+    UNSET,
+    FakeBiliTransport,
+    RecordingSleeper,
+    ScriptedRunner,
+    command_runner,
+    section_id_for,
+    write_video,
+)
 
 TITLE = "演示标题"
 JAR = {"SESSDATA": "sess", "bili_jct": "jct", "DedeUserID": "42"}
@@ -542,9 +550,31 @@ def test_group_into_season_creates_then_adds_and_reports_submitted(tmp_path):
     ]
 
 
+def test_group_into_season_sends_the_section_id_not_the_season_id(tmp_path):
+    """**本缺陷的回归断言（界面路径的入口）。**
+
+    `group_into_season` 拿到的是 `create_season` 的返回值 —— 那是**合集 id**，而归集接口的
+    `sectionId` 要的是**分区 id**。这两件事在旧实现里是同一个变量，于是每次「新建合集」的
+    归集都会 404，且重试不自愈（同一个错值会再发一遍）。
+    """
+    transport = FakeBiliTransport(season_id=990011)
+    outcome = group_into_season(
+        make_context(transport, runner=command_runner(), tmp_path=tmp_path),
+        [ready(1)],
+        season_title="合集",
+        season_desc="说明",
+    )
+    section_id = transport.calls[-1]["json_body"]["sectionId"]
+    assert section_id == section_id_for(990011)
+    assert section_id != outcome.season_id == 990011
+
+
 def test_group_into_season_reuses_an_existing_season_and_never_creates_a_second(tmp_path):
-    """重试不产生第二个同名合集 —— 用户根本不知道多了一个。"""
-    transport = FakeBiliTransport()
+    """重试不产生第二个同名合集 —— 用户根本不知道多了一个。
+
+    同时钉住「加入已有合集」这条路也要换号：用户选的是合集，接口要的是分区。
+    """
+    transport = FakeBiliTransport(seasons=[{"id": 555, "title": "选中的合集"}])
     outcome = group_into_season(
         make_context(transport, runner=command_runner(), tmp_path=tmp_path),
         [ready(1)],
@@ -556,6 +586,30 @@ def test_group_into_season_reuses_an_existing_season_and_never_creates_a_second(
     assert outcome.season_id == 555
     assert transport.called("/season/add") == 0
     assert transport.called("/season/section/episodes/add") == 1
+    assert transport.calls[-1]["json_body"]["sectionId"] == section_id_for(555)
+
+
+def test_group_into_season_stops_when_the_section_cannot_be_read(tmp_path):
+    """读不到分区就**一个归集请求都不发**。
+
+    退化成「拿合集 id 顶一下」得到的是 `-404 啥都木有`：用户既看不出是权限问题还是网络问题，
+    点「重试归集」也只会再撞一次同一堵墙。所以这种情况必须落成一条说得清的结论，
+    并且把 `season_id` 带回去 —— 否则重试会重新建一个同名合集。
+    """
+    transport = FakeBiliTransport(seasons=[])
+    outcome = group_into_season(
+        make_context(transport, runner=command_runner(), tmp_path=tmp_path),
+        [ready(1)],
+        season_title="合集",
+        season_desc="说明",
+        sleeper=RecordingSleeper(),
+    )
+    assert outcome.status == BiliSeasonStatus.failed.value
+    assert outcome.error == SEASON_SECTION_UNRESOLVED[0]
+    assert "重试归集" in (outcome.advice or "")
+    assert outcome.season_id == 990011
+    assert outcome.log_tail is not None
+    assert transport.called("/season/section/episodes/add") == 0
 
 
 def test_group_into_season_reports_a_create_failure_without_a_season_id(tmp_path):
@@ -766,12 +820,21 @@ def test_run_collection_groups_only_the_ready_items(tmp_path):
 
 
 def test_run_collection_adds_the_season_after_the_last_upload(tmp_path):
-    """归集是整批的最后一步：加条目的请求必须排在全部稿件之后。"""
+    """归集是整批的最后一步：加条目的请求必须排在全部稿件之后。
+
+    建合集与归集之间还夹着一次**读合集列表**（把合集 id 换成分区 id），所以这里比的是
+    「写请求」的先后 —— 拿最后两条 URL 去比会被那次读打断，看起来像是顺序错了。
+    """
     targets, archives = batch(tmp_path)
     transport = FakeBiliTransport(archives=archives)
     run_batch(make_context(transport, runner=command_runner(), tmp_path=tmp_path), targets, gap_seconds=0.0)
+    writes = [
+        url.rsplit("/x2/creative/web/", 1)[-1]
+        for url in transport.urls
+        if url.endswith("/season/add") or url.endswith("/season/section/episodes/add")
+    ]
+    assert writes == ["season/add", "season/section/episodes/add"]
     assert transport.urls[-1].endswith("/season/section/episodes/add")
-    assert transport.urls[-2].endswith("/season/add")
 
 
 def test_run_collection_reports_pending_when_everything_failed(tmp_path):

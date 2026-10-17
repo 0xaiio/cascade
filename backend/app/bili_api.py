@@ -40,6 +40,19 @@ DEFAULT_VERIFY_DELAY_SECONDS = 5.0
 TITLE_MATCH_PREFIX = 20
 COMMENT_DUPLICATE_CODE = 12051
 
+# `sectionId` 要的是**分区** id，而 `season/add` 返回的是**合集** id —— 两者不是一回事，
+# 中间必须回读一次合集列表（见 `find_season_section`）。新建的合集不是立刻出现在列表里，
+# 所以这次回读要带退避重试。
+SEASON_SECTION_ATTEMPTS = 3
+SEASON_SECTION_DELAY_SECONDS = 2.0
+SEASON_LIST_PAGE_SIZE = 30
+# 读合集列表翻页的上限。正常情况下新合集在最前面，翻到第 2、3 页还没找到就是真没有了；
+# 不设上限时「账号下的合集被删空但有脏数据」会让循环空转到天荒地老。
+SEASON_LIST_MAX_PAGES = 10
+# 平台给每个合集自动带的那个分区的 `type`。实测账号下 27 个合集里的默认分区都是 `type=1`，
+# 用户自建的分区是 `type=0`（实测有一个合集带 7 个自定义分区、没有默认分区）。
+SEASON_DEFAULT_SECTION_TYPE = 1
+
 
 class BiliApiError(RuntimeError):
     """业务失败（HTTP 200 但 `code != 0`）。`code` / `message` 原样保留，方便对账与排障。"""
@@ -187,8 +200,13 @@ def _season_id_of(data: Any) -> int | None:
     """从「创建合集」的响应里取出编号。**两种形态都实测到过**：直接是数字，
     或者裹在 `{"id": …}` 里 —— 全塞进一个嵌套条件表达式时没人看得懂它在认哪几种。"""
     raw = data.get("id") if isinstance(data, dict) else data
+    return _as_int(raw)
+
+
+def _as_int(value: Any) -> int | None:
+    """把平台给的编号转成 int。字符串数字也认（平台上见过），其余一律 `None`。"""
     try:
-        return int(raw)  # type: ignore[arg-type]
+        return int(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return None
 
@@ -197,19 +215,22 @@ def add_episodes(
     transport: Transport,
     jar: dict[str, str],
     *,
-    season_id: int,
+    section_id: int,
     episodes: list[dict[str, Any]],
 ) -> None:
-    """把稿件加进合集。
+    """把稿件加进合集的**某个分区**。
 
     参数名是 **`sectionId` / `episodes`（camelCase）**，并且 csrf 走 **query** 而不是正文 ——
     与「创建合集」的形态相反。这一点由社区 issue #1436 实证（文档表格里的下划线命名会 404）。
+
+    **这里的 id 必须是分区 id，不是合集 id。** `season/add` 只回合集 id，要用
+    `find_season_section` 换一次；拿合集 id 顶上去实测是 `-404 啥都木有`。
     """
     csrf = jar.get("bili_jct") or ""
     if not csrf:
         raise BiliApiError(None, "登录信息里没有 bili_jct，无法归集", where="归集稿件")
     body = {
-        "sectionId": int(season_id),
+        "sectionId": int(section_id),
         "episodes": [
             {"aid": int(item["aid"]), "cid": int(item["cid"]), "title": item["title"], "charging_pay": 0}
             for item in episodes
@@ -225,24 +246,117 @@ def add_episodes(
     _unwrap(result.json(), where="归集稿件")
 
 
-def list_seasons(transport: Transport, jar: dict[str, str], *, page_size: int = 30) -> list[dict[str, Any]]:
+def _read_season_page(
+    transport: Transport,
+    jar: dict[str, str],
+    *,
+    page: int,
+    page_size: int,
+) -> tuple[list[dict[str, Any]], int]:
+    """读一页合集列表，返回 `(原始行, 总数)`。
+
+    原始行是 `{"season": {...}, "sections": {"sections": [...]}}` —— **分区 id 只在这里**。
+    `list_seasons` 取的是内层 `season`，所以它拿不到分区；归集要的分区 id 必须从这些行里取。
+    """
+    result = transport.request(
+        "GET",
+        SEASON_LIST_URL,
+        params={"pn": page, "ps": page_size},
+        headers=_member_headers(jar),
+    )
+    data = _unwrap(result.json(), where="读取合集列表")
+    rows = (data or {}).get("seasons") or []
+    return [row for row in rows if isinstance(row, dict)], _as_int((data or {}).get("total")) or 0
+
+
+def list_seasons(
+    transport: Transport, jar: dict[str, str], *, page_size: int = SEASON_LIST_PAGE_SIZE
+) -> list[dict[str, Any]]:
     """列出已有合集，用于把 season_id 反查成人可读的标题。"""
     try:
-        result = transport.request(
-            "GET",
-            SEASON_LIST_URL,
-            params={"pn": 1, "ps": page_size},
-            headers=_member_headers(jar),
-        )
-        data = _unwrap(result.json(), where="读取合集列表")
+        rows, _ = _read_season_page(transport, jar, page=1, page_size=page_size)
     except (BiliApiError, HttpError):
         return []
-    seasons = (data or {}).get("seasons") or []
     out: list[dict[str, Any]] = []
-    for row in seasons:
-        if isinstance(row, dict) and isinstance(row.get("season"), dict):
+    for row in rows:
+        if isinstance(row.get("season"), dict):
             out.append(row["season"])
     return out
+
+
+def _pick_section(sections: list[Any]) -> dict[str, Any] | None:
+    """在合集的分区里挑一个能放视频的，返回 `{"id": …, "title": …}`。
+
+    优先 `type == SEASON_DEFAULT_SECTION_TYPE`（平台自动建的那个，实测叫「正片」）。
+    **一个合集被加了自定义分区之后就可能没有默认分区**（实测 `2026-math4cs` 有 7 个
+    `type=0` 的分区、没有 `type=1`），这时按 `order` 取最靠前的那个 —— 宁可放进第一个分区，
+    也不要因为「挑不出来」整条归集失败。
+
+    读不出 id 的行直接跳过：挑错一个 id 比挑不出来更贵（平台会 404，而错误信息看不出原因）。
+    """
+    usable: list[dict[str, Any]] = []
+    for sec in sections:
+        if not isinstance(sec, dict):
+            continue
+        sid = _as_int(sec.get("id"))
+        if sid is None:
+            continue
+        usable.append(
+            {
+                "id": sid,
+                "title": str(sec.get("title") or ""),
+                "type": _as_int(sec.get("type")),
+                "order": _as_int(sec.get("order")) or 0,
+            }
+        )
+    if not usable:
+        return None
+    defaults = [sec for sec in usable if sec["type"] == SEASON_DEFAULT_SECTION_TYPE]
+    chosen = min(defaults or usable, key=lambda sec: sec["order"])
+    return {"id": chosen["id"], "title": chosen["title"]}
+
+
+def find_season_section(
+    transport: Transport,
+    jar: dict[str, str],
+    *,
+    season_id: int,
+    attempts: int = SEASON_SECTION_ATTEMPTS,
+    delay: float = SEASON_SECTION_DELAY_SECONDS,
+    sleeper: Callable[[float], None] = time.sleep,
+) -> dict[str, Any] | None:
+    """把**合集 id** 换成归集要的**分区（section）id**。
+
+    `season/add` 只回一个合集 id，而 `episodes/add` 的 `sectionId` 要的是分区 id。
+    拿合集 id 去顶的实测结果是 `code=-404 message=啥都木有` —— 既不像网络问题也不像权限问题，
+    而且**重试不会自愈**（同一个错值会再发一遍）。所以这一步必须真的回读合集列表。
+
+    新建的合集不是立刻出现在列表里，因此带退避重试；读不到就返回 `None`，**不猜一个 id**。
+    """
+    target = _as_int(season_id)
+    if target is None:
+        return None
+    for attempt in range(max(1, attempts)):
+        try:
+            for page in range(1, SEASON_LIST_MAX_PAGES + 1):
+                rows, total = _read_season_page(transport, jar, page=page, page_size=SEASON_LIST_PAGE_SIZE)
+                for row in rows:
+                    season = row.get("season") or {}
+                    if _as_int(season.get("id")) != target:
+                        continue
+                    sections = ((row.get("sections") or {}).get("sections")) or []
+                    picked = _pick_section(sections)
+                    if picked is not None:
+                        return picked
+                    # 合集找到了但读不出分区（分区也可能比合集晚一步建好）→ 退避后再读。
+                if len(rows) < SEASON_LIST_PAGE_SIZE or page * SEASON_LIST_PAGE_SIZE >= total:
+                    break
+        except (BiliApiError, HttpError):
+            # 一次读失败不该直接判归集失败；下一轮再试，最后一轮仍失败就是「读不到」。
+            pass
+        if attempt < attempts - 1 and delay > 0:
+            sleeper(delay)
+    return None
 
 
 # ---------------------------------------------------------------- 置顶评论

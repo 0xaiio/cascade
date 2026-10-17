@@ -26,12 +26,13 @@ from app.bili_api import (
     fetch_video,
     find_archive,
     find_own_comment,
+    find_season_section,
     list_recent_archives,
     list_seasons,
     send_and_top_comment,
 )
 from app.bili_http import MEMBER_REFERER, WEB_REFERER, HttpError
-from bili_fakes import JAR, FakeBiliTransport, RecordingSleeper, StubTransport, own_reply
+from bili_fakes import JAR, FakeBiliTransport, RecordingSleeper, StubTransport, own_reply, section_id_for
 
 MARKER = "个人工作流同步上传"
 MESSAGE = f"本视频由{MARKER}，欢迎在评论区交流。"
@@ -66,7 +67,7 @@ def test_public_api_requests_use_the_web_referer():
 
 def test_member_json_requests_declare_content_type():
     transport = FakeBiliTransport()
-    add_episodes(transport, JAR, season_id=1, episodes=[{"aid": 1, "cid": 2, "title": "t"}])
+    add_episodes(transport, JAR, section_id=1, episodes=[{"aid": 1, "cid": 2, "title": "t"}])
     assert transport.calls[0]["headers"]["Content-Type"] == "application/json"
 
 
@@ -338,7 +339,7 @@ def test_add_episodes_uses_camel_case_body_and_csrf_in_the_query():
     `sectionId`，而且 csrf 必须走 query —— 写错的那一半只会在真账号上 404。
     """
     transport = FakeBiliTransport()
-    add_episodes(transport, JAR, season_id=990011, episodes=[{"aid": 111, "cid": 7001, "title": "第一集"}])
+    add_episodes(transport, JAR, section_id=990011, episodes=[{"aid": 111, "cid": 7001, "title": "第一集"}])
     call = transport.calls[0]
     assert call["params"] == {"csrf": "jct-value"}
     assert call["form"] == {}
@@ -352,7 +353,7 @@ def test_add_episodes_uses_camel_case_body_and_csrf_in_the_query():
 def test_add_episodes_coerces_ids_to_int():
     """平台对字符串数字不宽容；这里统一转成 int，避免「本地看着对、平台 404」。"""
     transport = FakeBiliTransport()
-    add_episodes(transport, JAR, season_id="990011", episodes=[{"aid": "111", "cid": "7001", "title": "t"}])
+    add_episodes(transport, JAR, section_id="990011", episodes=[{"aid": "111", "cid": "7001", "title": "t"}])
     body = transport.calls[0]["json_body"]
     assert body["sectionId"] == 990011
     assert body["episodes"][0]["aid"] == 111
@@ -363,7 +364,7 @@ def test_add_episodes_sends_several_episodes_in_one_call():
     """一次请求带上全部条目：逐条调用会被频控，也会在「第 3 条失败」时留下半个合集。"""
     transport = FakeBiliTransport()
     episodes = [{"aid": n, "cid": n * 10, "title": f"第 {n} 集"} for n in (1, 2, 3)]
-    add_episodes(transport, JAR, season_id=1, episodes=episodes)
+    add_episodes(transport, JAR, section_id=1, episodes=episodes)
     assert len(transport.calls) == 1
     assert len(transport.calls[0]["json_body"]["episodes"]) == 3
 
@@ -371,7 +372,7 @@ def test_add_episodes_sends_several_episodes_in_one_call():
 def test_add_episodes_refuses_without_csrf_and_makes_no_request():
     transport = FakeBiliTransport()
     with pytest.raises(BiliApiError) as excinfo:
-        add_episodes(transport, jar_without_csrf(), season_id=1, episodes=[{"aid": 1, "cid": 2, "title": "t"}])
+        add_episodes(transport, jar_without_csrf(), section_id=1, episodes=[{"aid": 1, "cid": 2, "title": "t"}])
     assert "bili_jct" in excinfo.value.message
     assert transport.calls == []
 
@@ -379,7 +380,7 @@ def test_add_episodes_refuses_without_csrf_and_makes_no_request():
 def test_add_episodes_propagates_a_business_error():
     transport = StubTransport({"code": 21070, "message": "已经添加过"})
     with pytest.raises(BiliApiError) as excinfo:
-        add_episodes(transport, JAR, season_id=1, episodes=[{"aid": 1, "cid": 2, "title": "t"}])
+        add_episodes(transport, JAR, section_id=1, episodes=[{"aid": 1, "cid": 2, "title": "t"}])
     assert excinfo.value.code == 21070
     assert excinfo.value.where == "归集稿件"
 
@@ -389,7 +390,7 @@ def test_add_episodes_lets_a_network_error_through_as_http_error():
         add_episodes(
             FakeBiliTransport(episodes_error=HttpError("连接被重置")),
             JAR,
-            season_id=1,
+            section_id=1,
             episodes=[{"aid": 1, "cid": 2, "title": "t"}],
         )
 
@@ -408,6 +409,129 @@ def test_list_seasons_returns_empty_on_failure():
 def test_list_seasons_skips_rows_without_an_inner_season():
     transport = StubTransport({"code": 0, "data": {"seasons": [None, "junk", {"season": {"id": 1}}, {"id": 2}]}})
     assert list_seasons(transport, JAR) == [{"id": 1}]
+
+
+# ---------------------------------------------------------------- 合集 → 分区
+def test_find_season_section_returns_the_section_id_not_the_season_id():
+    """**本缺陷的回归断言。** 归集接口的 `sectionId` 要的是**分区 id**：
+
+    平台上的分区 id 与合集 id 是两个独立编号（实测 `9343273` → `10455347`）。把合集 id
+    原样发过去得到的是 `code=-404 message=啥都木有`，而且重试不自愈 —— 所以这条用例同时
+    钉住「换过号」和「换出来的不是同一个数」两件事。
+    """
+    transport = FakeBiliTransport(season_id=990011)
+    picked = find_season_section(transport, JAR, season_id=990011, attempts=1)
+    assert picked == {"id": section_id_for(990011), "title": "正片"}
+    assert picked["id"] != 990011
+
+
+def test_find_season_section_prefers_the_platform_default_section():
+    """`type=1` 是平台自动建的默认分区。就算它的 `order` 更靠后，也要选它 —— 那才是
+    「正片」该去的地方，用户自建的分区各有各的用途。"""
+    transport = FakeBiliTransport(
+        seasons=[{"id": 7001, "title": "自己的合集"}],
+        season_sections={
+            7001: [
+                {"id": 11, "title": "第一讲", "type": 0, "order": 1},
+                {"id": 12, "title": "正片", "type": 1, "order": 5},
+            ]
+        },
+    )
+    assert find_season_section(transport, JAR, season_id=7001, attempts=1) == {"id": 12, "title": "正片"}
+
+
+def test_find_season_section_falls_back_to_the_first_custom_section():
+    """实测存在**没有默认分区**的合集（`2026-math4cs` 有 7 个 `type=0` 的分区）。
+    这类合集按 `order` 取最靠前的一个；判失败会让它永远归不了集。"""
+    transport = FakeBiliTransport(
+        seasons=[{"id": 7001, "title": "只有自定义分区"}],
+        season_sections={
+            7001: [
+                {"id": 21, "title": "第二讲", "type": 0, "order": 2},
+                {"id": 22, "title": "第一讲", "type": 0, "order": 1},
+            ]
+        },
+    )
+    assert find_season_section(transport, JAR, season_id=7001, attempts=1) == {"id": 22, "title": "第一讲"}
+
+
+def test_find_season_section_returns_none_when_the_season_has_no_sections():
+    """合集读到了、但里面一个分区都读不出来：返回 `None` 让调用方停手，
+    **不能退化成「用合集 id 试试」**。"""
+    transport = FakeBiliTransport(seasons=[{"id": 7001, "title": "空合集"}], season_sections={7001: []})
+    assert find_season_section(transport, JAR, season_id=7001, attempts=1) is None
+
+
+def test_find_season_section_returns_none_when_the_season_is_absent():
+    transport = FakeBiliTransport(seasons=[])
+    assert find_season_section(transport, JAR, season_id=7001, attempts=1) is None
+
+
+def test_find_season_section_retries_while_a_new_season_is_missing_from_the_list():
+    """新合集在平台列表里有延迟。读一次没有就退避再读 —— 一次就判死会让「刚建好就归集」
+    这条路稳定失败，而用户看到的是「合集建好了，但视频没加进去」。"""
+    transport = FakeBiliTransport(season_id=990011, season_visible_after=2)
+    sleeper = RecordingSleeper()
+    picked = find_season_section(transport, JAR, season_id=990011, attempts=3, delay=1.0, sleeper=sleeper)
+    assert picked == {"id": section_id_for(990011), "title": "正片"}
+    assert transport.season_reads == 3
+    assert sleeper.waits == [1.0, 1.0]
+
+
+def test_find_season_section_does_not_sleep_after_the_final_attempt():
+    sleeper = RecordingSleeper()
+    transport = FakeBiliTransport(seasons=[], season_visible_after=99)
+    assert find_season_section(transport, JAR, season_id=990011, attempts=2, delay=3.0, sleeper=sleeper) is None
+    assert transport.season_reads == 2
+    assert sleeper.waits == [3.0]
+
+
+def test_find_season_section_pages_past_the_first_page():
+    """合集可能不在第一页。翻页有上限，但**不能只看第一页** —— 账号下合集多于 30 个时，
+    只看第一页会把「合集明明在」判成「读不到」。"""
+    seasons = [{"id": 1000 + i, "title": f"合集{i}"} for i in range(35)]
+    transport = FakeBiliTransport(seasons=seasons)
+    assert find_season_section(transport, JAR, season_id=1034, attempts=1) == {
+        "id": section_id_for(1034),
+        "title": "正片",
+    }
+    assert transport.called("/x2/creative/web/seasons") == 2
+
+
+def test_find_season_section_skips_malformed_section_rows():
+    """分区行里混进 `None`/字符串/拿不出 id 的脏数据时，跳过它们而不是整体崩掉。"""
+    transport = FakeBiliTransport(
+        seasons=[{"id": 7001, "title": "脏数据"}],
+        season_sections={
+            7001: [
+                None,
+                "junk",
+                {"id": None, "title": "没有 id"},
+                {"id": "12x", "title": "不是数字"},
+                {"id": "345", "title": "能用的"},
+            ]
+        },
+    )
+    assert find_season_section(transport, JAR, season_id=7001, attempts=1) == {"id": 345, "title": "能用的"}
+
+
+def test_find_season_section_returns_none_on_a_business_error():
+    transport = StubTransport({"code": -101, "message": "账号未登录"})
+    assert (
+        find_season_section(transport, JAR, season_id=7001, attempts=2, delay=0, sleeper=RecordingSleeper())
+        is None
+    )
+
+
+def test_find_season_section_returns_none_on_a_network_error():
+    assert find_season_section(StubTransport(error=HttpError("断网了")), JAR, season_id=7001, attempts=1) is None
+
+
+def test_find_season_section_returns_none_for_a_bogus_season_id_without_asking():
+    """编号本身不是数字时不必打接口。"""
+    transport = FakeBiliTransport()
+    assert find_season_section(transport, JAR, season_id="不是编号", attempts=1) is None
+    assert transport.calls == []
 
 
 # ---------------------------------------------------------------- 找到自己的评论

@@ -37,6 +37,21 @@ def own_reply(rpid: int, message: str, *, mid: int = 42) -> dict[str, Any]:
     return {"rpid": rpid, "mid": mid, "content": {"message": message}}
 
 
+def section_id_for(season_id: int) -> int:
+    """合集 → 它的默认分区 id 的**约定**。
+
+    平台上的分区 id 与合集 id 是两个独立编号（实测 `9343273` → `10455347`），
+    任何「看起来差不多」的巧合都不该被拿来当捷径。替身用 `season_id + 1000` 生成一个
+    **一定不等于**合集 id 的值，于是「把合集 id 当分区 id 用」在断言里必然露馅。
+    """
+    return int(season_id) + 1000
+
+
+def default_section(season_id: int) -> dict[str, Any]:
+    """平台给新建合集自动带的那个默认分区（实测 `type=1`、叫「正片」）。"""
+    return {"id": section_id_for(season_id), "title": "正片", "type": 1, "order": 1}
+
+
 class StubTransport:
     """只回同一个固定响应的替身。
 
@@ -143,6 +158,8 @@ class FakeBiliTransport:
         tv_confirm_code: int = 0,
         tv_confirm_message: str = "ok",
         seasons: list[dict[str, Any]] | None = None,
+        season_sections: dict[int, list[dict[str, Any]]] | None = None,
+        season_visible_after: int | None = None,
     ) -> None:
         self.archives = [dict(DEFAULT_ARCHIVE)] if archives is UNSET else list(archives or [])
         # 稿件列表有平台侧延迟。`archives_ok_after=N` 让**前 N 次**读取失败、之后成功，
@@ -160,6 +177,13 @@ class FakeBiliTransport:
         self.seasons = (
             [{"id": self.season_id, "title": "已有合集"}] if seasons is None else list(seasons)
         )
+        # 每个合集下的分区。没显式给就按 `default_section` 造一个 —— 平台新建合集就长这样。
+        # 传 `{season_id: []}` 可以构造「合集在、但读不出分区」那种形状。
+        self.season_sections = dict(season_sections or {})
+        # 新建合集在平台列表里**有延迟**。`season_visible_after=N` 让合集在**前 N 次**读取里
+        # 消失，用来验证 `find_season_section` 真的会退避重试、而不是读一次就判死。
+        self.season_visible_after = season_visible_after
+        self.season_reads = 0
         self.season_add_error = season_add_error
         self.episodes_error = episodes_error
         self.comment_code = comment_code
@@ -296,7 +320,26 @@ class FakeBiliTransport:
                 raise self.episodes_error
             return self._json({"code": 0, "data": {}})
         if url.endswith("/x2/creative/web/seasons"):
-            return self._json({"code": 0, "data": {"seasons": [{"season": row} for row in self.seasons]}})
+            self.season_reads += 1
+            page = int((params or {}).get("pn") or 1)
+            size = int((params or {}).get("ps") or 30)
+            rows = []
+            for season in self.seasons:
+                hidden = (
+                    self.season_visible_after is not None
+                    and self.season_reads <= self.season_visible_after
+                    and int(season.get("id") or 0) == self.season_id
+                )
+                if hidden:
+                    continue
+                rows.append({"season": season, "sections": {"sections": self._sections_of(season)}})
+            start = (page - 1) * size
+            return self._json(
+                {
+                    "code": 0,
+                    "data": {"seasons": rows[start : start + size], "total": len(rows)},
+                }
+            )
         if url.endswith("/x/v2/reply/main"):
             mode = int((params or {}).get("mode") or 3)
             rows = self.reply_pages.get(mode, self.replies)
@@ -318,6 +361,12 @@ class FakeBiliTransport:
     @staticmethod
     def _json(payload: dict[str, Any]) -> HttpResult:
         return HttpResult(200, json.dumps(payload, ensure_ascii=False))
+
+    def _sections_of(self, season: dict[str, Any]) -> list[dict[str, Any]]:
+        sid = int(season.get("id") or 0)
+        if sid in self.season_sections:
+            return list(self.season_sections[sid])
+        return [default_section(sid)]
 
 
 def command_runner(
@@ -385,6 +434,8 @@ __all__ = [
     "ScriptedRunner",
     "StubTransport",
     "command_runner",
+    "default_section",
     "own_reply",
+    "section_id_for",
     "write_video",
 ]

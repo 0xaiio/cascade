@@ -11,16 +11,16 @@
 | 纯工具（模板/标签/硬限/**版权与来源**/**归集方式**） | `backend/tests/test_bili_meta.py` | 71 |
 | 基础设施（HTTP 接缝、扫码会话） | `backend/tests/test_bili_auth.py` | 59 |
 | 基础设施（`biliup` 探测/命令/进度/执行） | `backend/tests/test_bili_bin.py` | 44 |
-| 领域（会员态接口） | `backend/tests/test_bili_api.py` | 77 |
-| 领域（单次上传编排） | `backend/tests/test_bili_upload.py` | 67 |
+| 领域（会员态接口） | `backend/tests/test_bili_api.py` | 89 |
+| 领域（单次上传编排） | `backend/tests/test_bili_upload.py` | 69 |
 | 编排（队列/落账/收敛/预填/**归集决策**） | `backend/tests/test_bili_manager.py` | 82 |
 | 编排（读模型与徽标聚合） | `backend/tests/test_bili_read_model.py` | 60 |
 | 入口（13 个 operation 的状态码） | `backend/tests/test_api_bilibili.py` | 55 |
 | 共享替身 | `backend/tests/bili_fakes.py` | — |
-| **合计** | **9 个文件** | **543** |
+| **合计** | **9 个文件** | **557** |
 
 数字取自 `pytest --collect-only`（逐文件），与 `backend/tests` 全集减去既有基线相符：
-**543 + 356 = 899**，而 `backend/tests` 全集正是 **899**。
+**557 + 356 = 913**，而 `backend/tests` 全集正是 **913**。
 （那 356 是 `main` 的既有 354 加 [`011`](../../bug-fix/011-biliup-refuses-a-token-less-cookie-file.md)
 给 `test_log_safety.py` 加的 2 项 —— **B站 之外的部分一行没动**。）
 
@@ -39,6 +39,13 @@
 （`tag_preview` 漏了前端就会自己写死 12，见 [012](../../bug-fix/012-preflight-contradicts-itself-and-the-server.md)），
 以及「成功 / 失败 / 在途三组集合**恰好归类一次**」的不相交性。
 **核对等式：表内合计 + 356 = `backend/tests` 全集**（356 是 `main` 的既有基线）。
+
+**归集缺陷轮再 +14 = 557**（`test_bili_api.py` +12、`test_bili_upload.py` +2，
+`test_bili_manager.py` 三条用例只换了夹具、条数没动）。增量全在**「合集 id ≠ 分区 id」**
+这条判据上（[013](../../bug-fix/013-season-section-id-confusion.md)）：
+合集列表里 `sections.sections[]` 的三种形态（有默认分区 / 只有自定义分区 / 一个都没有）、
+新合集暂未进列表时的退避重试、超过一页时的翻页、脏分区行、以及
+**「读不到分区就一个归集请求都不发」**。等式仍是 557 + 356 = 913。
 
 前端同步在涨：这一轮从 12 个文件 / 119 passed 到 **15 个文件 / 172 passed**，
 新增的三份全是**不挂载组件**的纯函数测试（`biliForm.test.ts` 35、`biliStatus.test.ts` 14、

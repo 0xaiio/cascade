@@ -49,6 +49,10 @@ init 脚本底层调用的就是 `python -m app`，其进阶参数（`--port` / 
 
 `http://127.0.0.1:5173` 只用于前端热更新开发模式，需要另外启动 Vite dev server。不同读者的运行方式见 [用户手册](docs/user-manual.md#启动应用) 和 [开发文档](docs/development.md#本地运行)。
 
+## 视频介绍
+
+6 分钟演示（真实解析、下载、任务中心与 B站 投稿全流程）：[B站 · BV1JQJY6LExf](https://www.bilibili.com/video/BV1JQJY6LExf)。文稿、字幕与制作说明见 [ai/promotion](ai/promotion/README.md)。
+
 ## 文档导航
 
 | 文档 | 用途 |

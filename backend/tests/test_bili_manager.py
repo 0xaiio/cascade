@@ -49,7 +49,7 @@ from app.models import (
     Job,
     JobItem,
 )
-from bili_fakes import FakeBiliTransport, RecordingSleeper, command_runner
+from bili_fakes import FakeBiliTransport, RecordingSleeper, command_runner, section_id_for
 
 TITLE = "演示标题"
 TEST_MID = 42
@@ -447,7 +447,10 @@ async def test_join_an_existing_collection_never_creates_a_new_one(tmp_path):
     """
     harness = make_harness(
         tmp_path,
-        transport=FakeBiliTransport(archives=[{"aid": 1, "bvid": "BV1", "title": TITLE, "state": 0}]),
+        transport=FakeBiliTransport(
+            archives=[{"aid": 1, "bvid": "BV1", "title": TITLE, "state": 0}],
+            seasons=[{"id": 4242, "title": "选中的合集"}],
+        ),
     )
     items = harness.seed_job("job2", "合集任务", 1)
     target = UploadTarget(index=1, title=TITLE, video_path=Path(items[0]["path"]), item_id=items[0]["id"])
@@ -512,7 +515,11 @@ async def test_switching_the_target_collection_overrides_the_previous_one(tmp_pa
     """
     harness = make_harness(
         tmp_path,
-        transport=FakeBiliTransport(archives=[{"aid": 1, "bvid": "BV1", "title": TITLE, "state": 0}]),
+        transport=FakeBiliTransport(
+            archives=[{"aid": 1, "bvid": "BV1", "title": TITLE, "state": 0}],
+            # 两个候选合集都得在列表里，否则归集前换分区 id 那一步就断了。
+            seasons=[{"id": 111, "title": "A"}, {"id": 222, "title": "B"}],
+        ),
     )
     items = harness.seed_job("job2", "合集任务", 1)
     target = UploadTarget(index=1, title=TITLE, video_path=Path(items[0]["path"]), item_id=items[0]["id"])
@@ -537,13 +544,14 @@ async def test_switching_the_target_collection_overrides_the_previous_one(tmp_pa
 
     assert harness.season("job2").season_id == 222
     # 加进去的必须是 222 那个：两次归集的 sectionId 都得记下来。
-    # `sectionId` 走 **json_body**（见 `bili_api.add_episodes`：csrf 在 query，参数在正文）。
+    # `sectionId` 走 **json_body**（见 `bili_api.add_episodes`：csrf 在 query，参数在正文），
+    # 而它装的是**分区 id**（由合集 id 换出来的），所以比对的是 `section_id_for(合集)`。
     sections = [
         call["json_body"]["sectionId"]
         for call in harness.transport.calls
         if call["url"].endswith("/season/section/episodes/add")
     ]
-    assert sections == [111, 222]
+    assert sections == [section_id_for(111), section_id_for(222)]
     await harness.manager.stop()
 
 
@@ -1352,7 +1360,11 @@ async def test_single_submit_joins_an_existing_collection(tmp_path):
     """
     harness = make_harness(
         tmp_path,
-        transport=FakeBiliTransport(archives=[{"aid": 1, "bvid": "BV1", "title": TITLE, "state": 0}]),
+        transport=FakeBiliTransport(
+            archives=[{"aid": 1, "bvid": "BV1", "title": TITLE, "state": 0}],
+            # 用户选的那个合集必须在列表里 —— 归集前要拿它换分区 id。
+            seasons=[{"id": 4242, "title": "选中的合集"}],
+        ),
     )
     items = harness.seed_job("job1", "单视频任务", 1)
     created = await harness.manager.submit_single(
