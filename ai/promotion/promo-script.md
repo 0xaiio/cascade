@@ -10,6 +10,9 @@
 - 画面：真实环境录屏（终端 + 真实运行的 cascade 界面），非示意图
 - 时长：约 6 分半（落在要求的 3–10 分钟区间内）
 
+> 已发布：B站 [BV1JQJY6LExf](https://www.bilibili.com/video/BV1JQJY6LExf)，分区「科技 · 计算机技术」，
+> 标签 `youtube` / `yt-dlp` / `bilibili`，自制，归入合集 `0xaiio`。投稿参数与记录见 [README.md](README.md#发布记录)。
+
 ---
 
 ## 1. 文稿要点覆盖

@@ -9,6 +9,37 @@
 | [cascade-promo.mp4](cascade-promo.mp4) | 成片，1920×1080 / 30 fps / H.264 + AAC |
 | [cascade-promo.srt](cascade-promo.srt) | 外挂字幕（与片内硬字幕同源） |
 
+## 发布记录
+
+成片已投稿到 B站，并归入合集 `0xaiio`。
+
+| 项 | 值 |
+| --- | --- |
+| 稿件 | [BV1JQJY6LExf](https://www.bilibili.com/video/BV1JQJY6LExf)（aid `117453598230428`，cid `42806217520`） |
+| 标题 | cascade：本机 YouTube 下载控制台｜解析·下载·任务中心·B站投稿完整演示 |
+| 分区 | `231` 科技 · 计算机技术 |
+| 标签 | `youtube`、`yt-dlp`、`bilibili` |
+| 类型 | 自制（`copyright=1`） |
+| 封面 | 抽自成片第 6 秒的片头卡 |
+| 合集 | `0xaiio`（season_id `9343273`，「正片」分区 section_id `10455347`，`epCount=1`） |
+| 投稿时间 | 2026-10-17 |
+
+投稿与归集**没有走应用界面**，而是复用项目自身的模块（`bili_bin` 调 `biliup`、`bili_auth` 读登录文件、
+`bili_api` 打合集接口）——因为应用的投稿入口是**任务行级别**的，只受理它自己下载完成的任务，
+无法受理一个仓库里的现成视频文件。
+
+### 归集接口需要的是「分区 id」，不是「合集 id」
+
+实测记录（2026-10-17）：
+
+- 建合集 `POST /x2/creative/web/season/add` 返回的是**合集 id**（`9343273`）；
+- 归集 `POST /x2/creative/web/season/section/episodes/add` 的 `sectionId` 要的是**分区 id**
+  （该合集默认分区「正片」的 `10455347`）；
+- 传合集 id 时接口返回 `code=-404 message=啥都木有`；换成分区 id 立刻成功（`epCount` 从 0 变 1）。
+
+也就是说：**从界面新建合集再归集这条路径目前在平台侧会失败**，报的是 `-404 啥都木有`——
+一句既不像网络问题、也不像权限问题的提示。见下方「待处理」。
+
 ## 成片参数（实测）
 
 | 项 | 值 |
@@ -110,6 +141,20 @@ python build_video.py           # 归一化 + 拼接 + 字幕 + 混音 + 响度�
 
 `record_browser.py` 需要一个已在运行的后端（默认 `http://127.0.0.1:8010`），可用
 `python -m app --port 8010` 在 `backend/` 下启动。
+
+## 待处理
+
+**新建合集后的归集把「合集 id」当成了「分区 id」**（2026-10-17 实测发现，尚未修复）。
+
+- 位置：`bili_upload.group_into_season()` 先 `create_season()` 拿到合集 id，随后
+  `add_episodes(season_id=<合集 id>)`；而 `bili_api.add_episodes()` 把它写进请求体的
+  `sectionId`。接口路径是 `.../season/section/episodes/add`，这个字段要的是**分区 id**。
+- 现象：`code=-404 message=啥都木有`。这条记录会落成「归集失败」并给出「重试归集」，
+  但重试仍会用同一个合集 id，因此**不会自愈**。
+- 影响面：从界面**新建合集**的归集；「加入已有合集」若传的也是合集 id，同样受影响。
+- 待定：修法可以是「建完合集后回读 `season/sections` 取默认分区 id」，也可以在建合集前
+  先查账号下同名合集的既有分区。两条都需要补一条离线用例（`bili_api` 已按 transport 可注入设计）。
+- 复现证据（本次实测）：合集 id `9343273` → `-404`；分区 id `10455347` → 成功，`epCount` 0→1。
 
 ## 维护
 
