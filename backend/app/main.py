@@ -31,7 +31,7 @@ from .job_manager import JobManager
 from .logging_setup import configure_logging
 from .routers import API_ROUTERS
 from .runtime_env import sanitize_environment
-from .system_open import open_path_with_default_app, open_video_with_best_player
+from .system_open import open_path_with_chooser, open_path_with_default_app, open_video_with_best_player
 from .ytdlp_service import YtDlpService
 
 logger = logging.getLogger(__name__)
@@ -43,6 +43,7 @@ def create_app(
     directory_picker: Callable[[Path], Path | None] | None = None,
     system_opener: Callable[[Path], None] | None = None,
     video_opener: Callable[[Path, str | None], None] | None = None,
+    chooser_opener: Callable[[Path], None] | None = None,
     sanitize_environment_variables: bool = True,
     bili_manager: BiliManager | None = None,
 ) -> FastAPI:
@@ -85,11 +86,24 @@ def create_app(
     open_video_path = video_opener or (
         (lambda path, _actual_format=None: system_opener(path)) if system_opener else open_video_with_best_player
     )
+    # 注入了 `system_opener` 的调用方（几乎都是测试）等于声明「本机打开这件事由我接管」，
+    # 那么选择器也不该真去起 rundll32 —— 否则一个单测就会在你的桌面上弹窗。
+    open_with_chooser = chooser_opener or system_opener or open_path_with_chooser
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await asyncio.to_thread(checkpoint_wal, engine)
-        await manager.start()
+        # 必须在 worker 起来**之前**收敛上一次退出留下的孤儿条目：worker 一旦启动就会
+        # 消费队列，而这一步要先把库里的状态改对。`recover_orphaned_work` 内部按
+        # 「先改库、再 start」的顺序执行，所以这里不再单独调 `manager.start()`。
+        recovered = await manager.recover_orphaned_work()
+        if recovered.requeued_item_ids:
+            logger.warning(
+                "启动恢复：重新排队 %s 个条目（%s 个任务，策略=%s）",
+                len(recovered.requeued_item_ids),
+                len(recovered.job_ids),
+                recovered.policy,
+            )
         await bili.start()
         # 上次进程退出时正在投稿的记录必须收敛成一条可读原因，否则界面会永远停在「上传中」。
         await bili.resume_interrupted()
@@ -120,6 +134,7 @@ def create_app(
         pick_directory=pick_directory,
         open_local_path=open_local_path,
         open_video_path=open_video_path,
+        open_with_chooser=open_with_chooser,
     )
     for route_module in API_ROUTERS:
         app.include_router(route_module)

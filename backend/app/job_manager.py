@@ -17,6 +17,7 @@ from .events import EventBroker
 from .progress_persist import ProgressPersistGate
 from .log_safety import sanitize_log_message
 from .models import Job, JobEvent, JobItem, JobStatus, utc_now
+from .orphan_recovery import OrphanRecoveryReport, recover_orphaned_items
 from .output_paths import (
     find_subtitle_file,
     item_artifact_candidates,
@@ -78,6 +79,47 @@ class JobManager:
         await asyncio.gather(*self._workers, return_exceptions=True)
         self._workers.clear()
         self._queue = None
+
+    async def recover_orphaned_work(self) -> OrphanRecoveryReport:
+        """收回头一次进程退出时留在 `queued`/`running` 的条目，然后才允许 worker 消费。
+
+        **顺序是硬要求**：先改库（跑在 `asyncio.to_thread` 里，此刻一个 worker 都还没有），
+        再 `start()`。反过来 worker 会与被扫描的行并发读写，`item.status` 的读-改-写互相覆盖，
+        表现为「有的条目被扫了两遍、有的一遍都没扫到」。
+
+        队列本身是**内存**的：进程一退，`queued` 条目的 id 就没了，而库里的状态还留着 ——
+        这就是「重启后任务永远不动」的全部成因。见 ai/bug-fix/015。
+        """
+        report = await asyncio.to_thread(self._recover_orphaned_work)
+        await self.start()
+        assert self._queue is not None
+        for item_id in report.requeued_item_ids:
+            self._queue.put_nowait(item_id)
+        for job_id in report.job_ids:
+            await self._publish(
+                {"type": "jobs_recovered", "job_id": job_id, "policy": report.policy}
+            )
+        return report
+
+    def _recover_orphaned_work(self) -> OrphanRecoveryReport:
+        with Session(self.engine) as session:
+            configured = self.settings.orphan_recovery
+            report = recover_orphaned_items(session, policy=configured)
+            if configured.strip().lower() != report.policy:
+                logger.warning(
+                    "YTDL_ORPHAN_RECOVERY=%r 不是已知取值（resume / fail），按 %s 处理",
+                    configured,
+                    report.policy,
+                )
+            session.commit()
+            # 任务级终态必须回到运行期**同一个**收敛函数：条目全被标失败时要落到 failed，
+            # 被重新排队时要回到 running。在这里另写一套判定，「什么算结束」就会有两份定义。
+            for job_id in report.job_ids:
+                job = session.get(Job, job_id)
+                if job is None or job.status not in {JobStatus.queued.value, JobStatus.running.value}:
+                    continue
+                self._maybe_finish_job(session, job)
+            return report
 
     async def set_concurrency(self, concurrency: int) -> None:
         self.settings.default_concurrency = max(1, concurrency)

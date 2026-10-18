@@ -56,6 +56,13 @@ class AppSettings(BaseSettings):
     throttled_rate_kbps: int = Field(default=0, ge=0)
     # 停滞看门狗：N 秒内没有任何新增字节就让任务失败（而不是永久 running）。0 = 关闭。
     stall_timeout_seconds: float = Field(default=90.0, ge=0)
+    # 进程退出后残留在 queued/running 的条目怎么处理：
+    #   resume（默认）= 重新排队，交给 yt-dlp 断点续传（`continuedl=True`）；
+    #   fail          = 标记失败并在条目上写明原因，由用户决定要不要重下。
+    # 默认 resume 的理由：下载是幂等且可续传的，最坏情况只是多下一遍；而 resume 是
+    # **唯一**能让「重启后任务永远不动」这个症状消失的选项。只有 fail 会被识别，
+    # 其余取值一律按 resume 处理（写错一个字不该让应用起不来），见 app/orphan_recovery.py。
+    orphan_recovery: str = "resume"
     # aria2c 默认关闭：多连接是 YouTube 侧最敏感的触发条件，403/限速风险显著上升。
     # 仅在显式开启 aria2c 后生效，连接数保持保守（默认 2，上限 4）。
     aria2c_enabled: bool = False
