@@ -54,7 +54,7 @@
 
 - 所有查询通过 `session.exec(select(...))` 执行，使用 SQLModel 的声明式查询
 - [_ensure_columns](../backend/app/db.py#L43) 使用 f-string 构建 `ALTER TABLE` 语句，但表名和列名来自硬编码字典，非用户输入
-- [checkpoint_wal](../backend/app/db.py#L89) 的 `PRAGMA wal_checkpoint(...)` 同样由常量与函数默认参数构成
+- [checkpoint_wal](../backend/app/db.py#L93) 的 `PRAGMA wal_checkpoint(...)` 同样由常量与函数默认参数构成
 - 无原始 SQL 拼接
 
 ## 4. 跨站脚本攻击（XSS）
@@ -95,7 +95,7 @@
 
 详情：
 
-- [GET /api/diagnostics](../backend/app/routers/diagnostics.py#L29) 仅返回 PO token / visitor data 的"是否已配置"布尔值，不返回原文（[get_dependency_status](../backend/app/ytdlp_service.py#L288)）
+- [GET /api/diagnostics](../backend/app/routers/diagnostics.py#L29) 仅返回 PO token / visitor data 的"是否已配置"布尔值，不返回原文（[get_dependency_status](../backend/app/ytdlp_service.py#L292)）
 - [sanitize_log_message](../backend/app/log_safety.py#L20) 在写入日志前通过正则替换移除 URL query string（包含 cookie、token、authorization 等参数）
 - 代理 URL 在日志与 API 响应里都先经 [redact_proxy_credentials](../backend/app/proxy.py#L62) 脱敏（`user:pass@` → `***`）
 - cookies 文件（`data/cookies.txt`、B站 的 `data/bili_cookies.json`）和 `.env` 文件均在 `.gitignore` 中排除，不会进入 Git
@@ -236,7 +236,7 @@
 | 变更 | 位置 | 初步判断 | 需要复核的点 |
 | --- | --- | --- | --- |
 | 停滞看门狗 | [stall_guard.py](../backend/app/stall_guard.py) | 新增模块只读 progress payload 并在超时后抛异常，不接触文件系统、网络或数据库；无用户输入。 | 超时抛错是否会与取消/暂停语义冲突，导致任务状态异常。 |
-| WAL checkpoint | [db.py](../backend/app/db.py#L89) | `PRAGMA wal_checkpoint(TRUNCATE)` 由常量构成，失败只记日志。 | 与并发写入的交互、被强杀时的数据完整性。 |
+| WAL checkpoint | [db.py](../backend/app/db.py#L93) | `PRAGMA wal_checkpoint(TRUNCATE)` 由常量构成，失败只记日志。 | 与并发写入的交互、被强杀时的数据完整性。 |
 | 进度落库节流 | [progress_persist.py](../backend/app/progress_persist.py) | 纯内存节流，无 I/O。 | 节流是否会导致终态进度丢失。 |
 | 上传的 `.env` / 配置注入面 | [config.py](../backend/app/config.py#L19) | 新增 `YTDL_ARIA2C_PATH` 作为外部下载器可执行路径，会被交给 yt-dlp 作为 `external_downloader` 执行。**本机配置文件可控，非远端输入**，因此按本项目的威胁模型仍是低风险。 | 是否需要在文档中明确"该变量只应由本机使用者设置"；是否存在从 UI 可达的写入路径。 |
 | SQLite 补列 | [db.py](../backend/app/db.py#L43) | 仍是硬编码列名字典 + f-string，未引入外部输入。 | 无新增风险。 |

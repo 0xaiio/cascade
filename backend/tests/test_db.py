@@ -63,6 +63,26 @@ def test_checkpoint_wal_folds_the_write_ahead_log_back_into_the_database(tmp_pat
     assert busy == 0
 
 
+def test_init_db_adds_columns_that_existing_databases_are_missing(tmp_path: Path) -> None:
+    """补列是**追加式**的：`duration` 是表建出来之后才加的，老库不会自己长出来。
+
+    这里断言的正是 `_ensure_columns` 的登记项 —— 少登记一个，老库升级后
+    `SELECT` 会直接报 no such column，而不是退化成「时长未知」。
+    """
+    settings = AppSettings(
+        data_dir=tmp_path / "data",
+        download_dir=tmp_path / "downloads",
+        database_path=tmp_path / "data" / "app.sqlite3",
+    )
+    engine = create_app_engine(settings)
+    init_db(engine)
+
+    with engine.begin() as connection:
+        columns = {row[1] for row in connection.execute(text("PRAGMA table_info(jobitem)"))}
+
+    assert "duration" in columns
+
+
 class _FailingEngine:
     def begin(self):
         raise RuntimeError("database is locked")

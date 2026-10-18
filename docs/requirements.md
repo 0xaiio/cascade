@@ -24,16 +24,16 @@
 | FR-2 | 支持选择 playlist 子项并创建下载任务。 | [`selected_entries`](../backend/app/api_support.py#L63)、[`CreateJobRequest`](../backend/app/schemas.py#L82) |
 | FR-3 | 支持视频+字幕、仅视频、仅字幕三种模式。 | [`DownloadMode`](../backend/app/schemas.py#L7) |
 | FR-4 | 用户只选择清晰度，默认 `1440p`；后端自动选择具体格式。 | [`format_selector`](../backend/app/ytdlp_formats.py#L9) |
-| FR-5 | 下载前预检测计划分辨率、格式和视频大小，任务中心展示实际值。 | [`prepare_download`](../backend/app/ytdlp_service.py#L387)、[`_apply_download_preparation`](../backend/app/job_manager.py#L954) |
+| FR-5 | 下载前预检测计划分辨率、格式和视频大小，任务中心展示实际值。 | [`prepare_download`](../backend/app/ytdlp_service.py#L391)、[`_apply_download_preparation`](../backend/app/job_manager.py#L954) |
 | FR-6 | 支持明确的分辨率降级原因和重启建议。 | [`fallback_policy.py`](../backend/app/fallback_policy.py#L4)、[`resolution_decisions.py`](../backend/app/resolution_decisions.py#L87) |
-| FR-7 | 支持任务暂停、重启、删除、playlist 子视频删除、批量操作，以及本地播放/打开文件夹。 | [`batch_job_action`](../backend/app/routers/jobs.py#L79)、[`system_open.py`](../backend/app/system_open.py) |
+| FR-7 | 支持任务暂停、重启、删除、playlist 子视频删除、批量操作，以及本地播放/打开文件夹。 | [`batch_job_action`](../backend/app/routers/jobs.py#L80)、[`system_open.py`](../backend/app/system_open.py) |
 | FR-8 | 默认请求人工字幕和自动字幕；缺少某类字幕时 fallback 到另一类可用字幕，并显示来源与格式。 | [`DownloadOptions`](../backend/app/schemas.py#L63)、[`DownloadOptionsPanel`](../frontend/src/components/DownloadOptionsPanel.tsx#L26) |
 | FR-9 | 支持 cookies 上传、浏览器导入和清除。 | [`/api/cookies`](../backend/app/routers/cookies.py#L60)、[`BrowserCookieImporter`](../backend/app/browser_cookies.py#L67) |
-| FR-10 | 支持并发、限速、重试次数和单视频并发下载数（aria2c）作为运行时设置即时保存；限速/重试变更会让当前视频断点续传重启以应用新参数。 | [`SettingsUpdate`](../backend/app/schemas.py#L199)、[`set_runtime_download_defaults`](../backend/app/job_manager.py#L90) |
+| FR-10 | 支持并发、限速、重试次数和单视频并发下载数（aria2c）作为运行时设置即时保存；限速/重试变更会让当前视频断点续传重启以应用新参数。 | [`SettingsUpdate`](../backend/app/schemas.py#L201)、[`set_runtime_download_defaults`](../backend/app/job_manager.py#L90) |
 | FR-11 | 支持 SSE 事件流和任务轮询。 | [`/api/events`](../backend/app/routers/events.py#L15)、[`EventBroker`](../backend/app/events.py#L7) |
-| FR-12 | 支持诊断依赖状态、cookies 状态和稳定性参数。 | [`/api/diagnostics`](../backend/app/routers/diagnostics.py#L29)、[`get_dependency_status`](../backend/app/ytdlp_service.py#L288) |
-| FR-13 | 下载停滞可观测：在可配置窗口内没有新增字节时主动判为失败，而不是永久 `running`。 | [`StallGuard`](../backend/app/stall_guard.py#L32)、[`_download_once`](../backend/app/ytdlp_service.py#L582) |
-| FR-14 | 媒体流失败时在错误文案中带上当前 cookies 状态，便于区分「未配置 cookies」与网络问题。 | [`_media_stream_failure_message`](../backend/app/job_manager.py#L1041) |
+| FR-12 | 支持诊断依赖状态、cookies 状态和稳定性参数。 | [`/api/diagnostics`](../backend/app/routers/diagnostics.py#L29)、[`get_dependency_status`](../backend/app/ytdlp_service.py#L292) |
+| FR-13 | 下载停滞可观测：在可配置窗口内没有新增字节时主动判为失败，而不是永久 `running`。 | [`StallGuard`](../backend/app/stall_guard.py#L32)、[`_download_once`](../backend/app/ytdlp_service.py#L587) |
+| FR-14 | 媒体流失败时在错误文案中带上当前 cookies 状态，便于区分「未配置 cookies」与网络问题。 | [`_media_stream_failure_message`](../backend/app/job_manager.py#L1047) |
 | FR-15 | 代理可作为配置项读写（留空=自动、`direct`=强制直连、其余按 URL），并能**真的发一次请求**验证连通性，返回状态码、耗时、字节数与原始异常。 | [`proxy.py`](../backend/app/proxy.py#L169)、[`POST /api/proxy/test`](../backend/app/routers/diagnostics.py#L65) |
 | FR-16 | 已配置的 cookies 可被校验：离线检查格式/域名/鉴权项/过期，可选联网确认登录态，输出「未配置 / 未登录 / 已登录」三档结论与证据。 | [`cookie_health.py`](../backend/app/cookie_health.py#L234)、[`POST /api/cookies/verify`](../backend/app/routers/cookies.py#L24) |
 | FR-17 | 依赖与 JS 运行时状态可在不重启应用的前提下重新探测，并把结论回显到界面。 | [`POST /api/diagnostics/runtime`](../backend/app/routers/diagnostics.py#L52)、[`runtime_env.py`](../backend/app/runtime_env.py#L58) |
@@ -44,7 +44,7 @@
 | FR-22 | 提供 B站 环境体检（投稿工具是否可用、ffmpeg、登录态、缺项清单），每条结论文案必须自带「下一步」；并支持修复投稿工具、扫码登录、导入已有登录文件三种前置动作。 | [`bili_status`](../backend/app/routers/bilibili.py#L67)、[`BiliLoginSection`](../frontend/src/components/BiliLoginSection.tsx#L29) |
 | FR-23 | 投稿命令返回成功**不等于**已发布：必须回读账号稿件列表对账；对不上的记录进入「待核对」而非「已发布」或「失败」，且两者的推荐动作不同。 | [`find_archive`](../backend/app/bili_api.py#L124)、[`UPLOAD_UNVERIFIED`](../backend/app/bili_policy.py#L267) |
 | FR-24 | 任务行与条目行各有 B站 上传图标，状态由**后端**按该任务的全部记录聚合出一档徽标（未上传/上传中/已上传/待核对/部分失败/失败），前端不自行推导。 | [`derive_badge`](../backend/app/bili_read_model.py#L60)、[`BiliUploadButton`](../frontend/src/components/BiliUploadButton.tsx#L19) |
-| FR-25 | 失败与待核对可单条重试，动作按终态三选一：重新投稿 / **只**重新核对（不重投）/ 什么都不做；合集归集失败可单独重试，且**不会重复建合集**。 | [`BiliRetryRead`](../backend/app/schemas.py#L559)、[`bili_retry_season`](../backend/app/routers/bilibili.py#L311) |
+| FR-25 | 失败与待核对可单条重试，动作按终态三选一：重新投稿 / **只**重新核对（不重投）/ 什么都不做；合集归集失败可单独重试，且**不会重复建合集**。 | [`BiliRetryRead`](../backend/app/schemas.py#L561)、[`bili_retry_season`](../backend/app/routers/bilibili.py#L311) |
 | FR-26 | 投稿可自动生成封面（ffmpeg 抽帧）并自动发送、置顶一条评论；评论发送失败不影响稿件本身的状态。 | [`extract_cover_frame`](../backend/app/bili_bin.py#L288)、[`send_and_top_comment`](../backend/app/bili_api.py#L388) |
 | FR-27 | B站 凭据只以文件形式保存，API 与界面**只回传名字与计数**（不返回值、不返回掩码前缀）；登录文件被 git 跟踪时单独作为一条阻断项报出。 | [`cookie_summary`](../backend/app/bili_auth.py#L379)、[`is_cookie_tracked_by_git`](../backend/app/bili_auth.py#L390) |
 

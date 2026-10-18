@@ -77,6 +77,8 @@ export const jobPayload: Job = {
       resolution_fallback: null,
       downloaded_bytes: 34,
       total_bytes: 100,
+      // 3 分 05 秒：界面上渲染成「时长 0:03:05」（时:分:秒，时位不补零）。
+      duration: 185,
       speed: 2048,
       eta: 10,
       output_path: null,
@@ -118,6 +120,7 @@ export const playlistJobPayload: Job = {
       progress: 50,
       downloaded_bytes: 5_242_880,
       total_bytes: 10_485_760,
+      duration: 600,
       speed: 2048,
       eta: 20,
       elapsed_seconds: 42,
@@ -136,6 +139,8 @@ export const playlistJobPayload: Job = {
       status: "queued",
       downloaded_bytes: null,
       total_bytes: null,
+      // 刻意没有时长：任务行应折成「已知 0:10:00」，条目行应显示「时长 未知」。
+      duration: null,
       speed: null,
       eta: null,
       elapsed_seconds: 0,

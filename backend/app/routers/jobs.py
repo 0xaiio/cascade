@@ -62,6 +62,7 @@ async def create_job(request: CreateJobRequest, session: SessionDep, ctx: Contex
                 source_url=entry.url,
                 title=entry.title,
                 index=entry.index,
+                duration=entry.duration,
             )
         )
     session.commit()

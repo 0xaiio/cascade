@@ -7,6 +7,7 @@ import {
   formatDateTime,
   formatFileSize,
   formatItemResolution,
+  formatMediaDuration,
   formatPercent
 } from "../formatting";
 import { resolutionFallbackRestartLabel } from "../quality";
@@ -321,6 +322,7 @@ export function JobQueue({
               <span>分辨率 {job.actual_resolution ?? "检测中"}</span>
               <span>格式 {job.actual_format ?? "检测中"}</span>
               <span>大小 {formatJobVideoSize(job)}</span>
+              <span>时长 {formatJobDuration(job)}</span>
               <span>已用 {formatClock(job.elapsed_seconds)}</span>
               <span>剩余 {formatClock(job.eta)}</span>
               {job.speed ? <span>{formatBytesPerSecond(job.speed)}</span> : <span>-- KB/s</span>}
@@ -487,6 +489,7 @@ export function JobQueue({
                     <div className="item-metrics">
                       <span>{formatPercent(item.progress)}</span>
                       <span>大小 {formatVideoSize(item.total_bytes)}</span>
+                      <span>时长 {formatMediaDuration(item.duration)}</span>
                       <span>已下载 {formatVideoSize(item.downloaded_bytes)}</span>
                       <span>分辨率 {formatItemResolution(item)}</span>
                       <span>格式 {item.actual_format ?? "检测中"}</span>
@@ -528,6 +531,27 @@ function localActionErrorMessage(error: unknown) {
 
 function formatVideoSize(bytes: number | null | undefined): string {
   return bytes == null ? "未知" : formatFileSize(bytes);
+}
+
+/**
+ * 任务行的时长。**与「大小」同一套折法**：单视频任务就是那条视频的时长；
+ * 合集任务按子视频求和，有子视频还没有时长时前缀「已知」。
+ * 两处折法不同会让「大小 已知 2.1 GB · 时长 3:20」这种自相矛盾的一行出现。
+ */
+function formatJobDuration(job: Job): string {
+  if (job.items.length === 1) {
+    return formatMediaDuration(job.items[0]?.duration);
+  }
+  const knownDurations = job.items
+    .map((item) => item.duration)
+    .filter((seconds): seconds is number => typeof seconds === "number" && seconds > 0);
+  if (!knownDurations.length) {
+    return "未知";
+  }
+  const totalDuration = knownDurations.reduce((total, seconds) => total + seconds, 0);
+  return knownDurations.length === job.items.length
+    ? formatMediaDuration(totalDuration)
+    : `已知 ${formatMediaDuration(totalDuration)}`;
 }
 
 function formatJobVideoSize(job: Job): string {

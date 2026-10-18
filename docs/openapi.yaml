@@ -2215,6 +2215,13 @@ components:
           description: Planned size from pre-flight detection, then corrected by
             progress payloads and kept after completion.
           example: 112779969
+        duration:
+          type: [number, "null"]
+          description: >-
+            Video length in seconds, written when the job is created from the
+            analysis result. Null when the platform did not report one; restarting
+            an older job backfills it from the pre-flight metadata.
+          example: 3725.0
         speed:
           type: [number, "null"]
           description: Instantaneous bytes per second while running; average speed

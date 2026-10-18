@@ -27,6 +27,7 @@ from .stall_guard import DownloadStalled, StallGuard
 from .ytdlp_formats import (
     DEFAULT_MIN_AUTO_FALLBACK_HEIGHT,
     actual_format_from_info_dict,
+    duration_from_info_dict,
     filesize_from_info_dict,
     format_selector,
     has_resolution_at_or_above,
@@ -176,6 +177,9 @@ class DownloadPreparation:
     height: int | None = None
     actual_format: str | None = None
     filesize: int | None = None
+    # 时长（秒）顺带从同一份 `info` 里取出来：预检反正要取一次元数据，
+    # 旧任务（建库时还没记时长）重启一次就能补上，不必为了时长再发一次请求。
+    duration: float | None = None
 
 
 class YtDlpService:
@@ -436,6 +440,7 @@ class YtDlpService:
             height=resolution[1] if resolution else None,
             actual_format=actual_format,
             filesize=filesize,
+            duration=duration_from_info_dict(info),
         )
 
     def build_download_options(

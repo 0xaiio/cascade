@@ -888,6 +888,18 @@ def test_filesize_sums_requested_formats_for_prepared_download(tmp_path: Path) -
     assert filesize == 15_000
 
 
+def test_duration_is_read_from_info_dict_and_unusable_values_mean_unknown() -> None:
+    duration = ytdlp_service.duration_from_info_dict
+
+    assert duration({"duration": 3725.4}) == 3725.4
+    assert duration({"duration": 185}) == 185.0
+    # 直播/动态时长的条目没有 `duration`，或者给了 0：一律当「没有时长」，
+    # 界面宁可显示「时长 未知」，也不要拿 0 秒显示成 `0:00:00`。
+    assert duration({}) is None
+    assert duration({"duration": 0}) is None
+    assert duration({"duration": "unknown"}) is None
+
+
 def test_suggests_highest_available_resolution_below_requested(tmp_path: Path) -> None:
     service = YtDlpService(download_dir=tmp_path)
 

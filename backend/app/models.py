@@ -56,6 +56,10 @@ class JobItem(SQLModel, table=True):
     source_url: str
     title: str
     index: int = 1
+    # 视频时长（秒）。**建任务时就从解析结果写进去**（`POST /api/jobs` 的条目已经带时长），
+    # 因此任务一进队列就能显示时长，不必等预检或下载开始 —— 时长是视频的固有属性，
+    # 不像大小/分辨率那样要等选出格式才知道。
+    duration: Optional[float] = None
     status: str = Field(default=JobStatus.queued.value, index=True)
     progress: float = 0.0
     downloaded_bytes: Optional[int] = None

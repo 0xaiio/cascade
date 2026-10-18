@@ -117,6 +117,8 @@ class JobItemRead(BaseModel):
     progress: float
     downloaded_bytes: int | None = None
     total_bytes: int | None = None
+    # 视频时长（秒）。建任务时从解析结果写入，供任务中心显示「时长」；平台没给时长时为 None。
+    duration: float | None = None
     speed: float | None = None
     eta: int | None = None
     output_path: str | None = None

@@ -960,6 +960,11 @@ class JobManager:
         filesize = getattr(preparation, "filesize", None)
         if filesize is not None and not item.total_bytes:
             item.total_bytes = int(filesize)
+        # 时长只在**缺失时**补：建任务时已经从解析结果写过，那一份是权威值；
+        # 这里补的是「补列之前建的旧任务」——它们重启一次就能拿到时长。
+        duration = getattr(preparation, "duration", None)
+        if duration is not None and item.duration is None:
+            item.duration = float(duration)
         item.updated_at = utc_now()
         session.add(item)
         session.commit()
@@ -972,6 +977,7 @@ class JobManager:
                 "actual_height": item.actual_height,
                 "actual_format": item.actual_format,
                 "total_bytes": item.total_bytes,
+                "duration": item.duration,
             }
         )
 

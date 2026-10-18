@@ -802,6 +802,59 @@ class EmptyAssertionFromHttp403Service(FakeYtDlpService):
             raise AssertionError() from exc
 
 
+class DurationAwareYtDlpService(FakeYtDlpService):
+    """解析结果带时长的替身（单视频 185 秒；合集 600 + 3725 秒）。
+
+    两条路径都要被它覆盖：
+    - **建任务**：`POST /api/jobs` 把条目的时长写进 `JobItem.duration`，
+      所以任务一进队列就有时长，不必等预检；
+    - **重启旧任务**：`prepare_download` 也回时长，补列之前建的那批任务重启一次就能补上。
+    """
+
+    SINGLE_DURATION = 185.0
+
+    def extract_metadata(self, url, cookies_path=None):
+        if "playlist" in url:
+            return AnalyzeResponse(
+                url=url,
+                title="Batch",
+                is_playlist=True,
+                duration=4325.0,
+                entries=[
+                    VideoEntry(index=1, id="one", title="One", url="https://youtu.be/one", duration=600.0),
+                    VideoEntry(index=2, id="two", title="Two", url="https://youtu.be/two", duration=3725.0),
+                ],
+                formats=[FormatOption(format_id="22", label="720p mp4", height=720, ext="mp4")],
+                subtitles=[],
+                automatic_subtitles=[],
+                ffmpeg={"ffmpeg": True, "ffprobe": True},
+            )
+        return AnalyzeResponse(
+            url=url,
+            title="Single",
+            is_playlist=False,
+            duration=self.SINGLE_DURATION,
+            entries=[],
+            formats=[FormatOption(format_id="22", label="720p mp4", height=720, ext="mp4")],
+            subtitles=[],
+            automatic_subtitles=[],
+            ffmpeg={"ffmpeg": True, "ffprobe": True},
+        )
+
+    def prepare_download(self, url, options, cookies_path=None):
+        return SimpleNamespace(
+            is_selectable=True,
+            width=1280,
+            height=720,
+            actual_format="mp4 · avc1 + mp4a",
+            filesize=None,
+            duration=self.SINGLE_DURATION,
+        )
+
+    def download(self, url, options, progress_hook, should_cancel, cookies_path=None, download_dir=None):
+        progress_hook({"status": "finished", "filename": f"{url}.mp4"})
+
+
 class MediaStreamBlockedUntilLowerResolutionService(FakeYtDlpService):
     def __init__(self):
         super().__init__()

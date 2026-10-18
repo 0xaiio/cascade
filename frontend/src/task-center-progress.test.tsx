@@ -55,6 +55,19 @@ describe("App · 任务中心：进度与详情呈现", () => {
     expect(screen.getAllByText("格式 mp4 · avc1 + mp4a").length).toBeGreaterThan(0);
   });
 
+  test("shows duration next to the size on task rows and item rows", async () => {
+    render(<App />);
+
+    expect(await screen.findByText("Playlist batch")).toBeInTheDocument();
+    // 单视频任务：任务行就是那条视频本体（3 分 05 秒 → 时:分:秒，时位不补零）。
+    expect(screen.getAllByText("时长 0:03:05")).toHaveLength(2);
+    // 合集：任务行按子视频求和；有一条还不知道时长，所以前缀「已知」——与「大小」同一套折法，
+    // 否则同一行会出现「大小 已知 2.1 GB · 时长 10:00」这种自相矛盾的说法。
+    expect(screen.getByText("时长 已知 0:10:00")).toBeInTheDocument();
+    expect(screen.getByText("时长 0:10:00")).toBeInTheDocument();
+    expect(screen.getByText("时长 未知")).toBeInTheDocument();
+  });
+
   test("keeps average speed visible after a job completes", async () => {
     mockState.jobs = [
       {

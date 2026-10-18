@@ -87,6 +87,8 @@ export interface JobItem {
   progress: number;
   downloaded_bytes: number | null;
   total_bytes: number | null;
+  /** 视频时长（秒）。建任务时从解析结果写入；平台没给时长时为 `null`（界面显示「时长 未知」）。 */
+  duration: number | null;
   speed: number | null;
   eta: number | null;
   output_path: string | null;

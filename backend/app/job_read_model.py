@@ -68,6 +68,7 @@ def _read_job_item(item: JobItem, job_download_dir: str | None) -> JobItemRead:
         progress=item.progress,
         downloaded_bytes=item.downloaded_bytes,
         total_bytes=item.total_bytes,
+        duration=item.duration,
         speed=item.speed,
         eta=item.eta,
         output_path=_project_output_path(item, job_download_dir),

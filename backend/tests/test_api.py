@@ -25,6 +25,7 @@ from fakes import (
     DownloadBotChallengeYtDlpService,
     DownloadHttp403FallbackResolutionService,
     DownloadHttp403ThenAnti403SuccessService,
+    DurationAwareYtDlpService,
     EmptyAssertionFromHttp403Service,
     FakeYtDlpService,
     HappyPathExtractCountingYtDlpService,
@@ -933,6 +934,7 @@ def test_job_read_includes_realtime_progress_fields(tmp_path: Path) -> None:
         "actual_width",
         "actual_height",
         "actual_format",
+        "duration",
     ]:
         assert field in payload["items"][0]
     assert payload["actual_resolution"] == "1920x1080"
@@ -945,6 +947,38 @@ def test_job_read_includes_realtime_progress_fields(tmp_path: Path) -> None:
     assert payload["items"][0]["actual_width"] == 1920
     assert payload["items"][0]["actual_height"] == 1080
     assert payload["items"][0]["actual_format"] == "mp4 · avc1 + mp4a"
+
+
+def test_created_job_writes_duration_from_analysis(tmp_path: Path) -> None:
+    """时长在**建任务时**就落库：任务一进队列就能显示，不必等预检或下载开始。"""
+    client = make_client(tmp_path, service=DurationAwareYtDlpService())
+
+    response = client.post("/api/jobs", json={"url": "https://youtu.be/duration"})
+
+    assert response.status_code == 201
+    assert response.json()["items"][0]["duration"] == 185.0
+
+
+def test_created_playlist_job_writes_each_entry_duration(tmp_path: Path) -> None:
+    client = make_client(tmp_path, service=DurationAwareYtDlpService())
+
+    response = client.post("/api/jobs", json={"url": "https://youtube.com/playlist?list=duration"})
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert [item["duration"] for item in payload["items"]] == [600.0, 3725.0]
+
+
+def test_restarting_a_job_without_duration_backfills_it(tmp_path: Path) -> None:
+    """补列之前建的任务没有时长。**重启一次**就该补上 —— 预检反正要取一次元数据。"""
+    seed_job(tmp_path, "job-no-duration")
+
+    with TestClient(create_app(settings=make_settings(tmp_path), ytdlp_service=DurationAwareYtDlpService())) as client:
+        response = client.post("/api/jobs/job-no-duration/restart")
+        assert response.status_code == 200
+        payload = wait_for_job_status(client, "job-no-duration", "succeeded")
+
+    assert payload["items"][0]["duration"] == 185.0
 
 
 def test_finished_download_keeps_average_speed(tmp_path: Path, monkeypatch) -> None:

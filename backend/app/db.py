@@ -61,6 +61,10 @@ def _ensure_columns(engine: Engine) -> None:
             "download_dir": "TEXT",
         },
         "jobitem": {
+            # 视频时长（秒）。补列时库里已有的行拿不到时长（那时没记），留 NULL 即可：
+            # 界面显示「时长 未知」，而**重启这些旧任务**会在预检时补上（见
+            # `JobManager._apply_download_preparation`）。
+            "duration": "FLOAT",
             "started_at": "DATETIME",
             "finished_at": "DATETIME",
             "actual_width": "INTEGER",

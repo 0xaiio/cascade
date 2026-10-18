@@ -94,13 +94,14 @@ YouTube Downloader 是本机单用户工具。前端提供链接解析、下载�
 
 ## 任务中心
 
-任务中心展示任务级和子视频级状态。后端 API 返回的字段见 [JobRead](../backend/app/schemas.py#L138) 和 [JobItemRead](../backend/app/schemas.py#L110)，前端展示组件见 [JobQueue](../frontend/src/components/JobQueue.tsx#L21)。
+任务中心展示任务级和子视频级状态。后端 API 返回的字段见 [JobRead](../backend/app/schemas.py#L140) 和 [JobItemRead](../backend/app/schemas.py#L110)，前端展示组件见 [JobQueue](../frontend/src/components/JobQueue.tsx#L22)。
 Playlist 展开后会用浅色分组背景承载子视频列表，便于区分合集任务行和单个视频任务。
 
 | 信息 | 说明 |
 | --- | --- |
 | 进度 | 运行中显示聚合进度；分离音视频流不会在音频流开始时回退到 0。同一视频的音频合并会紧跟视频流开始，中间不再故意停顿数秒。 |
 | 视频大小 | 下载前预检测到文件大小时即显示计划大小；下载中会随 yt-dlp 进度校准；下载完成后保留最终大小。 |
+| 视频时长 | 跟在「大小」之后，格式为 `时:分:秒`（例如 `1:02:05`），**不到一小时也保留时位**，便于和「已用/剩余」区分。建任务时就从解析结果写入；平台没给时长的视频显示 `未知`。合集任务行显示各子视频时长之和，其中有子视频还没有时长时前缀「已知」（与「大小」同一套折法）。 |
 | 速度 | 运行中显示瞬时速度；结束后保留平均速度。 |
 | 实际分辨率/格式 | 下载前预检测后即写入，完成后再按 yt-dlp payload 或输出文件校准。 |
 | 失败原因 | 单视频失败时直接显示具体错误；playlist 可展开查看每个子视频错误。若错误以「当前 cookies 状态：未配置」开头，说明这是 403 的高风险前置条件，先导入 cookies 再重试。 |
@@ -322,7 +323,7 @@ YouTube 把登录态与出口 IP 绑定。导出 cookies 时走代理 A、下载
 
 默认下载根目录是 `downloads/`，数据库和 cookies 默认在 `data/`，配置默认值见 [AppSettings](../backend/app/config.py#L19)。Playlist 会在下载根目录下创建同名子文件夹；目录选择和保存逻辑见 [select_download_dir](../backend/app/routers/settings.py#L84)。
 
-产物命名模板固定为 `<标题(最多200字节)> [<YouTube id>].<扩展名>`，见 [build_download_options](../backend/app/ytdlp_service.py#L441)。因此即使数据库里的 `output_path` 丢失，后端仍能按文件名中的 id 找回同名视频与 sidecar。
+产物命名模板固定为 `<标题(最多200字节)> [<YouTube id>].<扩展名>`，见 [build_download_options](../backend/app/ytdlp_service.py#L446)。因此即使数据库里的 `output_path` 丢失，后端仍能按文件名中的 id 找回同名视频与 sidecar。
 
 ## 常见问题入口
 

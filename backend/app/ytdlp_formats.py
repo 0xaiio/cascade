@@ -112,6 +112,15 @@ def filesize_from_info_dict(info: dict[str, Any]) -> int | None:
     return positive_int(info.get("filesize")) or positive_int(info.get("filesize_approx"))
 
 
+def duration_from_info_dict(info: dict[str, Any]) -> float | None:
+    """视频时长（秒）。
+
+    yt-dlp 给的是 `duration`（直播、动态时长的条目会缺失或非正数），一律按「没有时长」处理 ——
+    界面上宁可显示「时长 未知」，也不要拿一个 0 秒去显示成 `0:00:00`。
+    """
+    return positive_float(info.get("duration"))
+
+
 def resolution_from_mapping(value: dict[str, Any]) -> tuple[int, int] | None:
     width = positive_int(value.get("width"))
     height = positive_int(value.get("height"))
@@ -125,6 +134,16 @@ def positive_int(value: Any) -> int | None:
         return None
     try:
         parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def positive_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
     except (TypeError, ValueError):
         return None
     return parsed if parsed > 0 else None
