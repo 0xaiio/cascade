@@ -14,8 +14,11 @@ from app.output_paths import (
     discover_output_file_candidates,
     existing_item_folder,
     existing_output_file,
+    find_subtitle_file,
     item_artifact_candidates,
     resolve_existing_output_path,
+    subtitle_candidates,
+    subtitle_language_from_path,
 )
 
 
@@ -142,3 +145,54 @@ def test_existing_item_folder_falls_back_to_discovered_parent(tmp_path: Path) ->
     downloads = tmp_path / "downloads"
     _seed(downloads, ["作品 [abc123].webm"])
     assert existing_item_folder(None, URL, downloads) == downloads
+
+
+# --- 字幕定位 ----------------------------------------------------------------
+
+
+def test_subtitle_candidates_recover_the_language_code(tmp_path: Path) -> None:
+    _seed(tmp_path, ["作品 [abc123].mp4", "作品 [abc123].en.vtt"])
+    found = subtitle_candidates(tmp_path / "作品 [abc123].mp4")
+    assert [code for _path, code in found] == ["en"]
+
+
+def test_subtitle_candidates_survive_brackets_in_the_title(tmp_path: Path) -> None:
+    """标题里带 `[` `]`（本项目自己的命名模板就带）—— `glob` 会把它们当字符类，
+    于是带方括号的标题一个候选都匹配不到。这里必须用 `iterdir()`。"""
+    _seed(tmp_path, ["作品 [abc123].mp4", "作品 [abc123].zh-Hans.srt"])
+    assert [code for _path, code in subtitle_candidates(tmp_path / "作品 [abc123].mp4")] == ["zh-Hans"]
+
+
+def test_subtitle_candidates_ignore_other_sidecars(tmp_path: Path) -> None:
+    _seed(tmp_path, ["作品 [abc123].mp4", "作品 [abc123].info.json", "作品 [abc123].jpg"])
+    assert subtitle_candidates(tmp_path / "作品 [abc123].mp4") == []
+
+
+def test_subtitle_candidates_do_not_bleed_into_a_neighbour(tmp_path: Path) -> None:
+    """前缀匹配必须带上**完整文件名**：`作品 [abc123]2.en.srt` 不是这一条的字幕。"""
+    _seed(tmp_path, ["作品 [abc123].mp4", "作品 [abc123]2.en.srt"])
+    assert subtitle_candidates(tmp_path / "作品 [abc123].mp4") == []
+
+
+def test_find_subtitle_file_prefers_the_requested_family(tmp_path: Path) -> None:
+    """视频被判成中文却挑到英文轨 —— 语言标识会一路错到 B站 上传。"""
+    _seed(tmp_path, ["作品 [abc123].mp4", "作品 [abc123].en.vtt", "作品 [abc123].zh-Hans.vtt"])
+    _path, code = find_subtitle_file(tmp_path / "作品 [abc123].mp4", "zh")
+    assert code == "zh-Hans"
+
+
+def test_find_subtitle_file_ignores_unsupported_languages(tmp_path: Path) -> None:
+    _seed(tmp_path, ["作品 [abc123].mp4", "作品 [abc123].ja.vtt"])
+    assert find_subtitle_file(tmp_path / "作品 [abc123].mp4") is None
+
+
+def test_find_subtitle_file_is_none_without_any_subtitle(tmp_path: Path) -> None:
+    _seed(tmp_path, ["作品 [abc123].mp4"])
+    assert find_subtitle_file(tmp_path / "作品 [abc123].mp4") is None
+
+
+def test_language_code_comes_from_the_last_dot_segment() -> None:
+    """标题里可以有点（`Ep 3.1 [abc].en.vtt`）—— 语言代码永远是最后一个点分段。"""
+    assert subtitle_language_from_path(Path("C++ Weekly - Ep 3.1 [abc].en.vtt")) == "en"
+    assert subtitle_language_from_path(Path("作品 [abc].zh-Hans.srt")) == "zh-Hans"
+    assert subtitle_language_from_path(Path("no-dot-here.vtt")) is None

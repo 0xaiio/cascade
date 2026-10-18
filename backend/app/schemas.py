@@ -129,6 +129,11 @@ class JobItemRead(BaseModel):
     fallback_resolution: str | None = None
     fallback_reason: str | None = None
     resolution_fallback: ResolutionFallback | None = None
+    # 下载到的字幕：**语言族**（`en` / `zh`）与来源（`human` 人工 / `auto` 自动生成 /
+    # `none` 没有可用字幕）。没有字幕结论时两列都是 `None`（与 `none` 区分：
+    # 那是「跑过一次，结论是没有」）。
+    subtitle_language: str | None = None
+    subtitle_source: str | None = None
     error: str | None = None
     created_at: datetime
     updated_at: datetime
@@ -396,6 +401,10 @@ class BiliPrefillItem(BaseModel):
     # 这一条的视频文件是否就绪。合集里任何一条没就绪都会让整批被拒（服务端会给结论），
     # 界面据此在提交前就把它标出来。
     ready: bool = True
+    # 这一条**会不会带字幕**的人话说明（如 `en · 人工`、`无字幕`）。
+    # 由服务端算而不是让前端把 `subtitle_language` / `subtitle_source` 拼一遍：
+    # 拼法（尤其是「没有字幕」怎么说）属于本功能的文案，写两处早晚不一致。
+    subtitle: str = ""
 
 
 class BiliPrefillRead(BaseModel):
@@ -509,6 +518,12 @@ class BiliUploadRead(BaseModel):
     cover_path: str | None = None
     verified_state: str | None = None
     verified_note: str | None = None
+    # CC 字幕这一步的结论（`posted` / `skipped` / `failed`）与平台侧的语言标识。
+    # **它与 `status` 是两件事**：字幕没传上去时 `status` 照样是 `published`，
+    # 界面必须能同时说清「稿件已发布」和「字幕没传上去」，而不是二选一。
+    subtitle_state: str = "skipped"
+    subtitle_lan: str = ""
+    subtitle_message: str = ""
     error: str | None = None
     advice: str | None = None
     attempt: int = 1

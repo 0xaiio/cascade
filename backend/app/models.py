@@ -74,6 +74,17 @@ class JobItem(SQLModel, table=True):
     requested_resolution: Optional[str] = None
     fallback_resolution: Optional[str] = None
     fallback_reason: Optional[str] = None
+    # 本次下载到的那条字幕。**语言记的是族名**（`en` / `zh`）而不是轨的真实代码
+    # （`zh-Hans` / `en-US`）—— 族名是「英文视频下英文字幕」这条规则的判据，也稳定；
+    # 真实代码在上传时从文件名现场取（`output_paths.find_subtitle_file`），
+    # 存两份迟早会对不上。
+    subtitle_language: Optional[str] = None
+    # 来源：`human`（人工/官方上传）/ `auto`（机器生成）/ `none`（没有可用字幕）。
+    # `none` 是**一条结论**而不是「还没跑」—— 判据见 `subtitle_plan.SubtitleOrigin`。
+    subtitle_source: Optional[str] = None
+    # 字幕文件的绝对路径。**它是上传环节的输入**：视频上传成功后要按它找文件，
+    # 不存下来就得在另一次请求里重新按语言猜一次。
+    subtitle_path: Optional[str] = None
     error: Optional[str] = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
@@ -151,6 +162,11 @@ class BiliUpload(SQLModel, table=True):
     cid: Optional[int] = None
     verified_state: Optional[str] = None
     verified_note: Optional[str] = None
+    # CC 字幕这一步的附加结论。**它不参与 `status`**：字幕没传上去不能把已发布的稿件
+    # 说成失败，所以它单独三列，而不是折进 `error`。取值见 `bili_subtitle`。
+    subtitle_state: str = "skipped"
+    subtitle_lan: str = ""
+    subtitle_message: str = ""
     error: Optional[str] = None
     advice: Optional[str] = None
     log_tail: Optional[str] = None

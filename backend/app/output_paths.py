@@ -19,8 +19,13 @@ from pathlib import Path
 import re
 from urllib.parse import parse_qs, urlparse
 
+from .subtitle_plan import is_supported_language, pick_track
+
 
 SIDECAR_SUFFIXES = [".description", ".info.json", ".jpg", ".jpeg", ".png", ".webp", ".srt", ".vtt"]
+# yt-dlp 写出的字幕文件后缀。**只认文本字幕**：`.json` 是元数据，`.ass` 本项目不产出
+# （`subtitle_format` 的值域是 best/srt/vtt），认了反而会把 info.json 之类的邻居捞进来。
+SUBTITLE_SUFFIXES = (".srt", ".vtt")
 MERGED_OUTPUT_SUFFIXES = [".mp4", ".mkv", ".webm"]
 MEDIA_SUFFIXES = [".mp4", ".mkv", ".webm", ".m4v", ".mov"]
 PARTIAL_SUFFIXES = [".part", ".ytdl", ".tmp", ".temp"]
@@ -112,6 +117,68 @@ def existing_item_folder(
         discovered = discover_output_file_candidates(source_url, base_dir)
         resolved = discovered[0] if discovered else None
     return resolved.parent if resolved is not None else None
+
+
+def subtitle_candidates(video_path: Path) -> list[tuple[Path, str]]:
+    """视频旁边的字幕文件，返回 `(路径, 语言代码)`。
+
+    命名是 yt-dlp 定的：`<视频文件名去掉后缀>.<语言代码>.<后缀>`，例如
+    `Title [abc].en.vtt`。这里按「同名前缀 + 字幕后缀」反推出语言代码 ——
+    **不枚举语言**，因为语言代码没有有界集合（`zh-Hans` / `en-US` / `en-orig` …）。
+
+    用 `iterdir()` 而不是 `glob`：标题里常见 `[` `]`（本项目自己的命名模板就带它），
+    `glob` 会把它们当字符类，于是带方括号的标题一个候选都匹配不到。
+    """
+    directory = video_path.parent
+    if not directory.is_dir():
+        return []
+    prefix = f"{video_path.stem}."
+    found: list[tuple[Path, str]] = []
+    for entry in sorted(directory.iterdir(), key=lambda path: path.name.lower()):
+        if not entry.is_file() or not entry.name.startswith(prefix):
+            continue
+        if entry.suffix.lower() not in SUBTITLE_SUFFIXES:
+            continue
+        code = entry.name[len(prefix) : -len(entry.suffix)]
+        # 空代码 = 文件就叫 `X..vtt`，不是「某语言的字幕」。
+        if code:
+            found.append((entry, code))
+    return found
+
+
+def subtitle_language_from_path(subtitle_path: Path) -> str | None:
+    """从字幕文件名里取回语言代码。**`subtitle_candidates` 的逆运算。**
+
+    命名是 `<视频名>.<语言代码>.<后缀>`，语言代码永远是**最后一个点分段** ——
+    即使视频标题里带点（`Ep 3.1 [abc].en.vtt`）也成立。
+    """
+    stem = Path(subtitle_path).stem
+    if "." not in stem:
+        return None
+    code = stem.rsplit(".", 1)[-1]
+    return code or None
+
+
+def find_subtitle_file(video_path: Path, family: str | None = None) -> tuple[Path, str] | None:
+    """挑一条**中英**字幕，返回 `(路径, 语言代码)`；没有返回 `None`。
+
+    `family` 给了就只在该族里挑（挑法与下载计划同一套偏好，见
+    `subtitle_plan.pick_track`）—— 否则「视频被判成中文却挑到一条英文轨」会一路带到
+    B站 上传，语言标识就错了。没给 `family` 时按文件名的字典序取第一条，
+    保证同一份目录永远同一个结论。
+
+    **非中英语种一律跳过**：本项目只处理英文与中文字幕。
+    """
+    supported = [
+        (path, code) for path, code in subtitle_candidates(video_path) if is_supported_language(code)
+    ]
+    if not supported:
+        return None
+    if family:
+        picked = pick_track([code for _path, code in supported], family)
+        if picked:
+            return next((path, code) for path, code in supported if code == picked)
+    return supported[0]
 
 
 def source_video_id(source_url: str) -> str | None:

@@ -489,6 +489,7 @@ export function BiliUploadDialog({
                       <th>序号</th>
                       <th>原视频</th>
                       <th>将提交的标题</th>
+                      <th>字幕</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -500,6 +501,9 @@ export function BiliUploadDialog({
                           {item.ready ? null : <span className="bili-inline-warn">还没下载好</span>}
                         </td>
                         <td>{previewTitle(item)}</td>
+                        {/* 文案由服务端给（`BiliPrefillItem.subtitle`）：前端拼一遍就会出现
+                            「界面说自动生成、后端写 ASR」这种两套说法。空串 = 还没有结论。 */}
+                        <td>{item.subtitle || "—"}</td>
                       </tr>
                     ))}
                   </tbody>

@@ -74,12 +74,23 @@ def _ensure_columns(engine: Engine) -> None:
             "requested_resolution": "TEXT",
             "fallback_resolution": "TEXT",
             "fallback_reason": "TEXT",
+            # 字幕下载结论。补列时库里已有的行拿不到（那时没记），留 NULL 即可：
+            # 界面显示「无字幕」，而**重启这些旧任务**会在预检时补上。
+            "subtitle_language": "TEXT",
+            "subtitle_source": "TEXT",
+            "subtitle_path": "TEXT",
         },
         "bili_upload": {
             "make_cover": "BOOLEAN DEFAULT 1",
             "comment": "TEXT DEFAULT ''",
             "copyright": "TEXT DEFAULT '1'",
             "source": "TEXT DEFAULT ''",
+            # CC 字幕的附加结论。补列时库里已有的行按 `skipped` 处理 ——
+            # 那是改动之前的实际行为（那时根本没有字幕这一步），
+            # 标成 `failed` 会让一批老稿件凭空多出一个失败结论。
+            "subtitle_state": "TEXT DEFAULT 'skipped'",
+            "subtitle_lan": "TEXT DEFAULT ''",
+            "subtitle_message": "TEXT DEFAULT ''",
         },
     }
     with engine.begin() as connection:

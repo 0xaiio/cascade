@@ -1,5 +1,8 @@
 export type DownloadMode = "video_subtitles" | "video_only" | "subtitles_only";
+/** 下载选项里的字幕**来源偏好**。 */
 export type SubtitleSource = "human" | "auto" | "both";
+/** 一条字幕**实际**的来源结论。与 `SubtitleSource` 不是一回事：那是「想下哪一类」，这是「下到的是哪一类」。 */
+export type SubtitleOrigin = "human" | "auto" | "none";
 export type SubtitleFormat = "best" | "srt" | "vtt";
 export type JobBatchAction = "pause" | "restart" | "delete";
 
@@ -99,6 +102,13 @@ export interface JobItem {
   fallback_resolution: string | null;
   fallback_reason: string | null;
   resolution_fallback: ResolutionFallback | null;
+  /**
+   * 下载到的字幕的语言族（`"en"` / `"zh"`）与来源（`"human"` 人工 / `"auto"` 自动生成 /
+   * `"none"` 没有可用字幕）。**`null` 表示还没有字幕结论**（任务刚建、还没跑完），
+   * 与 `subtitle_source === "none"`（跑过一次，结论是没有）不是一回事。
+   */
+  subtitle_language: string | null;
+  subtitle_source: SubtitleOrigin | null;
   error: string | null;
   created_at: string;
   updated_at: string;
@@ -364,6 +374,8 @@ export interface BiliPrefillItem {
   desc: string;
   tags: string;
   ready: boolean;
+  /** 这一条会不会带字幕（如 `en · 人工` / `无字幕`）。空串 = 还没有字幕结论。文案由服务端给。 */
+  subtitle: string;
 }
 
 export interface BiliPrefill {
@@ -416,6 +428,13 @@ export interface BiliUpload {
   cover_path: string | null;
   verified_state: string | null;
   verified_note: string | null;
+  /**
+   * CC 字幕这一步的结论。**它与 `status` 是两件事**：字幕没传上去时 `status` 照样是
+   * `published`，界面要能同时说清这两件事，而不是二选一。
+   */
+  subtitle_state: "posted" | "skipped" | "failed";
+  subtitle_lan: string;
+  subtitle_message: string;
   error: string | null;
   advice: string | null;
   attempt: number;

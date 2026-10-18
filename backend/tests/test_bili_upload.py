@@ -168,6 +168,120 @@ def test_run_single_streams_progress_monotonically(tmp_path):
     assert seen == [pytest.approx(0.20), pytest.approx(0.60), pytest.approx(0.95)]
 
 
+# ================================================================ CC 字幕
+def _subtitle(tmp_path: Path, name: str = "a.en.srt") -> Path:
+    path = tmp_path / name
+    path.write_text(
+        "1\n00:00:01,000 --> 00:00:03,000\nHello\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_run_single_uploads_the_downloaded_subtitle(tmp_path):
+    """视频上传成功后，字幕要一并提交，且挂在**分P**（`oid` = cid）上。"""
+    transport = FakeBiliTransport(archives=[archive(aid=111, bvid="BV1xx", state=0)])
+    video = write_video(tmp_path / "a.mp4")
+    result = run_single(
+        make_context(transport, runner=command_runner(), tmp_path=tmp_path),
+        UploadTarget(1, TITLE, video, subtitle_path=_subtitle(tmp_path), subtitle_language="en"),
+        single_meta(),
+    )
+    assert result.status == BiliUploadStatus.published.value
+    assert result.subtitle_state == "posted"
+    assert result.subtitle_lan == "en"
+    assert transport.called("/x/v2/dm/subtitle/draft/save") == 1
+    form = transport.subtitles[0]
+    assert form["oid"] == 7001  # cid，不是 aid
+    assert form["aid"] == 111
+    assert form["bvid"] == "BV1xx"
+
+
+def test_run_single_maps_the_language_onto_the_platform_whitelist(tmp_path):
+    """`zh-Hans` → `zh`。平台拒收 `zh-CN` / `en-US`（实测 `79011 不合法的语言`）。"""
+    transport = FakeBiliTransport(archives=[archive()])
+    video = write_video(tmp_path / "a.mp4")
+    result = run_single(
+        make_context(transport, runner=command_runner(), tmp_path=tmp_path),
+        UploadTarget(1, TITLE, video, subtitle_path=_subtitle(tmp_path, "a.zh-Hans.srt"), subtitle_language="zh-Hans"),
+        single_meta(),
+    )
+    assert result.subtitle_lan == "zh"
+    assert transport.subtitles[0]["lan"] == "zh"
+
+
+def test_failed_subtitle_never_turns_a_published_video_into_a_failure(tmp_path):
+    """字幕是附加物：它失败时**稿件状态必须照旧是已发布**，只有结论被记下来。"""
+    transport = FakeBiliTransport(
+        archives=[archive(aid=111, bvid="BV1xx", state=0)], subtitle_code=79011, subtitle_message="不合法的语言"
+    )
+    video = write_video(tmp_path / "a.mp4")
+    result = run_single(
+        make_context(transport, runner=command_runner(), tmp_path=tmp_path),
+        UploadTarget(1, TITLE, video, subtitle_path=_subtitle(tmp_path), subtitle_language="en"),
+        single_meta(),
+    )
+    assert result.status == BiliUploadStatus.published.value
+    assert result.ok is True
+    assert result.subtitle_state == "failed"
+    assert "79011" in result.subtitle_message
+
+
+def test_without_a_subtitle_the_step_is_skipped_not_failed(tmp_path):
+    """下载阶段就判成「没有可用字幕」时，只跳过字幕，视频流程照常完成。"""
+    transport = FakeBiliTransport(archives=[archive(aid=111, bvid="BV1xx", state=0)])
+    video = write_video(tmp_path / "a.mp4")
+    result = run_single(
+        make_context(transport, runner=command_runner(), tmp_path=tmp_path),
+        UploadTarget(1, TITLE, video),
+        single_meta(),
+    )
+    assert result.status == BiliUploadStatus.published.value
+    assert result.subtitle_state == "skipped"
+    assert transport.called("/x/v2/dm/subtitle/draft/save") == 0
+
+
+def test_subtitle_is_skipped_when_the_video_never_got_verified(tmp_path):
+    """未核实的稿件连存不存在都不知道，拿不到 aid/cid，字幕无处可挂。"""
+    transport = FakeBiliTransport(archives=[])
+    video = write_video(tmp_path / "a.mp4")
+    result = run_single(
+        make_context(transport, runner=command_runner(), tmp_path=tmp_path),
+        UploadTarget(1, TITLE, video, subtitle_path=_subtitle(tmp_path), subtitle_language="en"),
+        single_meta(),
+    )
+    assert result.status == BiliUploadStatus.unverified.value
+    assert result.subtitle_state == "skipped"
+    assert transport.called("/x/v2/dm/subtitle/draft/save") == 0
+
+
+def test_subtitle_is_skipped_when_the_file_is_gone(tmp_path):
+    """磁盘上的东西随时可能被删 —— 拿一个不存在的路径去上传只是把失败推迟一步。"""
+    transport = FakeBiliTransport(archives=[archive(aid=111, bvid="BV1xx", state=0)])
+    video = write_video(tmp_path / "a.mp4")
+    result = run_single(
+        make_context(transport, runner=command_runner(), tmp_path=tmp_path),
+        UploadTarget(1, TITLE, video, subtitle_path=tmp_path / "gone.srt", subtitle_language="en"),
+        single_meta(),
+    )
+    assert result.status == BiliUploadStatus.published.value
+    assert result.subtitle_state == "skipped"
+    assert transport.called("/x/v2/dm/subtitle/draft/save") == 0
+
+
+def test_reverify_can_reattach_a_subtitle(tmp_path):
+    """视频已发布、字幕失败时，重试只能补传字幕 —— 重投会在账号上多一条重复稿件。"""
+    transport = FakeBiliTransport(archives=[archive(aid=111, bvid="BV1xx", state=0)])
+    result = reverify(
+        make_context(transport, runner=command_runner(), tmp_path=tmp_path),
+        title=TITLE,
+        subtitle_path=_subtitle(tmp_path),
+        subtitle_language="en",
+    )
+    assert result.status == BiliUploadStatus.published.value
+    assert result.subtitle_state == "posted"
+
+
 def test_run_single_prefers_the_platform_cover_over_the_local_frame(tmp_path):
     """本地抽的封面被 B站 转码/裁切过，**平台那个才是最终生效的**。"""
     transport = FakeBiliTransport(

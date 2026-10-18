@@ -328,6 +328,138 @@ def test_prepare_download_reraises_errors_that_are_not_about_format_selection(
         )
 
 
+class _InfoYoutubeDL:
+    """回一份固定 `info` 的替身。**字幕计划就在这份 info 上算**，不需要碰格式选择。"""
+
+    def __init__(self, opts, info):
+        self.opts = opts
+        self.info = info
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def extract_info(self, url, download=False):
+        return self.info
+
+    def build_format_selector(self, selector):
+        return selector
+
+    def _select_formats(self, formats, selector):
+        return [formats[0]] if formats else []
+
+
+def _prepare(monkeypatch, service, options, info):
+    monkeypatch.setattr(
+        "app.ytdlp_service.yt_dlp.YoutubeDL", lambda opts: _InfoYoutubeDL(opts, info)
+    )
+    return service.prepare_download("https://youtu.be/x", options)
+
+
+def test_prepare_download_targets_the_original_language_of_the_video(monkeypatch, tmp_path: Path) -> None:
+    """视频说的是中文（`zh-Hans-orig`）→ 目标是中文字幕，而不是默认英文。"""
+    service = YtDlpService(download_dir=tmp_path)
+    preparation = _prepare(
+        monkeypatch,
+        service,
+        DownloadOptions(mode="video_subtitles", resolution="720p"),
+        {
+            "formats": [{"format_id": "18", "height": 720}],
+            "subtitles": {},
+            "automatic_captions": {"zh-Hans": [{}], "zh-Hans-orig": [{}], "en": [{}]},
+        },
+    )
+
+    assert preparation.subtitle is not None
+    assert preparation.subtitle.language == "zh"
+    assert preparation.subtitle.code == "zh-Hans"
+    assert preparation.subtitle.origin == "auto"
+
+
+def test_prepare_download_prefers_human_subtitles_over_asr(monkeypatch, tmp_path: Path) -> None:
+    service = YtDlpService(download_dir=tmp_path)
+    preparation = _prepare(
+        monkeypatch,
+        service,
+        DownloadOptions(mode="video_subtitles", resolution="720p"),
+        {
+            "formats": [{"format_id": "18", "height": 720}],
+            "subtitles": {"en": [{}]},
+            "automatic_captions": {"en": [{}], "en-orig": [{}]},
+        },
+    )
+
+    assert preparation.subtitle is not None
+    assert preparation.subtitle.origin == "human"
+    assert preparation.subtitle.languages == ["en"]
+
+
+def test_prepare_download_skips_when_neither_source_exists(monkeypatch, tmp_path: Path) -> None:
+    """两者都没有 → 结论是 `none`。**它不是一个失败**，下载流程照旧继续。"""
+    service = YtDlpService(download_dir=tmp_path)
+    preparation = _prepare(
+        monkeypatch,
+        service,
+        DownloadOptions(mode="video_subtitles", resolution="720p"),
+        {
+            "formats": [{"format_id": "18", "height": 720}],
+            "subtitles": {"ja": [{}]},
+            "automatic_captions": {"ja": [{}]},
+        },
+    )
+
+    assert preparation.is_selectable is True
+    assert preparation.subtitle is not None
+    assert preparation.subtitle.origin == "none"
+    assert preparation.subtitle.code is None
+
+
+def test_prepare_download_resolves_subtitles_for_subtitles_only_mode(monkeypatch, tmp_path: Path) -> None:
+    """只下字幕时没有「选格式」，但字幕计划仍然要算 —— 那是这次下载的全部内容。"""
+    service = YtDlpService(download_dir=tmp_path)
+    preparation = _prepare(
+        monkeypatch,
+        service,
+        DownloadOptions(mode="subtitles_only"),
+        {"subtitles": {"en": [{}]}, "automatic_captions": {"en": [{}]}},
+    )
+
+    assert preparation.is_selectable is True
+    assert preparation.subtitle is not None
+    assert preparation.subtitle.code == "en"
+
+
+def test_subtitles_only_prepare_survives_a_metadata_failure(monkeypatch, tmp_path: Path) -> None:
+    """取元数据失败在这里**不判失败**：真正的下载随后会用自己的报错说出真实原因。
+
+    在这里抛出只会把「预检失败」叠在真正的病因上，而且会让一次纯字幕下载在
+    网络抖动时直接判死。
+    """
+
+    class Broken:
+        def __init__(self, opts):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def extract_info(self, url, download=False):
+            raise DownloadError("ERROR: [youtube] x: Sign in to confirm you're not a bot.")
+
+    monkeypatch.setattr("app.ytdlp_service.yt_dlp.YoutubeDL", Broken)
+    service = YtDlpService(download_dir=tmp_path)
+
+    preparation = service.prepare_download("https://youtu.be/x", DownloadOptions(mode="subtitles_only"))
+
+    assert preparation.is_selectable is True
+    assert preparation.subtitle is None
+
+
 def test_dependency_status_exposes_proxy_source_and_redacts_credentials(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr("app.proxy.read_system_proxy", lambda: "127.0.0.1:7890")
     monkeypatch.setattr("app.proxy.read_environment_proxy", lambda: "http://user:pw@127.0.0.1:54109")
@@ -1009,11 +1141,38 @@ def test_empty_subtitle_languages_still_bounded_when_default_is_blank(tmp_path: 
 def test_explicit_subtitle_languages_win_over_default(tmp_path: Path) -> None:
     service = YtDlpService(download_dir=tmp_path, default_subtitle_languages=["en"])
     opts = service.build_download_options(
-        DownloadOptions(mode="video_subtitles", subtitle_languages=["ja"]),
+        DownloadOptions(mode="video_subtitles", subtitle_languages=["zh-Hans"]),
         cookies_path=None,
     )
 
-    assert opts["subtitleslangs"] == ["ja"]
+    assert opts["subtitleslangs"] == ["zh-Hans"]
+
+
+def test_subtitle_languages_outside_chinese_and_english_are_ignored(tmp_path: Path) -> None:
+    """只处理中英字幕：显式选了别的语种也要被忽略，而不是原样发给 yt-dlp。
+
+    回退到**有界**的默认（而不是空列表）是同一条约束的另一半：空 `subtitleslangs`
+    会被 yt-dlp 当成没给，转而按它自己的默认去挑英文 —— 那正是这里要挡的东西。
+    """
+    service = YtDlpService(download_dir=tmp_path, default_subtitle_languages=["en"])
+    opts = service.build_download_options(
+        DownloadOptions(mode="video_subtitles", subtitle_languages=["ja", "ko"]),
+        cookies_path=None,
+    )
+
+    assert opts["subtitleslangs"] == ["en"]
+    assert "ja" not in opts["subtitleslangs"]
+    assert "ko" not in opts["subtitleslangs"]
+
+
+def test_mixed_subtitle_languages_keep_only_the_supported_ones(tmp_path: Path) -> None:
+    service = YtDlpService(download_dir=tmp_path, default_subtitle_languages=["en"])
+    opts = service.build_download_options(
+        DownloadOptions(mode="video_subtitles", subtitle_languages=["ja", "zh-Hant", "en-US"]),
+        cookies_path=None,
+    )
+
+    assert opts["subtitleslangs"] == ["zh-Hant", "en-US"]
 
 
 def test_download_options_default_to_1440p_and_both_subtitle_sources(tmp_path: Path) -> None:

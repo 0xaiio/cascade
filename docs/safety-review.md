@@ -39,10 +39,10 @@
 
 详情：
 
-- 文件删除在 [_delete_output_files](../backend/app/job_manager.py#L351) 中执行，所有候选路径通过 [_is_under_allowed_root](../backend/app/job_manager.py#L372) 验证，仅允许在下载根目录或任务下载子目录下操作
+- 文件删除在 [_delete_output_files](../backend/app/job_manager.py#L357) 中执行，所有候选路径通过 [_is_under_allowed_root](../backend/app/job_manager.py#L372) 验证，仅允许在下载根目录或任务下载子目录下操作
 - 本地播放/打开文件夹接口（[routers/job_files.py](../backend/app/routers/job_files.py#L16) 起）仅使用数据库记录的 `output_path` 和 `download_dir`，不接受前端传入任意路径
 - [safe_path_name](../backend/app/paths.py#L7) 为 playlist 目录名移除 `<>:"/\|?*` 等不安全字符，并限制长度为 120 字符
-- [discover_output_file_candidates](../backend/app/output_paths.py#L47) 仅在给定的 `job_download_dir` 内按 YouTube video ID 匹配文件，不遍历上级目录
+- [discover_output_file_candidates](../backend/app/output_paths.py#L52) 仅在给定的 `job_download_dir` 内按 YouTube video ID 匹配文件，不遍历上级目录
 
 ## 3. SQL 注入（SQL Injection）
 
@@ -54,7 +54,7 @@
 
 - 所有查询通过 `session.exec(select(...))` 执行，使用 SQLModel 的声明式查询
 - [_ensure_columns](../backend/app/db.py#L43) 使用 f-string 构建 `ALTER TABLE` 语句，但表名和列名来自硬编码字典，非用户输入
-- [checkpoint_wal](../backend/app/db.py#L93) 的 `PRAGMA wal_checkpoint(...)` 同样由常量与函数默认参数构成
+- [checkpoint_wal](../backend/app/db.py#L104) 的 `PRAGMA wal_checkpoint(...)` 同样由常量与函数默认参数构成
 - 无原始 SQL 拼接
 
 ## 4. 跨站脚本攻击（XSS）
@@ -95,7 +95,7 @@
 
 详情：
 
-- [GET /api/diagnostics](../backend/app/routers/diagnostics.py#L29) 仅返回 PO token / visitor data 的"是否已配置"布尔值，不返回原文（[get_dependency_status](../backend/app/ytdlp_service.py#L292)）
+- [GET /api/diagnostics](../backend/app/routers/diagnostics.py#L29) 仅返回 PO token / visitor data 的"是否已配置"布尔值，不返回原文（[get_dependency_status](../backend/app/ytdlp_service.py#L296)）
 - [sanitize_log_message](../backend/app/log_safety.py#L20) 在写入日志前通过正则替换移除 URL query string（包含 cookie、token、authorization 等参数）
 - 代理 URL 在日志与 API 响应里都先经 [redact_proxy_credentials](../backend/app/proxy.py#L62) 脱敏（`user:pass@` → `***`）
 - cookies 文件（`data/cookies.txt`、B站 的 `data/bili_cookies.json`）和 `.env` 文件均在 `.gitignore` 中排除，不会进入 Git

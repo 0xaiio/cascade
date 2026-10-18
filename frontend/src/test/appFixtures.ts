@@ -82,6 +82,9 @@ export const jobPayload: Job = {
       speed: 2048,
       eta: 10,
       output_path: null,
+      // 还在下载，字幕结论还没出来 —— 与「跑过一次、结论是没有（`none`）」不是一回事。
+      subtitle_language: null,
+      subtitle_source: null,
       error: null
     }
   ]
@@ -418,7 +421,9 @@ export const biliPrefillSinglePayload: BiliPrefill = {
       title: "Unsupported resolution",
       desc: "简介",
       tags: "编程,数据库",
-      ready: true
+      ready: true,
+      // 服务端给的文案（不是前端拼的）：这一条会带一条人工英文字幕一起上传。
+      subtitle: "en · 人工"
     }
   ],
   problems: [],
@@ -456,7 +461,8 @@ export const biliPrefillCollectionPayload: BiliPrefill = {
       title: "Playlist batch · 第 01/2 集",
       desc: "Part one\n原视频：https://youtu.be/one",
       tags: "编程,Part",
-      ready: true
+      ready: true,
+      subtitle: "en · 人工"
     },
     {
       index: 2,
@@ -466,7 +472,9 @@ export const biliPrefillCollectionPayload: BiliPrefill = {
       title: "Playlist batch · 第 02/2 集",
       desc: "Part two\n原视频：https://youtu.be/two",
       tags: "编程,Part",
-      ready: false
+      ready: false,
+      // 这条下载时就没拿到字幕 —— 界面要在投稿**之前**说清楚它不带字幕。
+      subtitle: "无字幕"
     }
   ],
   problems: [],
@@ -513,7 +521,11 @@ export const biliUploadPayload: BiliUpload = {
   updated_at: "2026-10-05T10:00:30Z",
   started_at: "2026-10-05T10:00:00Z",
   finished_at: "2026-10-05T10:00:30Z",
-  elapsed_seconds: 30
+  elapsed_seconds: 30,
+  // 字幕三件套：**独立于稿件状态**。这条当时没有可用字幕（`skipped` 是出厂态）。
+  subtitle_state: "skipped",
+  subtitle_lan: "",
+  subtitle_message: "没有已下载的字幕，跳过字幕上传"
 };
 
 /** 一条失败稿件：有 `error` 与 `advice`，因此任务卡片里会渲染出明细与重试按钮。 */

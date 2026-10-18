@@ -31,6 +31,9 @@ SEASON_LIST_URL = "https://member.bilibili.com/x2/creative/web/seasons"
 REPLY_ADD_URL = "https://api.bilibili.com/x/v2/reply/add"
 REPLY_TOP_URL = "https://api.bilibili.com/x/v2/reply/top"
 REPLY_MAIN_URL = "https://api.bilibili.com/x/v2/reply/main"
+# CC 字幕（可关闭字幕）的保存/提交。**它与合集、评论同属「biliup 不做、我们自研」的那批**：
+# `biliup-rs 0.2.4` 的投稿命令不带字幕参数，所以只能自己调。
+SUBTITLE_SAVE_URL = "https://api.bilibili.com/x/v2/dm/subtitle/draft/save"
 
 MEMBER_ORIGIN = "https://member.bilibili.com"
 # 稿件列表的延迟是平台侧固有的，不是网络问题；退避重试是唯一手段。
@@ -357,6 +360,56 @@ def find_season_section(
         if attempt < attempts - 1 and delay > 0:
             sleeper(delay)
     return None
+
+
+# ---------------------------------------------------------------- CC 字幕
+def save_subtitle(
+    transport: Transport,
+    jar: dict[str, str],
+    *,
+    aid: int,
+    bvid: str,
+    cid: int,
+    lan: str,
+    data: str,
+    submit: bool = True,
+) -> None:
+    """保存一条 CC 字幕（`data` 是 BCC 文本，见 `bili_subtitle.to_bcc`）。
+
+    **参数名与取值都来自对平台实际请求的观察**，不是从文档推的：
+    `aid` / `bvid` / `oid`（= 分P 的 cid）/ `type` / `csrf` / `data` / `sign` / `submit`。
+    其中两个**布尔**要按小写字面量发（`false` / `true`）—— Python 的 `True`
+    经 `urlencode` 会变成 `True`，平台按字符串解析时就认不出来了。
+
+    `oid` 必须是 **cid 而不是 aid**：`x/web-interface/view` 里这两个号就不是一个值，
+    混用的报错同样是那句没有信息量的 `-404 啥都木有`（见 `find_season_section` 那条教训）。
+
+    `submit=False` 只存草稿。它存在的意义是：接口形态可以在**不改动任何已发布稿件**的
+    前提下被验证 —— 这是唯一一种安全的实测方式。
+    """
+    csrf = jar.get("bili_jct") or ""
+    if not csrf:
+        raise BiliApiError(None, "登录信息里没有 bili_jct，无法上传字幕", where="上传字幕")
+    form = {
+        "aid": int(aid),
+        "bvid": str(bvid),
+        "oid": int(cid),
+        "type": 1,
+        "csrf": csrf,
+        "data": data,
+        "lan": str(lan),
+        "sign": "false",
+        "submit": "true" if submit else "false",
+    }
+    result = transport.request(
+        "POST",
+        SUBTITLE_SAVE_URL,
+        form=form,
+        headers=_api_headers(jar),
+    )
+    payload = result.json()
+    if payload.get("code") != 0:
+        raise BiliApiError(payload.get("code"), str(payload.get("message") or ""), where="上传字幕")
 
 
 # ---------------------------------------------------------------- 置顶评论

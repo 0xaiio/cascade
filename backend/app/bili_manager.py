@@ -86,6 +86,8 @@ from .bili_policy import (
     MISSING_VIDEO,
     NOT_LOGGED_IN,
 )
+from .bili_subtitle import SUBTITLE_FAILED
+from .subtitle_plan import subtitle_summary
 from .bili_read_model import (
     IN_FLIGHT_STATUSES,
     latest_season,
@@ -118,7 +120,7 @@ from .models import (
     JobItem,
     utc_now,
 )
-from .output_paths import existing_output_file
+from .output_paths import existing_output_file, subtitle_language_from_path
 from .schemas import (
     BiliAccountRead,
     BiliAdvice,
@@ -321,6 +323,9 @@ def _prefill_item(item: JobItem, meta: UploadMetadata, base_dir: Path | None) ->
         desc=meta.desc,
         tags=meta.tags,
         ready=_item_path(item, base_dir) is not None,
+        # 这一条会不会带字幕。**提交前就说清楚**：字幕是跟着稿件一起发到平台上的，
+        # 用户应该在按下「投稿」之前知道这一条有没有，而不是事后去看日志。
+        subtitle=subtitle_summary(item.subtitle_language, item.subtitle_source),
     )
 
 
@@ -929,14 +934,42 @@ class BiliManager:
             if status in IN_FLIGHT_STATUSES:
                 return BiliRetryRead(action="none", message="这一条正在上传中，请稍候", upload=read)
             if status in {BiliUploadStatus.published.value, BiliUploadStatus.reviewing.value}:
-                return BiliRetryRead(
-                    action="none",
-                    message="这一条已经上传成功，没有重复投稿（避免在 B 站留下重复稿件）",
-                    upload=read,
+                # **字幕是唯一还能补做的动作**：视频已经在平台上了，重投只会多一条重复稿件；
+                # 但字幕那次失败很可能是暂时的（平台侧延迟 / 限流），而且它是幂等的
+                # （同一个语言轨再传一次是覆盖，不是多一条）。
+                if row.subtitle_state != SUBTITLE_FAILED:
+                    return BiliRetryRead(
+                        action="none",
+                        message="这一条已经上传成功，没有重复投稿（避免在 B 站留下重复稿件）",
+                        upload=read,
+                    )
+                subtitle_path, subtitle_language = self._subtitle_of(session, row)
+                updated = await asyncio.to_thread(
+                    self._reverify_work,
+                    upload_id,
+                    title,
+                    index,
+                    item_id,
+                    subtitle_path,
+                    subtitle_language,
                 )
+                return BiliRetryRead(action="reverify", message="已重新上传字幕", upload=updated)
 
+        subtitle_path, subtitle_language = None, None
         if status == BiliUploadStatus.unverified.value:
-            updated = await asyncio.to_thread(self._reverify_work, upload_id, title, index, item_id)
+            with Session(self.engine) as session:
+                row = session.get(BiliUpload, upload_id)
+                if row is not None:
+                    subtitle_path, subtitle_language = self._subtitle_of(session, row)
+            updated = await asyncio.to_thread(
+                self._reverify_work,
+                upload_id,
+                title,
+                index,
+                item_id,
+                subtitle_path,
+                subtitle_language,
+            )
             return BiliRetryRead(action="reverify", message="已重新核对一次", upload=updated)
 
         with Session(self.engine) as session:
@@ -968,9 +1001,24 @@ class BiliManager:
             season=read,
         )
 
-    def _reverify_work(self, upload_id: str, title: str, index: int, item_id: str | None) -> BiliUploadRead:
+    def _reverify_work(
+        self,
+        upload_id: str,
+        title: str,
+        index: int,
+        item_id: str | None,
+        subtitle_path: Path | None,
+        subtitle_language: str | None,
+    ) -> BiliUploadRead:
         context = self._context()
-        result = reverify(context, title=title, index=index, item_id=item_id)
+        result = reverify(
+            context,
+            title=title,
+            index=index,
+            item_id=item_id,
+            subtitle_path=subtitle_path,
+            subtitle_language=subtitle_language,
+        )
         self._store_result(upload_id, result)
         self._publish_threadsafe(
             {"type": "bili_upload_finished", "job_id": self._job_of(upload_id), "upload_id": upload_id}
@@ -1070,11 +1118,14 @@ class BiliManager:
             row = session.get(BiliUpload, upload_id)
             assert row is not None
             index = self._index_for(session, row.job_id, row.item_id)
+            subtitle_path, subtitle_language = self._subtitle_of(session, row)
             target = UploadTarget(
                 index=index,
                 title=row.title,
                 video_path=Path(row.video_path),
                 item_id=row.item_id,
+                subtitle_path=subtitle_path,
+                subtitle_language=subtitle_language,
             )
             meta = UploadMetadata(
                 title=row.title,
@@ -1085,6 +1136,30 @@ class BiliManager:
                 source=effective_source(row.copyright, row.source),
             )
             return target, meta, bool(row.make_cover), row.comment or ""
+
+    def _subtitle_of(self, session: Session, row: BiliUpload) -> tuple[Path | None, str | None]:
+        """这条稿件要一并传的字幕。**从下载结论里读，不在投稿记录里再存一份。**
+
+        为什么不复写到 `BiliUpload`：字幕是**下载条目**的产物（`JobItem.subtitle_path`），
+        投稿记录再存一份就是同一件事的两处真相 —— 而这两处会在「字幕重下了一遍」
+        或「投稿被重试」时不一致。
+
+        **文件不在了就当没有**：磁盘上的东西随时可能被用户删掉，拿一个不存在的路径
+        去上传，只是把「没有字幕」推迟成一次必然失败的上传。
+        """
+        if not row.item_id:
+            return None, None
+        item = session.get(JobItem, row.item_id)
+        if item is None or not item.subtitle_path:
+            return None, None
+        path = Path(item.subtitle_path)
+        if not path.is_file():
+            logger.info("bili 字幕已不存在，跳过：item=%s path=%s", row.item_id, item.subtitle_path)
+            return None, None
+        # 语言代码取**文件名里那条**（下载后真实写出来的轨，如 `zh-Hans`）；
+        # 库里存的是族名（`en` / `zh`），只在文件名解析不出来时兜底 ——
+        # B站 的语言标识由它映射而来，族名也能用，只是精度低一档。
+        return path, subtitle_language_from_path(path) or item.subtitle_language
 
     def _context(self, *, on_progress: Callable[[float], None] | None = None) -> UploadContext:
         """装配一次上传的外部依赖。前置条件在这里**再查一遍** —— 排队期间状态可能已经变了。
@@ -1156,6 +1231,9 @@ class BiliManager:
             row.cover_url = result.cover_url or row.cover_url
             row.verified_state = result.verified_state
             row.verified_note = result.verified_note
+            row.subtitle_state = result.subtitle_state
+            row.subtitle_lan = result.subtitle_lan
+            row.subtitle_message = result.subtitle_message
             row.error = result.error
             row.advice = result.advice
             row.log_tail = result.log_tail

@@ -17,7 +17,12 @@ from .events import EventBroker
 from .progress_persist import ProgressPersistGate
 from .log_safety import sanitize_log_message
 from .models import Job, JobEvent, JobItem, JobStatus, utc_now
-from .output_paths import item_artifact_candidates, output_file_candidates, resolve_existing_output_path
+from .output_paths import (
+    find_subtitle_file,
+    item_artifact_candidates,
+    output_file_candidates,
+    resolve_existing_output_path,
+)
 from .resolution_decisions import (
     ResolutionDecision,
     ResolutionDecisionKind,
@@ -30,6 +35,7 @@ from .resolution_decisions import (
 )
 from .safe_delete import delete_scope, is_deletion_allowed, removable_job_dir
 from .schemas import DownloadOptions, FormatOption
+from .subtitle_plan import SubtitleOrigin, SubtitlePlan, language_family
 from .transfer_stats import TransferStats
 from .ytdlp_service import DownloadCancelled, YtDlpService
 
@@ -536,6 +542,11 @@ class JobManager:
         item.requested_resolution = None
         item.fallback_resolution = None
         item.fallback_reason = None
+        # 字幕结论跟着**这一轮**走：重跑一次可能换到另一条轨（也可能变成没有），
+        # 留着上一轮的值会让上传环节拿到一个磁盘上已经不存在的路径。
+        item.subtitle_language = None
+        item.subtitle_source = None
+        item.subtitle_path = None
         item.updated_at = now
         job.current_item_title = item.title
         job.updated_at = now
@@ -547,6 +558,7 @@ class JobManager:
         progress_aggregator = DownloadProgressAggregator()
         persist_gate = ProgressPersistGate()
         runtime_restart_requested = False
+        subtitle_plan: SubtitlePlan | None = None
 
         def progress_hook(payload: dict[str, Any]) -> None:
             if job.id in self._deleted:
@@ -599,7 +611,7 @@ class JobManager:
                 )
 
         try:
-            options = self._prepare_download(session, item, options)
+            options, subtitle_plan = self._prepare_download(session, item, options)
             progress_aggregator.set_expected_total_bytes(item.total_bytes)
             should_cancel = (
                 lambda: job.id in self._cancelled
@@ -661,6 +673,7 @@ class JobManager:
                     item.actual_width, item.actual_height = resolution
             if item.actual_format is None and item.output_path:
                 item.actual_format = self._format_from_output_path(Path(item.output_path))
+            self._record_subtitle_result(item, subtitle_plan, download_dir)
             item.status = JobStatus.succeeded.value
             item.progress = 100.0
         finally:
@@ -916,27 +929,36 @@ class JobManager:
             return None
         return preparation
 
-    def _prepare_download(self, session: Session, item: JobItem, options: DownloadOptions) -> DownloadOptions:
-        """探测目标清晰度；不可选时按 `resolution_decisions` 的判定降级。
+    def _prepare_download(
+        self, session: Session, item: JobItem, options: DownloadOptions
+    ) -> tuple[DownloadOptions, SubtitlePlan | None]:
+        """探测目标清晰度并算出字幕计划；不可选时按 `resolution_decisions` 的判定降级。
+
+        返回 `(本次真正使用的下载选项, 字幕计划)`。**字幕计划必须随选项一起交回去**：
+        它决定了 `subtitle_languages`（只请求一条轨，人工优先、无则跳过），而结论
+        （语言 + 来源）要等下载成功、字幕文件真的出现在磁盘上之后才落库 ——
+        预测与结果分开，才不会出现「计划说有字幕、磁盘上一个文件也没有」。
 
         本方法只保留**IO 与时序**：探测、取元数据、写状态、提交。判定全部在
-        [`resolution_decisions`](resolution_decisions.py) 里，那里可被单测。
+        [`resolution_decisions`](resolution_decisions.py) 与
+        [`subtitle_plan`](subtitle_plan.py) 里，那里可被单测。
         """
         preparation = self._probe_preparation(item, options)
         if preparation is not None:
             self._apply_download_preparation(session, item, preparation)
-            return options
+            plan = getattr(preparation, "subtitle", None)
+            return self._options_with_subtitle_plan(options, preparation), plan
 
         # 早退必须在取元数据**之前**：这两种情况不需要元数据，多取一次就是白付一次网络开销。
         if not should_look_for_fallback(options):
-            return options
+            return options, None
 
         analysis_formats = self._extract_formats_or_none(item)
         decision = decide_probe_fallback(options.resolution, analysis_formats)
         if decision.kind is ResolutionDecisionKind.fail:
             raise RuntimeError(decision.message)
         if decision.kind is ResolutionDecisionKind.skip:
-            return options
+            return options, None
 
         fallback_options = self._options_with_resolution(options, decision.fallback_resolution)
         fallback_preparation = self._probe_preparation(item, fallback_options)
@@ -949,7 +971,21 @@ class JobManager:
         session.add(item)
         session.commit()
         self._apply_download_preparation(session, item, fallback_preparation)
-        return fallback_options
+        plan = getattr(fallback_preparation, "subtitle", None)
+        return self._options_with_subtitle_plan(fallback_options, fallback_preparation), plan
+
+    def _options_with_subtitle_plan(self, options: DownloadOptions, preparation: Any) -> DownloadOptions:
+        """把字幕计划写进下载选项。**只在「用户没有指定语言」时改写** —— 显式选择优先。
+
+        计划里没有可用轨时请求**族名本身**（`zh` / `en`）：yt-dlp 用 `fullmatch`
+        匹配语言代码，填族名匹配不到任何轨 → 一条都不下、也不报错。这正好是
+        「跳过字幕、不中断流程」；反过来若退化成空列表，yt-dlp 会当没给
+        `subtitleslangs` 而按它自己的默认去挑英文，把「跳过」悄悄变成「下英文」。
+        """
+        plan = getattr(preparation, "subtitle", None)
+        if plan is None or options.subtitle_languages:
+            return options
+        return options.model_copy(update={"subtitle_languages": [plan.code or plan.language]})
 
     def _apply_download_preparation(self, session: Session, item: JobItem, preparation: Any) -> None:
         if preparation.width is not None and preparation.height is not None:
@@ -980,6 +1016,42 @@ class JobManager:
                 "duration": item.duration,
             }
         )
+
+    def _record_subtitle_result(
+        self,
+        item: JobItem,
+        plan: SubtitlePlan | None,
+        download_dir: Path,
+    ) -> None:
+        """下载成功后把字幕结论落库。**判据是磁盘上有没有那个文件**，不是计划说了什么。
+
+        为什么不信计划：yt-dlp 对「请求的语言不存在」是静默跳过（不报错），所以
+        「计划说有」与「真的写出来了」是两件事。上传环节读的是这里的 `subtitle_path`，
+        存一个不存在的文件路径，等于让一次上传在最后一刻才发现没有字幕。
+
+        `plan` 为 `None` 表示这一轮没跑预检（`video_only`、或不需要降级的早退路径），
+        此时**仍然按磁盘发现**去认字幕 —— 视频旁边的中英字幕就是用户能用的那份，
+        与它当初是不是计划内的无关。
+        """
+        video_path = Path(item.output_path) if item.output_path else None
+        if video_path is None:
+            return
+        if not video_path.is_absolute():
+            video_path = download_dir / video_path
+        found = find_subtitle_file(video_path, plan.language if plan else None)
+        if found is None:
+            item.subtitle_language = None
+            item.subtitle_source = SubtitleOrigin.none.value
+            item.subtitle_path = None
+            return
+        path, code = found
+        item.subtitle_language = language_family(code) or (plan.language if plan else None)
+        # 来源只能来自计划：文件名里没有「人工 / 自动生成」这件事，而 yt-dlp 的
+        # 优先级（人工先占住语言、自动只补空缺）与计划用的是同一套判据。
+        # **计划缺失就留 NULL 而不是猜一个**：`NULL` = 这一轮没有来源结论，
+        # `none` = 有结论（没有可用字幕）—— 这两件事混在一起就无法解释了。
+        item.subtitle_source = plan.origin.value if plan else None
+        item.subtitle_path = str(path)
 
     def _options_with_resolution(self, options: DownloadOptions, resolution: str) -> DownloadOptions:
         return options.model_copy(update={"resolution": resolution, "format_id": None})

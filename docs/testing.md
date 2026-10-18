@@ -118,13 +118,18 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 
 ## 后端测试范围
 
-后端测试位于 [backend/tests](../backend/tests/)（31 个 `test_*.py` + [fakes.py](../backend/tests/fakes.py) / [bili_fakes.py](../backend/tests/bili_fakes.py)，当前 **913 passed**）：
+后端测试位于 [backend/tests](../backend/tests/)（35 个 `test_*.py` + [fakes.py](../backend/tests/fakes.py) / [bili_fakes.py](../backend/tests/bili_fakes.py)，当前 **1039 passed**）：
+
+> **数字必须自己数一遍**，不要只信 `-q` 的汇总行。逐文件规模用
+> `pytest backend/tests/<文件> -q -p no:cacheprovider --co` 取，各文件之和应**恰等于**全集
+> （2026-10-18 实测：35 个文件逐项相加 = 1039 = 全集）。历史上有过把「收集不全的那一次」当成
+> 基线的教训（见过 267 / 286 / 289 三个数，真实基线一直是当时的 913）。
 
 | 文件 | 重点 |
 | --- | --- |
 | [test_api.py](../backend/tests/test_api.py) | API 行为、任务创建、重启、删除、cookies、设置、诊断、代理自检、cookies 体检、运行环境自检刷新，合集子视频按并发并行下载，happy-path 不再二次 extract_metadata，以及**探针抛异常时降级仍要真的执行并开始下载**。 |
 | [test_db.py](../backend/tests/test_db.py) | SQLite WAL、`busy_timeout`、`synchronous=NORMAL` 与 WAL checkpoint。 |
-| [test_ytdlp_service.py](../backend/tests/test_ytdlp_service.py) | yt-dlp 参数、profile、PO token、aria2c、格式选择和错误识别；**预检把「选不出格式」归一成 `is_selectable=False` 而不是抛出去，且无关异常仍要原样抛出**；JS 运行时探测（跳过坏候选、原样报错、探测本身不抛异常、诊断暴露失败原因）。 |
+| [test_ytdlp_service.py](../backend/tests/test_ytdlp_service.py) | yt-dlp 参数、profile、PO token、aria2c、格式选择和错误识别；**预检把「选不出格式」归一成 `is_selectable=False` 而不是抛出去，且无关异常仍要原样抛出**；JS 运行时探测（跳过坏候选、原样报错、探测本身不抛异常、诊断暴露失败原因）。字幕计划另加 7 条：显式语言优先于默认、**非中英语言被忽略**、混合列表只留中英、计划随 `DownloadPreparation` 回传（语言/轨码/来源/理由）、`subtitles_only` 也算出计划且元数据失败在那里不致命。 |
 | [test_download_progress.py](../backend/tests/test_download_progress.py) | 多子流进度聚合：字幕/chunk 不锁死在 99.9%，分离音视频不把已下载字节重置为 0。 |
 | [test_progress_persist.py](../backend/tests/test_progress_persist.py) | 进度 SQLite/SSE 写入节流：首次、终态、时间间隔和进度跳变。 |
 | [test_transfer_stats.py](../backend/tests/test_transfer_stats.py) | 平均速度计算。 |
@@ -137,7 +142,7 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 | [test_connectivity.py](../backend/tests/test_connectivity.py) | 代理探针：直连与走代理分别构造正确的 opener、HTTP 错误与网络异常都变成可展示证据、失败必带 `next_steps`、`direct` 失败文案说明「可能预期」。 |
 | [test_cookie_health.py](../backend/tests/test_cookie_health.py) | cookies 体检：格式、域名分布、鉴权项命中/缺失、过期、`LOGGED_IN` 三态（真/假/未知）、结论与下一步。 |
 | [test_resolution_decisions.py](../backend/tests/test_resolution_decisions.py) | 降级**判定**的纯单测（31 例，0.12 s）：四种降级原因各自的输入条件、"该不该找降级候选"的两个早退条件、两句失败文案不可互换、"元数据不可得"与"零个格式"必须区分、每个 reason 都能被 `fallback_policy` 翻成非空文案。 |
-| [test_output_paths.py](../backend/tests/test_output_paths.py) | 产物位置计算：候选链「记录值优先 + 去重」、成品定位与 sidecar 排除；含一条**与重构前实现逐项对照**的用例（见 [ai/refactor/004](../ai/refactor/004-artifact-paths.md)）。 |
+| [test_output_paths.py](../backend/tests/test_output_paths.py) | 产物位置计算：候选链「记录值优先 + 去重」、成品定位与 sidecar 排除；含一条**与重构前实现逐项对照**的用例（见 [ai/refactor/004](../ai/refactor/004-artifact-paths.md)）。字幕定位另加 8 条：标题含 `[` `]` 时仍能找到（**必须用 `iterdir` 而不是 `glob`** —— 后者把方括号当字符类）、不误吃同前缀的 `作品 [abc123]2.en.srt`、按族偏好挑一条、非中英语种被过滤、语言取 stem 最后一段点号后（见 [ai/feature/subtitle-pipeline](../ai/feature/subtitle-pipeline/README.md)）。 |
 | [test_safe_delete.py](../backend/tests/test_safe_delete.py) | 删除白名单的路径安全判定：根目录与子孙放行，父目录、无关绝对路径、以及**共享字符串前缀的兄弟目录**一律拒绝，Windows 大小写差异视为同一根（见 [ai/refactor/005](../ai/refactor/005-safe-delete.md)）。 |
 | [test_proxy.py](../backend/tests/test_proxy.py) | 代理**解析**：`direct` 哨兵、显式 > 系统 > 环境变量的优先级、环境变量只报告不落盘、`no_proxy` 绕过与凭据脱敏。 |
 | [test_dev_server.py](../backend/tests/test_dev_server.py) | 端口预检与「谁占了这个端口」：`netstat` / `tasklist` 输出解析、可用端口向后查找、`YTDL_API_PORT` 默认值与 `.env` 锚定仓库根（[009](../ai/bug-fix/009-local-dev-port-is-occupied-and-unconfigurable.md)）。 |
@@ -150,17 +155,20 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 | [test_bili_auth.py](../backend/tests/test_bili_auth.py) | 登录文件四形态兼容、**两处「条目列表」解析必须逐字一致**（扁平的 `dict` 与内层 `list` 走同一条 `_jar_from_pairs`）、条目缺 `name`/`value` 要跳过、内层列表为空要回落到扁平那条、**凭据摘要只回名字与计数（不含值、不含前缀）**、是否被 git 跟踪、扫码挑战与轮询状态映射；**投稿令牌交换**（签名字面值冻结 —— 签名错会被 B站 伪装成「凭据坏了」、两组参数风格相反（appkey 轮次签名 / h5 确认走用户的 `csrf`）、`86039` 重试但其它码立刻报出来、`Cookie` 头只带两项不夹带回调 URL 上的查询参数名）、令牌摘要只回布尔与长度。 |
 | [test_bili_bin.py](../backend/tests/test_bili_bin.py) | 投稿工具探测：**0 字节空壳与「没装」必须分开**（`is_pe` 校验 PE 头）、三级查找优先级、空壳识别与修复；命令组装含 `--submit`（**注意它在本版并不起作用**，实际提交走 App 接口，见 [011](../ai/bug-fix/011-biliup-refuses-a-token-less-cookie-file.md)）与 **`--copyright` / `--source` 跟随元数据**（自制稿不带 `--source`，落库快照与实发参数因此不会不一致）；进度解析单调不回退；`run_command` 超时会 kill 并写超时标记、回调抛异常不影响上传；抽封面四种降级。 |
 | [test_bili_api.py](../backend/tests/test_bili_api.py) | B站 客户端的请求形状与错误边界：member/web referer 与 `Content-Type`、`BiliApiError` 与 `HttpError` 不混用、对账的前缀匹配**两侧都归一空白**与退避次数、建合集（`csrf` 在 form）/ 归集（`csrf` 在 **query**、body 用 **camelCase**）、**建合集回包里取 `id` 的四种平台形态**（`777` / `"777"` / `{"id": 777}` / `{"id": "777"}`）与 10 种坏形状一律报「缺 id」而不是抛 `TypeError`、发并置顶评论的幂等（重复码 `12051` 后换时间序重找、只置顶失败时保住 `rpid`）。 |
-| [test_bili_upload.py](../backend/tests/test_bili_upload.py) | 单次上传的领域逻辑：状态折合、封面优先级、**失败时把 biliup 的原始输出按固定前缀逐行进日志、成功时不刷屏**（`caplog`）、**对账查不到时是「待核对」不是「失败」且不重投**、日志尾部清洗凭据、评论（无 `aid` 或**只有 `aid` 没有 `cid`** 都不发、评论失败不污染稿件状态）、模板批量渲染与逐条校验、整批编排（条间等间隔、单条失败不中断、只归集已发布的、全军覆没时不建空合集）。 |
+| [test_bili_upload.py](../backend/tests/test_bili_upload.py) | 单次上传的领域逻辑：状态折合、封面优先级、**失败时把 biliup 的原始输出按固定前缀逐行进日志、成功时不刷屏**（`caplog`）、**对账查不到时是「待核对」不是「失败」且不重投**、日志尾部清洗凭据、评论（无 `aid` 或**只有 `aid` 没有 `cid`** 都不发、评论失败不污染稿件状态）、模板批量渲染与逐条校验、整批编排（条间等间隔、单条失败不中断、只归集已发布的、全军覆没时不建空合集）。CC 字幕另加 7 条：投稿成功后挂字幕、`zh-Hans` → `zh`、**字幕失败不把稿件状态翻成失败**、无字幕/未核实/文件已不在各给一句 `skipped` 的理由、`reverify` 可只重挂字幕。 |
+| [test_subtitle_plan.py](../backend/tests/test_subtitle_plan.py) | **45 例**（本轮新增）。字幕下载计划的判定：族判定（`zh-Hans` / `en-US` / `zh-Hans-orig` 归族、`yue` **不算**中文、其它语种返回 `None`）、`-orig` 原声轨优先于人工字幕、同族多条轨只挑一条（简体优先繁体、基础码优先地区变体、`-orig` 排后）、人工优先→降级 ASR→`none`、两个来源开关各自的效果、**每条分支 `reason` 非空**、`subtitle_summary` 区分「结论是没有」与「还没有结论」。 |
+| [test_bili_subtitle.py](../backend/tests/test_bili_subtitle.py) | **38 例**（本轮新增）。SRT/VTT → BCC：时间戳解析（失败返回 `None` 不猜 0）、WEBVTT/NOTE 跳过、`<c>` 内联标签剥离、**只合并相邻且完全相同**的字幕、BCC 的 `from`/`to` 是秒、`utf-8-sig`；**语言白名单参数化**（`zh-CN`/`en-US`/`zh-Hans`/`en-GB` 必须映射成平台接受的值）；端点断言（`oid == cid`、`sign == "false"`、`submit == "true"`）；**任何失败都落成结论、绝不抛异常**。 |
+| [test_subtitle_recording.py](../backend/tests/test_subtitle_recording.py) | **6 例**（本轮新增）。下载结论的落库：按**磁盘证据**而不是计划、自动模式只请求计划里那一条轨、没有可用轨时请求族名（**不是空列表也不是 `["all"]`**）、文件缺失落成 `none`、非中英语种不记录、**重跑清掉旧结论**。 |
 | [test_bili_read_model.py](../backend/tests/test_bili_read_model.py) | 「多条记录 → 一档徽标」的**19 行真值表**参数化：8 成功 2 在跑 → 上传中、归集算在途、归集失败不等于全成功、全部待核对不报成功、被拒算失败；外加「成功 / 失败 / 在途三组集合**恰好归类一次**」的不相交性（唯一允许落在三组之外的是 `unverified`）；连同任务级/条目级投影、孤儿记录排最后、汇总按 job 排序；`season_upload_ids` 对合集 `upload_ids` 列的**七种内容形态加 `null` 列**容错（合法列表、空列表、空串、坏 JSON、**JSON 对象** —— `{"a": 1}` 必须当成空而不是 `["a"]`、非字符串元素 `[1, 2]` 折成字符串、`[null]` 不吞条目）、`latest_season` 取最新一行、`list_seasons` 的定序保证选择稳定。 |
 | [test_bili_manager.py](../backend/tests/test_bili_manager.py) | 队列与编排：重投复用同一行并作废旧 `bvid`/`aid`、六种前置条件各自报错（含 **`missing_upload_token`**）、登录落盘时补令牌 / 交换失败仍留住 cookies、导入路径补令牌且**不重复换**、体检把缺令牌报成 blocker、重试三分支（已发布→什么都不做 / 在途→什么都不做 / 待核对→**只重新核对且不发命令** / 失败→重新投稿）、重启收敛（`uploading` 与 `queued` 都折成可重试失败、幂等）、worker 崩溃可读且不带走 worker、体检（含 0 字节空壳与「没装」分开）、投稿间隔。 |
 | [test_api_bilibili.py](../backend/tests/test_api_bilibili.py) | 路由层：真 `BiliManager` + `TestClient` + 按数据库状态等完成（**不用队列空作完成信号**：worker 一 `get()` 走队列就空了，那时它还在跑）。覆盖体检 / 扫码（只有 `confirmed` 才落盘、`%2C` 解码）/ 导入清除 / 预填（单视频与合集、404、422）/ 读回 / 单视频与合集投稿（400 超限定位于第几条、409 列出未下载的、404）/ 重试与重试归集。 |
-| [bili_fakes.py](../backend/tests/bili_fakes.py) | B站 测试的共享替身：`FakeBiliTransport`（覆盖 13 个端点，含 TV 令牌交换那三个；记录 `calls`/`comments`/`topped`、未知 URL 直接断言失败）、`StubTransport`、脚本化 runner/sleeper、`write_video()`。**`UNSET` 哨兵**是必须的：用 `None` 兼作「没传参数」时，`account=None`（未登录）与 `video=None`（查不到稿件）都会被当成「用默认值」，那两条用例根本测不到目标分支、只会绿着过去。 |
+| [bili_fakes.py](../backend/tests/bili_fakes.py) | B站 测试的共享替身：`FakeBiliTransport`（覆盖 14 个端点，含 TV 令牌交换那三个与 CC 字幕保存；记录 `calls`/`comments`/`topped`/`subtitles`、未知 URL 直接断言失败）、`StubTransport`、脚本化 runner/sleeper、`write_video()`。**`UNSET` 哨兵**是必须的：用 `None` 兼作「没传参数」时，`account=None`（未登录）与 `video=None`（查不到稿件）都会被当成「用默认值」，那两条用例根本测不到目标分支、只会绿着过去。字幕端点可用 `subtitle_code` / `subtitle_message` / `subtitle_error` 脚本化（`subtitle_code` 设为非 0 即模拟平台拒绝，用来验「字幕失败不翻稿件状态」）。 |
 
 默认自动测试不依赖真实 YouTube 下载，避免网络、地区、cookies 和 YouTube 风控导致不稳定。
 
 ## 前端测试范围
 
-前端组件测试是对 `App` 的**集成测试**，按功能面拆成 `frontend/src/*.test.tsx` 多个文件：解析链接与下载选项（`analyzer.test.tsx`，11）、cookies 导入与校验（7）、设置面板与代理检测（10）、任务中心（控制/删除/展开 11、本地文件操作与链接 9、进度与详情呈现 6）、清晰度降级（4）、自检信息（2）、帮助浮层（3）、**B站 上传（`bili-upload.test.tsx`，50 例）**、版面与文案不变式（3），以及只读样式源文的 `styles.test.ts`（3）。当前 **15 个文件 / 172 passed**。
+前端组件测试是对 `App` 的**集成测试**，按功能面拆成 `frontend/src/*.test.tsx` 多个文件：解析链接与下载选项（`analyzer.test.tsx`，11）、cookies 导入与校验（7）、设置面板与代理检测（10）、任务中心（控制/删除/展开 11、本地文件操作与链接 9、进度与详情呈现 6）、清晰度降级（4）、自检信息（2）、帮助浮层（3）、**B站 上传（`bili-upload.test.tsx`，51 例）**、版面与文案不变式（3），以及只读样式源文的 `styles.test.ts`（3）。当前 **17 个文件 / 196 passed**（12 个 `.tsx` 组件测试 + 5 个 `.ts` 纯函数测试）。
 
 另有三份**不挂载任何组件**的纯函数测试（`frontend/src/*.test.ts`，不经过 `App`）：B站 表单词汇表与本地预检 `biliForm.test.ts`（35 例）、B站 状态谓词 `biliStatus.test.ts`（14 例）、错误取值兜底 `errors.test.ts`（4 例）。它们把原先内联在 `BiliUploadDialog.tsx` / `App.tsx` 里的判断抽成纯函数后再测，所以能在不渲染界面的前提下覆盖边界（例如「列表还在读」与「还没选合集」不能同时报出来，见 [ai/bug-fix/012](../ai/bug-fix/012-preflight-contradicts-itself-and-the-server.md)）。
 
@@ -189,6 +197,7 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 - B站 上传入口：视频没下载好时按钮**禁用并给出原因**（单视频与合集两种措辞）、点开后用该任务的 `job_id`/`item_id` 去预填（合集传 `item_id=null`）、上传中禁用、徽标文案与配色完全照搬服务端给的值（前端不自己判「算不算已上传」）。
 - B站 上传表单：字段、**硬限数字**与**回显时的截断长度**都来自 `prefill.limits`（前端不写死常量，否则会出现「界面说没超、提交回来 400」，或「短到能完整显示」那个分支永远走不到 —— 见 [ai/bug-fix/012](../ai/bug-fix/012-preflight-contradicts-itself-and-the-server.md)）；超限**只报错不截断**（输入框里仍是用户输入的完整内容）；提交的请求体就是用户在表单里填的；被拒（409）时表单**不关闭**、错误留在表单里；合集显示逐条预览且改模板即时重算、未就绪的条目按序号点名并挡住提交。
 - B站 稿件明细：失败给「重试」、待核对给「**重新核对**」（措辞必须分开，否则用户会去重投一条已经投上去的稿件）、已发布的条目**不给重试按钮**只给「在 B 站查看」、合集归集失败单独给「重试归集」。页顶「跑完了」的提示**只在徽标真的变化且落到终态时**才播报（首次拉到状态与没变化时都不能播报）。
+- B站 投稿预览表的「字幕」列：每条渲染服务端给的 `item.subtitle`（`en · 人工` / `zh · 自动生成` / `无字幕`），没有值时显示占位符 —— **文案由服务端拼**（前端拼一遍就会出现两套说法，见 [ai/feature/subtitle-pipeline](../ai/feature/subtitle-pipeline/README.md)）。
 - B站 设置区：三项体检各自的措辞与下一步；**0 字节空壳**要显示成不通过并给出「修复」按钮（`found=true` 不等于能用）；登录文件只报数量、不显示值**也不列名字**；被 git 跟踪单独红字；半截登录文件报出缺哪几项；扫码二维码内联渲染、`confirmed` 之前不刷新体检、`scanned` 继续等待。
 - 样式源文不变式（**jsdom 不做布局，这是布局类缺陷唯一能进单测的部分**）：文件上传控件（`.file-button`）的基类不得声明纵向外边距与宽度（[ai/ui/001](../ai/ui/001-cookie-buttons-not-on-the-same-baseline.md)）；右栏（`.side-column`）必须声明 `overflow-wrap: anywhere`，且全表不得出现 `overflow-wrap: normal`（[ai/ui/002](../ai/ui/002-side-column-overflow-breaks-the-page.md)）；语言选择器标签（`.select-trigger span`）必须允许换行，且不得声明 `overflow:` 或 `text-overflow:`（「藏起来」不等于「放得下」，[ai/ui/003](../ai/ui/003-language-trigger-label-overflows-the-page.md)）。「两个按钮是否共线」「标签是否真的折了行」只能靠真实浏览器量，见 [ai/ui](../ai/ui/README.md)。
 
@@ -241,7 +250,7 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 - 720p 自动降级底线失效。
 - 单视频失败原因被任务级聚合错误覆盖。
 - `throttledratelimit` 被重新默认打开，导致「每约 5 秒中断并重新 extract」的性能回退，见 [PLAN.md](../ai/perf/PLAN.md) §3.1。
-- 停滞看门狗的文案被改动后误命中 [is_media_stream_blocked_error](../backend/app/ytdlp_service.py#L682)，把停滞误分类成媒体流阻塞。
+- 停滞看门狗的文案被改动后误命中 [is_media_stream_blocked_error](../backend/app/ytdlp_service.py#L732)，把停滞误分类成媒体流阻塞。
 - aria2c 多连接在默认配置下被启用，推高 403 率。
 - Cookies 导入暴露敏感信息或擅自关闭浏览器。
 - JS 运行时探测退化成「只看文件是否存在」：那样「检测到 node 却解不出 n challenge」会重新变成不可诊断的状态。

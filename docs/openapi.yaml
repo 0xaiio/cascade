@@ -2257,6 +2257,20 @@ components:
           oneOf:
             - $ref: "#/components/schemas/ResolutionFallback"
             - type: "null"
+        subtitle_language:
+          type: [string, "null"]
+          description: >-
+            Language family of the subtitle that was downloaded (`en` or `zh`).
+            Only English and Chinese subtitles are ever handled; everything else is ignored.
+            `null` means there is no subtitle conclusion yet (the item has not finished a run) —
+            which is different from `subtitle_source = "none"` (a run finished and found nothing).
+          example: en
+        subtitle_source:
+          type: [string, "null"]
+          description: >-
+            Where the subtitle came from: `human` (uploaded by the channel), `auto` (ASR),
+            or `none` (no usable subtitle was found, the download was skipped on purpose).
+          example: human
         error:
           type: [string, "null"]
           description: Readable failure reason. Media-stream failures are prefixed
@@ -3033,6 +3047,12 @@ components:
           type: boolean
           default: true
           description: False when this entry is missing something and would be refused at submit time.
+        subtitle:
+          type: string
+          default: ""
+          description: >-
+            Human-readable summary of the subtitle that will be attached to this entry
+            (for example `en · 人工` or `无字幕`). Empty when there is no subtitle conclusion yet.
 
     BiliPrefillRead:
       type: object
@@ -3220,6 +3240,24 @@ components:
           type: [string, "null"]
         verified_note:
           type: [string, "null"]
+        subtitle_state:
+          type: string
+          default: skipped
+          description: >-
+            Outcome of the CC subtitle step: `posted`, `skipped` (nothing to attach) or `failed`.
+            It is deliberately separate from `status` — a failed subtitle never turns a
+            published submission into a failure.
+          enum: [posted, skipped, failed]
+        subtitle_lan:
+          type: string
+          default: ""
+          description: >-
+            Language identifier sent to the platform (`zh`, `en`, `zh-Hant`, `zh-TW`, `zh-HK`).
+            Note this is the platform's own whitelist, not `zh-CN`/`en-US`.
+        subtitle_message:
+          type: string
+          default: ""
+          description: One-line, human-readable explanation of `subtitle_state`.
         error:
           type: [string, "null"]
         advice:

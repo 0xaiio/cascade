@@ -19,15 +19,15 @@ PlantUML 源文件：[system-context.puml](diagrams/system-context.puml)。
 | React/Vite 前端 | 解析表单、下载选项、任务中心、cookies 操作和设置面板。 | [App.tsx](../frontend/src/App.tsx)、[api.ts](../frontend/src/api.ts#L37) |
 | FastAPI 后端 | HTTP API、SSE、任务调度、SQLite 持久化、调用 yt-dlp。 | [create_app](../backend/app/main.py#L40) |
 | 启动入口 | 解析命令行、启动前做端口预检并识别占用者、把实际监听地址打印出来，再交给 uvicorn。 | [__main__.py](../backend/app/__main__.py#L64)、[dev_server.py](../backend/app/dev_server.py#L44) |
-| 任务调度与执行 | 队列、worker、暂停/重启/删除、进度聚合、错误分类与终态收敛。 | [JobManager](../backend/app/job_manager.py#L44) |
+| 任务调度与执行 | 队列、worker、暂停/重启/删除、进度聚合、错误分类与终态收敛。 | [JobManager](../backend/app/job_manager.py#L50) |
 | SQLite | 存储任务、子任务、设置和事件。 | [models.py](../backend/app/models.py#L27)、[db.py](../backend/app/db.py#L27) |
-| yt-dlp 服务 | 元数据解析、下载参数构建、profile 重试、格式选择和依赖诊断。 | [YtDlpService](../backend/app/ytdlp_service.py#L185) |
+| yt-dlp 服务 | 元数据解析、下载参数构建、profile 重试、格式选择和依赖诊断。 | [YtDlpService](../backend/app/ytdlp_service.py#L189) |
 | 停滞看门狗 | 观测 progress 回调，把静默卡死转为可见失败。 | [StallGuard](../backend/app/stall_guard.py#L32) |
 | 浏览器 cookies 导入器 | 从本机浏览器导入 YouTube/Google cookies，并处理 Edge 锁库和 CDP fallback。 | [BrowserCookieImporter](../backend/app/browser_cookies.py#L67) |
 | 代理与连通性自检 | 解析代理来源（显式 > 系统 > 环境变量）并**真的发一次请求**验证连通；cookies 体检则把离线格式检查与 `LOGGED_IN` 探针合成一个结论。 | [proxy.py](../backend/app/proxy.py#L169)、[connectivity.py](../backend/app/connectivity.py#L73)、[cookie_health.py](../backend/app/cookie_health.py#L234) |
 | 错误翻译与自检留痕 | 把异常链翻译成「诊断 / 原因 / 建议」三段可执行结论；启动时摘除会打坏 JS 运行时的宿主环境变量并留痕。 | [error_advice.py](../backend/app/error_advice.py#L116)、[runtime_env.py](../backend/app/runtime_env.py#L58) |
 | 本机打开器 | 选择可解码播放器打开视频、打开输出目录。 | [system_open.py](../backend/app/system_open.py#L23) |
-| B站 上传编排 | 单 worker 串行投稿、投稿间隔、状态写库与重启收敛、环境体检、事件发布。与下载链路**完全解耦**：独立账号、独立登录文件、独立队列。 | [BiliManager](../backend/app/bili_manager.py#L328) |
+| B站 上传编排 | 单 worker 串行投稿、投稿间隔、状态写库与重启收敛、环境体检、事件发布。与下载链路**完全解耦**：独立账号、独立登录文件、独立队列。 | [BiliManager](../backend/app/bili_manager.py#L333) |
 | B站 领域与边界 | 单次投稿的领域逻辑（对账后定结论）、`biliup` 子进程边界、B站 会员态客户端、扫码登录与凭据摘要、元数据与硬限、文案常量。 | [bili_upload.py](../backend/app/bili_upload.py#L299)、[bili_bin.py](../backend/app/bili_bin.py#L271)、[bili_api.py](../backend/app/bili_api.py#L124)、[bili_auth.py](../backend/app/bili_auth.py#L75)、[bili_meta.py](../backend/app/bili_meta.py#L202)、[bili_policy.py](../backend/app/bili_policy.py#L38) |
 
 ## 组件关系
@@ -64,7 +64,7 @@ Playlist 解析后由前端提交选中的条目索引。后端为每个条目�
 
 PlantUML 源文件：[cookies-flow.puml](diagrams/cookies-flow.puml)。
 
-Cookies 可手动上传或从浏览器导入。解析阶段遇到需要登录或 bot 校验时，后端会尝试自动导入并重试一次，逻辑见 [_extract_metadata_with_cookies](../backend/app/api_support.py#L87)。下载阶段遇到同类错误时，任务管理器会刷新 cookies 并重试当前子视频，逻辑见 [_download_with_cookie_refresh](../backend/app/job_manager.py#L710)。
+Cookies 可手动上传或从浏览器导入。解析阶段遇到需要登录或 bot 校验时，后端会尝试自动导入并重试一次，逻辑见 [_extract_metadata_with_cookies](../backend/app/api_support.py#L87)。下载阶段遇到同类错误时，任务管理器会刷新 cookies 并重试当前子视频，逻辑见 [_download_with_cookie_refresh](../backend/app/job_manager.py#L723)。
 
 ### 上传到 B站
 
@@ -74,7 +74,8 @@ Cookies 可手动上传或从浏览器导入。解析阶段遇到需要登录或
 2. `POST /api/bilibili/uploads`（或 `/collections`）先做前置条件与硬限校验：不满足就 `409`/`400` 而不入队 —— 一次可解释的拒绝，好过留下一条要用户去清理的失败记录。
 3. `BiliManager` 的单 worker 串行处理：抽帧封面（可选）→ `biliup` 子进程投稿 → **回读账号稿件列表对账**（标题前缀匹配）→ 发并置顶评论（可选）。
 4. 状态写库后经 SSE 通知；前端按 `GET /api/bilibili/uploads/summary`（任务中心整列一次拿全）或单任务读模型重拉。
-5. 合集的视频全部确认发布后，再单独走一次归集：建 `season` → 逐条加进 section。归集是另一次调用、另一张表，失败不影响已发布的稿件。
+5. 稿件已在平台上之后，把下载阶段存下来的字幕作为**可关闭的 CC 字幕**一并提交（SRT/VTT 转成 BCC，挂在分P 的 `cid` 上）。它有自己的三档结论（`posted` / `skipped` / `failed`），**独立于稿件状态、也不进徽标**，失败还可以只重传一次字幕而不重投视频。
+6. 合集的视频全部确认发布后，再单独走一次归集：建 `season` → 逐条加进 section。归集是另一次调用、另一张表，失败不影响已发布的稿件。
 
 与下载最大的不同在于**「完成」的判据不在本机**：子进程返回码 0 只说明命令成功，平台上到底有没有这条稿件必须回读才知道，因此 `unverified`（待核对）是这套状态机里的一等状态，而不是失败的变体。
 
@@ -88,10 +89,11 @@ PlantUML 源文件：[download-lifecycle.puml](diagrams/download-lifecycle.puml)
 
 B站 上传有**自己的两套状态**，与 `JobStatus` 无关：
 
-- 稿件 [BiliUploadStatus](../backend/app/models.py#L93)：`queued` → `uploading` → `submitted`（命令成功、待对账）→ `published` / `reviewing` / `rejected`（按平台状态码折合）；命令失败落 `failed`，对账查不到落 `unverified`（待核对）。**`unverified` 不是失败的变体**：它表达「我们还不知道」，所以它的重试只重读平台、绝不重投。
-- 合集 [BiliSeasonStatus](../backend/app/models.py#L111)：`pending` → `grouping` → `grouped` / `failed`。`grouped` 只表示「已提交归集」——B站 对合集还有一道人工审核。
+- 稿件 [BiliUploadStatus](../backend/app/models.py#L104)：`queued` → `uploading` → `submitted`（命令成功、待对账）→ `published` / `reviewing` / `rejected`（按平台状态码折合）；命令失败落 `failed`，对账查不到落 `unverified`（待核对）。**`unverified` 不是失败的变体**：它表达「我们还不知道」，所以它的重试只重读平台、绝不重投。
+- 合集 [BiliSeasonStatus](../backend/app/models.py#L122)：`pending` → `grouping` → `grouped` / `failed`。`grouped` 只表示「已提交归集」——B站 对合集还有一道人工审核。
+- 字幕 `subtitle_state`：`skipped`（默认，没有字幕可传）→ `posted` / `failed`。它**不是** `BiliUploadStatus` 的一档：字幕挂在投稿**之后**，把「已发布 + 字幕失败」折成一种失败，用户能做的唯一正确动作（重传字幕）就被隐藏了。下载侧另有 `subtitle_source`（`human` / `auto` / `none`），其中 `none` 是「这个视频没有可用中英字幕」的**结论**，与 `NULL`（这一轮还没有结论）不同。
 
-进程重启后，停在 `uploading` 的记录（含 `queued`）一律折成**可重试的失败**，而不是永远停在「上传中」，见 [resume_interrupted](../backend/app/bili_manager.py#L370)。
+进程重启后，停在 `uploading` 的记录（含 `queued`）一律折成**可重试的失败**，而不是永远停在「上传中」，见 [resume_interrupted](../backend/app/bili_manager.py#L375)。
 
 ## 数据模型
 
@@ -99,7 +101,7 @@ B站 上传有**自己的两套状态**，与 `JobStatus` 无关：
 
 PlantUML 源文件：[data-model.puml](diagrams/data-model.puml)。
 
-核心表是 `Job`、`JobItem`、`JobEvent` 和 `Setting`；B站 上传另有两张自己的表 [`BiliUpload`](../backend/app/models.py#L121)（一条稿件一行，入参与结果都存）和 [`BiliSeason`](../backend/app/models.py#L164)（一个任务的合集一行）。旧数据库兼容列通过 `_ensure_columns()` 自动补齐，见 [db.py](../backend/app/db.py#L27)。
+核心表是 `Job`、`JobItem`、`JobEvent` 和 `Setting`；B站 上传另有两张自己的表 [`BiliUpload`](../backend/app/models.py#L132)（一条稿件一行，入参与结果都存）和 [`BiliSeason`](../backend/app/models.py#L180)（一个任务的合集一行）。旧数据库兼容列通过 `_ensure_columns()` 自动补齐，见 [db.py](../backend/app/db.py#L27)。
 
 B站 的**凭据不在这两张表里**，也不在任何表里：登录态只以文件形式放在 `data/bilibili/cookies.json`（gitignored），API 只回传名字与计数。凭据落库会被读模型、备份与 SQL 转储一并带出去，而这个文件形态还能直接被 `biliup` 复用，不必在两层之间搬运凭据。
 

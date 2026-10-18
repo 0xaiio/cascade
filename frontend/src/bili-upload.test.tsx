@@ -422,6 +422,15 @@ describe("App · B站 上传表单（合集）", () => {
     expect(within(dialog).getByText("第02集：Part two")).toBeInTheDocument();
   });
 
+  test("tells which subtitle each entry will carry before submitting", async () => {
+    const { dialog } = await openCollectionDialog();
+
+    // 字幕是跟着稿件一起发到平台上的，用户应该在按下「上传」之前就知道有没有 ——
+    // 而不是事后去看日志。文案由服务端给，前端不拼。
+    expect(within(dialog).getByText("en · 人工")).toBeInTheDocument();
+    expect(within(dialog).getByText("无字幕")).toBeInTheDocument();
+  });
+
   test("names the entries that are not downloaded and refuses to start", async () => {
     const { dialog } = await openCollectionDialog();
 

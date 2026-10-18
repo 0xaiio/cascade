@@ -68,6 +68,7 @@ from .bili_policy import (
     platform_state_text,
     status_for_platform_state,
 )
+from .bili_subtitle import SUBTITLE_SKIPPED, bilibili_language, upload_subtitle
 from .log_safety import sanitize_log_message
 from .models import BiliSeasonStatus, BiliUploadStatus
 
@@ -99,6 +100,13 @@ class UploadTarget:
     video_path: Path
     source_url: str = ""
     item_id: str | None = None
+    # 要一并传上去的字幕。**没有就是没有**（`None`），不是「还没找」——
+    # 判据在调用方：下载结论里记了路径，且那个文件现在还在磁盘上。
+    subtitle_path: Path | None = None
+    # 字幕轨的语言代码（yt-dlp 的形状，如 `zh-Hans` / `en-US`）。
+    # **它与 `subtitle_path` 必须成对给**：B站 的语言标识由它映射而来
+    # （`bili_subtitle.bilibili_language`），缺了就只能靠文件名猜。
+    subtitle_language: str | None = None
 
 
 @dataclass
@@ -149,6 +157,11 @@ class UploadResult:
     progress: float = 0.0
     # 置顶评论这一附加动作的结果（人话）。评论失败不影响稿件状态。
     comment: str | None = None
+    # CC 字幕这一附加动作的结果。**它是附加物，不参与稿件状态判定** ——
+    # 见 `bili_subtitle.upload_subtitle`：字幕没传上去不能把已发布的稿件说成失败。
+    subtitle_state: str = SUBTITLE_SKIPPED
+    subtitle_lan: str = ""
+    subtitle_message: str = ""
 
     @property
     def episode_ready(self) -> bool:
@@ -289,6 +302,40 @@ def _verify(
                 result.cover_url = str(pic)
 
 
+def _attach_subtitle(context: UploadContext, target: UploadTarget, result: UploadResult) -> None:
+    """稿件已在平台上之后，把 CC 字幕挂上去。**这一步不参与稿件状态的判定。**
+
+    三个前置条件，缺一个就 `skipped`（都是「这次没有字幕可传」，不是失败）：
+
+    1. 有字幕文件 —— 下载阶段就可能判成「该视频没有可用字幕」（需求允许跳过）；
+    2. 稿件已核对到 `aid` / `cid` —— 字幕是挂在**分P**上的，拿不到编号就无处可挂；
+    3. 稿件在平台上（`result.ok`）—— 未核实的稿件连存不存在都不知道。
+    """
+    if not target.subtitle_path:
+        result.subtitle_message = "没有已下载的字幕，跳过字幕上传"
+        return
+    if not result.ok:
+        result.subtitle_message = "稿件未确认已发布，跳过字幕上传"
+        return
+    if not (result.aid and result.cid and result.bvid):
+        result.subtitle_message = "稿件还没核对到 aid/cid，跳过字幕上传"
+        return
+
+    lan = bilibili_language(target.subtitle_language)
+    outcome = upload_subtitle(
+        context.transport,
+        context.jar,
+        aid=int(result.aid),
+        bvid=str(result.bvid),
+        cid=int(result.cid),
+        path=Path(target.subtitle_path),
+        lan=lan,
+    )
+    result.subtitle_state = outcome.state
+    result.subtitle_lan = outcome.lan or lan
+    result.subtitle_message = outcome.message
+
+
 def _reject(result: UploadResult, message: tuple[str, str]) -> UploadResult:
     """把一条结论为「失败」的结果补齐并返回。`_reject` 的语义是「不进入对账」。"""
     result.status = BiliUploadStatus.failed.value
@@ -368,6 +415,9 @@ def run_single(
             marker=COMMENT_MARKER,
         )
         result.comment = outcome.message
+
+    # 字幕放在**最后**：它是稿件的附加物，且依赖上面刚拿到的 aid/cid。
+    _attach_subtitle(context, target, result)
     return result
 
 
@@ -377,12 +427,18 @@ def reverify(
     title: str,
     index: int = 1,
     item_id: str | None = None,
+    subtitle_path: Path | None = None,
+    subtitle_language: str | None = None,
 ) -> UploadResult:
     """**只重新对账，不重新投稿。**
 
     「待核对」的重试必须走这条路：那些稿件的投稿命令已经成功过，再跑一次 `biliup` 就是
     真的投第二遍。把它们和失败态一起「重试」是最容易写错、代价也最大的一个分支 ——
     用户点一次「重试」，账号上就多一条重复稿件。
+
+    **字幕是唯一会在这里被重做的动作**：视频已经发布成功、只是字幕没传上去时，
+    重试没有别的东西可做（重投会多一条重复稿件），而字幕那次失败很可能是暂时的
+    （平台侧延迟、限流）。所以调用方在字幕失败时走这条路补传一次。
     """
     result = UploadResult(
         index=index,
@@ -391,6 +447,21 @@ def reverify(
         title=title,
     )
     _verify(context, title, result)
+    if subtitle_path:
+        _attach_subtitle(
+            context,
+            UploadTarget(
+                index=index,
+                title=title,
+                video_path=Path(""),
+                item_id=item_id,
+                subtitle_path=subtitle_path,
+                subtitle_language=subtitle_language,
+            ),
+            result,
+        )
+    else:
+        result.subtitle_message = "没有可用的字幕，未补传字幕"
     return result
 
 

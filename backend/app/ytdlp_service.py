@@ -24,6 +24,7 @@ from .log_safety import sanitize_log_message
 from .proxy import ProxyResolution, has_no_proxy_bypass, redact_proxy_credentials, resolve_proxy
 from .schemas import AnalyzeResponse, DownloadOptions, FormatOption, SubtitleOption, VideoEntry
 from .stall_guard import DownloadStalled, StallGuard
+from .subtitle_plan import SubtitlePlan, is_supported_language, resolve_subtitle_plan
 from .ytdlp_formats import (
     DEFAULT_MIN_AUTO_FALLBACK_HEIGHT,
     actual_format_from_info_dict,
@@ -180,6 +181,9 @@ class DownloadPreparation:
     # 时长（秒）顺带从同一份 `info` 里取出来：预检反正要取一次元数据，
     # 旧任务（建库时还没记时长）重启一次就能补上，不必为了时长再发一次请求。
     duration: float | None = None
+    # 本次的字幕结论。**由同一份 `info` 算出**（预检已经取过元数据，不额外发请求），
+    # 编排层据此改写 `subtitle_languages` 并把结论落到条目上。
+    subtitle: SubtitlePlan | None = None
 
 
 class YtDlpService:
@@ -407,7 +411,23 @@ class YtDlpService:
         被执行，症状是界面提示「已自动降级到 1080p」而一个字节都没下。见 ai/bug-fix/010。
         """
         if options.mode == "subtitles_only":
-            return DownloadPreparation(is_selectable=True)
+            # 只下字幕时没有「选格式」这回事，但**字幕计划仍然要算**（这才是一次
+            # 纯字幕下载的全部内容）。取元数据失败在这里**不判失败**：预检的语义是
+            # 「能不能下」，而真正的下载随后会用自己的报错把真实原因说出来 ——
+            # 在这里抛出只会把「预检失败」叠在真正的病因上。
+            try:
+                info = self._extract_info_for_subtitles(url, options, cookies_path)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "subtitle plan unavailable: url=%s error=%s",
+                    url,
+                    sanitize_log_message(self.readable_error_message(exc)),
+                )
+                return DownloadPreparation(is_selectable=True)
+            return DownloadPreparation(
+                is_selectable=True,
+                subtitle=self._subtitle_plan(info, options),
+            )
 
         ydl_opts = self.build_download_options(options, cookies_path)
         ydl_opts["skip_download"] = True
@@ -441,7 +461,37 @@ class YtDlpService:
             actual_format=actual_format,
             filesize=filesize,
             duration=duration_from_info_dict(info),
+            subtitle=self._subtitle_plan(info, options),
         )
+
+    def _extract_info_for_subtitles(
+        self,
+        url: str,
+        options: DownloadOptions,
+        cookies_path: Path | None,
+    ) -> dict[str, Any]:
+        """只为算字幕计划取一次元数据。**复用 `build_download_options`**，
+        免得出现「预检一套参数、下载另一套参数」这种两处真相；字幕模式下它本来
+        就是 `skip_download=True` 且不带 `format`。
+        """
+        ydl_opts = self.build_download_options(options, cookies_path)
+        ydl_opts["skip_download"] = True
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+        if not info:
+            raise ValueError("Unable to extract metadata for this URL.")
+        return info
+
+    def _subtitle_plan(self, info: dict[str, Any], options: DownloadOptions) -> SubtitlePlan:
+        """从一份 `info` 里算出本次的字幕结论。判定全在 `subtitle_plan`（可离线单测）。"""
+        plan = resolve_subtitle_plan(
+            info.get("subtitles") or {},
+            info.get("automatic_captions") or {},
+            allow_human=options.subtitle_source in {"human", "both"},
+            allow_auto=options.subtitle_source in {"auto", "both"},
+        )
+        logger.info("subtitle plan: language=%s code=%s origin=%s reason=%s", plan.language, plan.code, plan.origin, plan.reason)
+        return plan
 
     def build_download_options(
         self,
@@ -1053,15 +1103,21 @@ class YtDlpService:
     def _subtitle_languages(self, options: DownloadOptions) -> list[str]:
         """决定本次下载要拉哪些字幕语言。
 
-        空列表**绝不能**退化成 yt-dlp 的 ``["all"]``：那会让 yt-dlp 去拉该视频的
-        **全部**字幕轨（人工 + 自动，常见 20+ 条），密集请求立刻触发 HTTP 429，
-        而 429 会让整个 item 判定失败——连视频本体都不会被下载（真实验收里实测到）。
-        所以空列表改为回退到**有界**默认值（设置里的 ``default_subtitle_languages``）。
+        两条硬约束：
+
+        1. 空列表**绝不能**退化成 yt-dlp 的 ``["all"]``：那会让 yt-dlp 去拉该视频的
+           **全部**字幕轨（人工 + 自动，常见 20+ 条），密集请求立刻触发 HTTP 429，
+           而 429 会让整个 item 判定失败——连视频本体都不会被下载（真实验收里实测到）。
+           所以空列表改为回退到**有界**默认值（设置里的 ``default_subtitle_languages``）。
+        2. **只保留中英两族**。本项目只处理英文与中文字幕，其余语种一律忽略；
+           过滤在这里做，是因为它是「不管调用方有没有先跑预检」都会经过的唯一一道。
         """
-        if options.subtitle_languages:
-            return list(options.subtitle_languages)
-        if self.default_subtitle_languages:
-            return list(self.default_subtitle_languages)
+        requested = [code for code in options.subtitle_languages if is_supported_language(code)]
+        if requested:
+            return requested
+        configured = [code for code in self.default_subtitle_languages if is_supported_language(code)]
+        if configured:
+            return configured
         return list(FALLBACK_SUBTITLE_LANGUAGES)
 
     def _subtitle_options(self, options: DownloadOptions) -> dict[str, Any]:
@@ -1135,8 +1191,16 @@ class YtDlpService:
         return vcodec == "none" and acodec == "none"
 
     def _map_subtitles(self, subtitles: dict[str, list[dict[str, Any]]]) -> list[SubtitleOption]:
+        """把字幕轨映射成界面条目。**只保留中英两族** —— 本项目不处理其它语种。
+
+        过滤放在这里而不是界面上：这是「哪些语言存在」的唯一出口，界面、字幕语言选择器
+        与下载计划全都读它。放到下游就等于同一条规则写三遍，而漏一处的表现是
+        「界面列出了 20 种语言可选、选了却不下」。
+        """
         mapped: list[SubtitleOption] = []
         for language, tracks in sorted(subtitles.items()):
+            if not is_supported_language(language):
+                continue
             formats = sorted({track.get("ext", "unknown") for track in tracks if track})
             mapped.append(SubtitleOption(language=language, formats=formats))
         return mapped

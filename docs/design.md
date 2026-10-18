@@ -35,6 +35,8 @@
 | [bili_manager.py](../backend/app/bili_manager.py#L328) | L2 编排 | B站 上传的队列与编排：单 worker 串行、投稿间隔（抗账号级频控）、状态写库与收敛、重启后把中断记录折成可重试失败、环境体检、事件发布。 | 不直接调 `biliup`（经 `bili_upload`），不解析 B站 内部结构（经 `bili_api`），不算界面徽标（经 `bili_read_model`）。 |
 | [bili_read_model.py](../backend/app/bili_read_model.py#L60) | L2 编排 | 把 `bili_upload` / `bili_season` 投影成 API 读模型；**「多条记录 → 一档徽标」的聚合规则**只在这里定义。 | 不写库、不改状态；`elapsed_seconds` 复用 `job_read_model`（见下方「同层横向依赖」）。 |
 | [ytdlp_service.py](../backend/app/ytdlp_service.py#L88) | L3 领域 | yt-dlp 边界：元数据、预检测、参数构建、profile 重试链、错误分类、依赖诊断。 | 不碰数据库，不决定任务状态。 |
+| [subtitle_plan.py](../backend/app/subtitle_plan.py#L200) | L3 领域 | 字幕下载**计划**：主语言判定（`-orig` 原声轨）、同族轨偏好、人工→ASR→跳过的收敛、来源标签与摘要文案。**纯逻辑**：不联网、不读库、不 import yt-dlp。 | 不写库、不发请求；不知道 `JobItem` 的存在（结论由 `job_manager` 取走）。 |
+| [bili_subtitle.py](../backend/app/bili_subtitle.py#L218) | L3 领域 | B站 CC 字幕：SRT/VTT → BCC 转换、语言标识映射、一次字幕上传（`posted` / `skipped` / `failed`）。 | **不参与稿件状态判定**、不写库、不重试；不知道端点长什么样（端点在 `bili_api`）。 |
 | [ytdlp_formats.py](../backend/app/ytdlp_formats.py#L9) | L3 领域 | 格式选择器、分辨率/大小/codec 提取、降级候选计算。 | 不导入 yt-dlp。 |
 | [stall_guard.py](../backend/app/stall_guard.py#L32) | L3 领域 | 纯函数式停滞判定与 `DownloadStalled`。 | 不写库、不发布事件。 |
 | [fallback_policy.py](../backend/app/fallback_policy.py#L10) | L3 领域 | 降级原因常量与用户可读文案、重启建议。 | 不做降级决策（决策在 `resolution_decisions`）。 |
@@ -84,7 +86,7 @@
 | [JobQueue.tsx](../frontend/src/components/JobQueue.tsx#L21) | 任务中心展示与本地文件操作入口。 | 不直接访问本机文件系统（一律走后端受控打开/删除接口）。 |
 | [BiliIcon.tsx](../frontend/src/components/BiliIcon.tsx#L12) | B站 图标：圆角机身 + 两根天线 + 两只眼睛的**手绘** SVG，描边走 `currentColor` 由调用方决定颜色。 | 不含任何布局与文案；品牌色只落在这个图标上，不扩散成按钮配色。 |
 | [BiliUploadButton.tsx](../frontend/src/components/BiliUploadButton.tsx#L19) | 任务行/条目行上的上传入口：**图标 + 一句人话**。`idle` 档显示动作词（「上传到 B站」），其余档原样显示后端徽标文案 —— 前端不自己造一套状态文案，两处必然会漂移。 | 不请求、不判断能不能传（`disabledReason` 由 `App` 给），不决定上传什么。 |
-| [BiliUploadDialog.tsx](../frontend/src/components/BiliUploadDialog.tsx#L41) | 上传表单模态框，**单视频与合集共用**：单视频填的就是最终内容，合集填的是模板（`{index}` `{title}` `{count}` `{job}` 占位符）并带一张逐条预览表。硬限数字来自 `prefill.limits`，超限只报错不截断，未就绪的条目先标出来。 | 不渲染模板（渲染在后端 `bili_meta`，前端只显示服务端给的结果），不校验硬限（只显示 `12/80`），不发请求（`onSubmit` 归 `App`）。 |
+| [BiliUploadDialog.tsx](../frontend/src/components/BiliUploadDialog.tsx#L41) | 上传表单模态框，**单视频与合集共用**：单视频填的就是最终内容，合集填的是模板（`{index}` `{title}` `{count}` `{job}` 占位符）并带一张逐条预览表。硬限数字来自 `prefill.limits`，超限只报错不截断，未就绪的条目先标出来。预览表还有一列**字幕**，显示服务端算好的 `item.subtitle`。 | 不渲染模板（渲染在后端 `bili_meta`，前端只显示服务端给的结果），不校验硬限（只显示 `12/80`），不拼字幕文案（那句由后端 `subtitle_summary` 给），不发请求（`onSubmit` 归 `App`）。 |
 | [BiliJobStatus.tsx](../frontend/src/components/BiliJobStatus.tsx#L19) | 任务卡片里的上传明细与「下一步」：失败原因 + 服务端给的 advice、合集归集结论、重试入口。**只在有话说时渲染一行**。 | 不决定重试动作（后端按终态三选一），不给已成功的条目放重试按钮。 |
 | [BiliLoginSection.tsx](../frontend/src/components/BiliLoginSection.tsx#L29) | 设置面板里的 B站 区：环境体检、扫码登录（含轮询，1.5s）、导入登录文件、修复投稿工具。**凭据一个字符都不显示**（只给「已保存 N 项 / 缺 SESSDATA」的摘要与账号名）。 | 不显示 cookies 值或掩码前缀；「登录文件被 git 跟踪」单独红字，不由本组件自动修复。 |
 | [subtitles.ts](../frontend/src/subtitles.ts#L12) | 字幕文案与来源归一：`formatSubtitleInfo`（那行「字幕：来源 X · 格式 Y」）、`effectiveSubtitleSourceForAnalysis`（提交前把「两者都要」收敛成该视频真有的那一类）。 | 不做请求、不读存储。 |
@@ -131,7 +133,7 @@ PlantUML 源文件：[runtime-concurrency.puml](diagrams/runtime-concurrency.pum
 由此推出三条必须遵守的约定：
 
 1. **进度 hook 在工作线程上执行**，所以它使用自己的 `Session` 写库，不能复用请求级 session。
-2. **从线程发布事件要跨回事件循环**：[_publish_threadsafe](../backend/app/job_manager.py#L1114) 先写 `JobEvent` 行，再 `loop.call_soon_threadsafe` 调度 `broker.publish`。异步路径直接用 [_publish](../backend/app/job_manager.py#L1101)。
+2. **从线程发布事件要跨回事件循环**：[_publish_threadsafe](../backend/app/job_manager.py#L1186) 先写 `JobEvent` 行，再 `loop.call_soon_threadsafe` 调度 `broker.publish`。异步路径直接用 [_publish](../backend/app/job_manager.py#L1173)。
 3. **锁只保护状态转换，不保护下载**：`_item_claim_lock` 只覆盖"刷新 → 校验 queued → 置 running → commit"；`_cookie_import_lock` 只在 403 后的 cookies 刷新导入期间持有。下载本身靠 `should_cancel` 回调协作取消，而不是靠锁。
 4. **单个条目的收尾出错不能带走 worker**：worker 循环对每条 item 的整段工作加了兜底 —— 崩溃的条目被标记为 `failed`（而不是永远停在 `running`），worker 继续消费队列。没有这层兜底，一个条目的记账错误就会静默地少掉一个并发口。见 [008](../ai/bug-fix/008-return-in-finally-swallows-the-real-error.md)。
 
@@ -155,13 +157,34 @@ PlantUML 源文件：[download-data-flow.puml](diagrams/download-data-flow.puml)
 
 worker 领取 item → 声明式预检测（`prepare_download`，命中则不再二次 `extract_metadata`）→ 下载 → 进度 hook 依次经过 `StallGuard` 与 `DownloadProgressAggregator`，再由 `ProgressPersistGate` 决定是否落库 → `JobEvent` 持久化 + SSE 通知 → 前端收到信号后重新拉取 `/api/jobs` 读模型。终态写入平均速度并收敛任务状态。
 
+### 字幕下载计划
+
+字幕在**预检的同一次元数据里**就定了，不为它多发一次请求：
+
+`prepare_download` 取 `info` → `_subtitle_plan(info, options)` 产出 `SubtitlePlan`（语言族 / 真实轨码 /
+来源 / 理由），挂在 `DownloadPreparation.subtitle` 上回传给 `job_manager` →
+`_options_with_subtitle_plan` 把 `subtitle_languages` 收敛成**一条**（仅当用户没显式指定语言时）→
+yt-dlp 自己按「人工先占、自动只补缺」的顺序挑 → 下载成功后 `_record_subtitle_result` 按**磁盘证据**落库。
+
+三条必须记住的约束（详见 [ai/feature/subtitle-pipeline/02](../ai/feature/subtitle-pipeline/02-design.md)）：
+
+1. **主语言是平台给的，不是猜的**：yt-dlp 给原始语音那条 ASR 轨加 `-orig` 后缀，
+   `zh-Hans-orig` 存在 == 这个视频说的是中文。粤语 `yue` 不算中文。
+2. **「跳过字幕」不能用空语言列表表达**：空 `subtitleslangs` 被 yt-dlp 当「没给」，它会按自己的默认
+   去挑英文 —— 把「跳过」悄悄变成「下载英文」。必须请求一个**匹配不到任何轨**的值（族名 `zh` / `en`
+   正好如此），靠 `fullmatch` 落空实现「一条都不下、也不报错」。更不许退化成 `["all"]`
+   （一次拉 20+ 条轨会撞 429，连视频本体一起失败），所以 `SubtitlePlan.languages` 被设计成**永远 0 或 1 条**。
+3. **落库信磁盘不信计划**：yt-dlp 对「请求的语言不存在」是静默跳过（不报错），
+   所以「计划说有」与「真的写出来了」是两件事。`NULL`（这一轮没有结论）与 `none`（结论是没有）
+   也必须分开，否则用户刚提交任务就会看到「无字幕」。
+
 ### 设置变更
 
 `PUT /api/settings` → 写 `Setting` 行 → 按字段分派副作用：并发调整 worker 数；限速/重试改写 queued/running/paused 任务的 `options_json`，并把正在运行的 `JobItem` 标记为待重启（`_runtime_restart_items`），让当前 yt-dlp 实例抛出 `DownloadCancelled` 后重新入队，靠 `.part` 续传应用新参数；`aria2c_connections`（界面：单视频并发下载数）只更新设置与 `YtDlpService`，不影响正在进行的任务。
 
 ### 删除与文件清理
 
-删除统一走 `JobManager`：先删数据库记录与关联 `JobEvent`，再按需删除文件。文件删除只在"下载根目录"或"该任务下载目录"之内执行，并对 `output_path`、合并后的最终文件与 sidecar 分别枚举候选，见 [_delete_output_files](../backend/app/job_manager.py#L351)。删除 playlist 的最后一个子项时父任务一并删除。
+删除统一走 `JobManager`：先删数据库记录与关联 `JobEvent`，再按需删除文件。文件删除只在"下载根目录"或"该任务下载目录"之内执行，并对 `output_path`、合并后的最终文件与 sidecar 分别枚举候选，见 [_delete_output_files](../backend/app/job_manager.py#L357)。删除 playlist 的最后一个子项时父任务一并删除。
 
 ### 上传到 B站
 
@@ -174,15 +197,35 @@ worker 领取 item → 声明式预检测（`prepare_download`，命中则不再
 两条与平台语义直接相关的约束：
 
 - **命令返回码 0 不等于已发布**。`biliup` 退出后必须用账号的稿件列表回读对账（按标题前缀匹配，两侧都做空白归一），对不上就是 `unverified`（「待核对」，不是失败）——两者措辞必须分开，否则用户会去重投一条**已经投上去**的稿件。
-- **重试动作由终态决定，而不是由按钮决定**：`failed` / `rejected` → 重新投稿（复用同一行，`attempt` 自增）；`unverified` → **只**重读平台列表，绝不重投；已发布或在途 → 什么都不做。判定只在 [BiliManager](../backend/app/bili_manager.py#L328) 里做，界面只负责把这个结论显示出来。
+- **重试动作由终态决定，而不是由按钮决定**：`failed` / `rejected` → 重新投稿（复用同一行，`attempt` 自增）；`unverified` → **只**重读平台列表，绝不重投；已发布或在途 → **什么都不做，除非字幕失败**（那时走「只重传字幕」）。判定只在 [BiliManager](../backend/app/bili_manager.py#L333) 里做，界面只负责把这个结论显示出来。
+
+#### 挂在投稿末尾的 CC 字幕
+
+`run_single` 的最后一步是 [_attach_subtitle](../backend/app/bili_upload.py#L305)：稿件已在平台上、
+且拿到 `aid` + `cid` + `bvid` 之后，把下载阶段落下的字幕文件转成 BCC，提交到
+`POST /x/v2/dm/subtitle/draft/save`（`oid` = **cid**，不是 aid）。它是**字幕轨**而不是烧进画面的硬字幕，
+观众可以在播放器里关掉。
+
+四条设计约束：
+
+- **字幕的三档状态（`posted` / `skipped` / `failed`）与稿件状态完全分离**，且**不参与徽标聚合**。
+  徽标回答「这个任务传上去没有」；把「已发布 + 字幕失败」显示成一种新的失败档，用户能做的唯一
+  正确动作却是「重传字幕」而不是「重投视频」—— 那是一次误导。
+- **`upload_subtitle` 不抛异常**，任何失败都落成 `failed` 结论。这一步挂在「视频已经传成功」之后，
+  抛出去会让一条**已发布**的稿件被标成失败，而用户看到的错误还是「字幕没传上去」。
+- **字幕路径只在 `JobItem` 上存一份**，不复制到 `BiliUpload`；上传时按文件**现在还在不在**重新判断。
+  复制一份会让「记录里有路径」与「磁盘上有文件」变成两件互不相干的事。
+- **语言标识用平台白名单里的值**：`zh-Hans` → `zh`（`zh-Hans` 不在白名单），繁体三档原样保留。
+  B站 **不接受** `zh-CN` / `en-US` / `zh-Hans` / `en-GB`（`code=79011 不合法的语言`）—— 实测结论，
+  不是从文档推的。
 
 ## 状态机与一致性
 
 `Job` 与 `JobItem` 共用 `JobStatus` 六态，但驱动者不同：
 
 - `JobItem` 由 worker 驱动：认领时置 `running`，结束按结果置 `succeeded` / `failed` / `cancelled` / `paused`。
-- `Job` 由 [_maybe_finish_job](../backend/app/job_manager.py#L493) 收敛：只要还有 running 或 queued 子项就保持 `running`；全部结束才由 [_finish_job](../backend/app/job_manager.py#L767) 判定终态（有失败项 → `failed`；被暂停 → `paused`；被取消 → `cancelled`；否则 `succeeded`）。
-- 任务级进度是子项进度的算术平均，见 [_refresh_job_counts](../backend/app/job_manager.py#L815)。
+- `Job` 由 [_maybe_finish_job](../backend/app/job_manager.py#L499) 收敛：只要还有 running 或 queued 子项就保持 `running`；全部结束才由 [_finish_job](../backend/app/job_manager.py#L780) 判定终态（有失败项 → `failed`；被暂停 → `paused`；被取消 → `cancelled`；否则 `succeeded`）。
+- 任务级进度是子项进度的算术平均，见 [_refresh_job_counts](../backend/app/job_manager.py#L828)。
 
 并发一致性依赖三点：单条 `JobItem` 只会被一个 worker 认领（`_item_claim_lock` + 状态校验）；worker 线程各自持有 session 并独立 commit；读模型只读不写，避免与写入路径争抢状态。
 
@@ -191,7 +234,7 @@ B站 上传有**自己的两套状态**，与 `JobStatus` 无关：
 - `BiliUpload.status`（8 态）：`queued` → `uploading` → 三选一分支 —— `submitted`（命令成功、还没对账）→ `published` / `reviewing` / `rejected`（平台稿件状态码折合）；命令失败或对账查不到则落到 `unverified`（待核对）或 `failed`。`unverified` **不是失败**：它表达「我们还不知道」，所以它的重试只重读平台，不重投。
 - `BiliSeason.status`（4 态）：`pending` → `grouping` → `grouped` / `failed`。`grouped` 的文案是「已提交归集（B站 需人工审核）」——平台侧还有一个看不见的人工审核环节，界面不能承诺「合集已上线」。
 
-界面上的那**一档徽标**（`none` / `uploading` / `uploaded` / `unverified` / `partial` / `failed`）不落库，由 [derive_badge](../backend/app/bili_read_model.py#L60) 从「这个任务的全部记录 + 合集记录」现场算出来 —— 多条记录的聚合规则只有这一处，前端不参与。重启后的一致性靠 [resume_interrupted](../backend/app/bili_manager.py#L370)：进程退出时停在 `uploading` 的记录（含 `queued`）一律折成**可重试的失败**，而不是永远停在「上传中」。
+界面上的那**一档徽标**（`none` / `uploading` / `uploaded` / `unverified` / `partial` / `failed`）不落库，由 [derive_badge](../backend/app/bili_read_model.py#L60) 从「这个任务的全部记录 + 合集记录」现场算出来 —— 多条记录的聚合规则只有这一处，前端不参与。重启后的一致性靠 [resume_interrupted](../backend/app/bili_manager.py#L375)：进程退出时停在 `uploading` 的记录（含 `queued`）一律折成**可重试的失败**，而不是永远停在「上传中」。
 
 ## 持久化设计
 
@@ -199,11 +242,12 @@ B站 上传有**自己的两套状态**，与 `JobStatus` 无关：
 | --- | --- | --- |
 | WAL + `busy_timeout=5000` + `synchronous=NORMAL` | 每个连接建立时下发 pragma，见 [_configure_sqlite_connection](../backend/app/db.py#L14)。 | 多 worker 并发写入时"等待"而不是直接 `database is locked`；被其他进程锁住时只跳过 pragma，不让应用起不来。 |
 | 追加式补列 | [_ensure_columns](../backend/app/db.py#L43) 用 `PRAGMA table_info` + `ALTER TABLE ADD COLUMN`。 | 兼容旧库，无需迁移框架。**只支持追加**，不支持删除/改名/改类型。 |
-| WAL checkpoint | lifespan 启动与停止各执行一次 `wal_checkpoint(TRUNCATE)`，见 [checkpoint_wal](../backend/app/db.py#L93)。 | 避免进程被强杀后 `-wal` 侧车无界增长，也避免每次读都回放 WAL。失败只记日志。 |
+| WAL checkpoint | lifespan 启动与停止各执行一次 `wal_checkpoint(TRUNCATE)`，见 [checkpoint_wal](../backend/app/db.py#L104)。 | 避免进程被强杀后 `-wal` 侧车无界增长，也避免每次读都回放 WAL。失败只记日志。 |
 | 进度写入节流 | `ProgressPersistGate`：首次、终态、间隔 ≥250ms 或进度跳变 ≥0.5% 才写。 | 5 路并行时避免把每个 chunk 回调都变成一次事务。 |
 | 进度聚合 | `DownloadProgressAggregator` 按子流分别累计已下载字节，分母取"各子流已知总和的较大者"并以下限钳制。 | 字幕/chunk/分离音视频都会各自回调；不能让小文件或当前 chunk 的 100% 冒充整体完成，也不能把已下载字节归零。 |
 | B站 上传两张表 | `bili_upload`（一条稿件一行）与 `bili_season`（一个任务的合集一行）。前者存投稿入参（标题/简介/标签/分区/视频路径/是否做封面/评论）+ 结果（`bvid`/`aid`/`cid`/`verified_state`/`progress`/`attempt`/`log_tail`），后者存 `season_id` 与归集状态。 | **入参也落库**：投稿是异步的，worker 必须能在用户关掉页面之后照着重投；只存结果会让重试变成「拿当前表单再猜一次」。`attempt` 让重投复用同一行，界面不出现重复条目。 |
 | B站 凭据不入库 | 登录态只以文件形式放 `data/bilibili/cookies.json`（gitignored），API 只回传名字与计数。 | 凭据落库会被 `GET` 读模型、备份与 SQL 转储带出去；文件形态还能直接被 `biliup` 复用，不必在两层之间搬运凭据。 |
+| 字幕结论分两处记 | 下载侧在 `JobItem`（`subtitle_language` 族名 / `subtitle_source` / `subtitle_path`），上传侧在 `BiliUpload`（`subtitle_state` / `subtitle_lan` / `subtitle_message`）。**上传侧不复制字幕路径**，只存这一次的结论。 | 下载与上传是两条链路；路径复制一份会让「记录里有路径」与「磁盘上有文件」脱钩。`subtitle_state` 独立于 `status`，是为了让「字幕失败」不翻掉「稿件已发布」。历史行的补列默认 `skipped`（改动前从不传字幕，写 `failed` 等于给旧记录凭空编一个失败）。 |
 
 ## 错误分类与可观测性
 
@@ -211,12 +255,12 @@ B站 上传有**自己的两套状态**，与 `JobStatus` 无关：
 
 | 分类 | 判定依据 | 处理 |
 | --- | --- | --- |
-| cookies 缺失/需登录 | 错误链中出现 cookies 提示词 + 登录/bot 关键词，见 [is_cookie_required_error](../backend/app/ytdlp_service.py#L780)。 | 刷新浏览器 cookies 后重试一次；仍失败则给出两条可操作建议。 |
-| 媒体流阻断 | 403/`forbidden` 或连接重置族关键词，见 [is_media_stream_blocked_error](../backend/app/ytdlp_service.py#L682)。 | 在同清晰度下换 profile 重试；终态文案前置 cookies 状态，并给出降清晰度重启建议。 |
-| 目标格式不可用（**预检阶段**） | 错误文本含 `requested format is not available`，由 [prepare_download](../backend/app/ytdlp_service.py#L391) 抛出。 | 归一成 `is_selectable=False`，按原因分类后**真的**用降级清晰度重新预检并下载。 |
+| cookies 缺失/需登录 | 错误链中出现 cookies 提示词 + 登录/bot 关键词，见 [is_cookie_required_error](../backend/app/ytdlp_service.py#L830)。 | 刷新浏览器 cookies 后重试一次；仍失败则给出两条可操作建议。 |
+| 媒体流阻断 | 403/`forbidden` 或连接重置族关键词，见 [is_media_stream_blocked_error](../backend/app/ytdlp_service.py#L732)。 | 在同清晰度下换 profile 重试；终态文案前置 cookies 状态，并给出降清晰度重启建议。 |
+| 目标格式不可用（**预检阶段**） | 错误文本含 `requested format is not available`，由 [prepare_download](../backend/app/ytdlp_service.py#L395) 抛出。 | 归一成 `is_selectable=False`，按原因分类后**真的**用降级清晰度重新预检并下载。 |
 | 目标格式不可用（**下载阶段**） | 同上，但出现在预检通过之后（两次请求之间格式列表变了）。 | 标注 `requested_resolution_unselectable` 并把错误替换成降级说明；按 [架构文档](architecture.md) 的约定，**不**自动重下。 |
 | 停滞 | 看门狗判定字节峰值超时未刷新。 | 直接失败，不换 profile、不重试。 |
-| 其他 | 兜底。 | 透传清洗后的错误文本，见 [readable_error_message](../backend/app/ytdlp_service.py#L756)。 |
+| 其他 | 兜底。 | 透传清洗后的错误文本，见 [readable_error_message](../backend/app/ytdlp_service.py#L806)。 |
 
 可观测性由三处构成：任务中心读模型（进度/速度/大小/实际分辨率/格式/错误）、`/api/diagnostics`（依赖与稳定性参数，且不回显 token 原文）、以及 `JobEvent` 表（事件审计，可与 SSE 推送交叉核对）。
 
@@ -229,6 +273,8 @@ B站 上传有**自己的两套状态**，与 `JobStatus` 无关：
 | 新增一个降级原因 | 在 `fallback_policy.py` 加常量与文案、补一条 `restart_resolution` 规则，并在 `resolution_decisions.py` 里加上产出该常量的一条判定；不要在 `job_manager` 里内联中文字符串。`test_resolution_decisions.py` 有一条参数化用例会遍历所有 reason 常量，漏加文案会当场报错。 |
 | 新增一个 API | 在 `routers/` 下对应资源的模块里声明路由（新资源就新建一个模块并登记进 `API_ROUTERS`），模型放 `schemas.py`，跨路由复用的逻辑放 `api_support.py` / `job_artifacts.py`；涉及状态转换的一律委托 `JobManager`，不直接改表。 |
 | 新增一种错误分类 | 在 `YtDlpService` 加静态判定函数，在 `_log_item_failure` 加类别名，并补单测确认不会与其他分类互相误命中（尤其注意关键词冲突）。 |
+| 改字幕的选取规则（语种、主语言判据、轨偏好） | 只改 `subtitle_plan.py`（纯函数），`test_subtitle_plan` 当场能验；**不要**把判定搬进 `job_manager` —— 那里只有 IO 与时序，搬进去就测不到了。 |
+| 改字幕的上传行为（格式、端点、语言标识） | 格式与结论在 `bili_subtitle.py`，端点与参数在 `bili_api.save_subtitle`，时机在 `bili_upload._attach_subtitle`。语言标识**只能取平台白名单里的值**，改之前先看 `test_bili_subtitle` 里那张参数化表。 |
 
 ## 已知限制与设计债
 
@@ -243,5 +289,6 @@ B站 上传有**自己的两套状态**，与 `JobStatus` 无关：
 9. **合集归集依赖平台的「集合」接口，且有人工审核**：`season/add` 与 `season/section/episodes/add` 是页面接口而非稳定开放 API，平台改动会让归集失败（此时稿件仍已发布，可单独重试）。`grouped` 只表示「已提交归集」，不代表已上线。
 10. **投稿成功与否靠标题前缀回读对账**：平台没有提供「按本地标识查投稿」的接口，只能用最近稿件列表 + 标题前缀匹配。**改名后即无法对账**，这类记录会停在 `unverified` 并需要人工去创作中心确认。前缀匹配因此只取前若干字符并两侧空白归一。
 11. **账号级频控无法本地消解**：单 worker + 投稿间隔只能降低触发概率，不能保证不触发；触发后正确处理是等几分钟原样重投（平台报 `601`），改参数硬刷会把临时限流升级成账号风险。这一点已写进错误文案，不做自动重试。
+12. **字幕的语言标识受平台白名单约束，且主语言判定依赖平台给 `-orig` 标记**。白名单不含 `zh-CN` / `en-US` / `zh-Hans` / `en-GB`（实测 `code=79011`），因此 `zh-Hans` 必须压成 `zh`；平台不给原声轨标记时退化为「人工字幕里的中/英」、再退化为英文 —— 这是有界默认而不是精确判定。字幕失败也不进徽标，任务行上看不到「字幕没传上去」。详见 [ai/feature/subtitle-pipeline](../ai/feature/subtitle-pipeline/README.md)。
 
 以上限制的共同验证方式是 [测试文档](testing.md) 的自动测试与离线基准；涉及真实网络的验收必须以真实的 cookies 与连通性为前提，不能用手工观察替代。

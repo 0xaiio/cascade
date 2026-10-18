@@ -160,6 +160,11 @@ class FakeBiliTransport:
         seasons: list[dict[str, Any]] | None = None,
         season_sections: dict[int, list[dict[str, Any]]] | None = None,
         season_visible_after: int | None = None,
+        # CC 字幕（`x/v2/dm/subtitle/draft/save`）。默认成功；`subtitle_code` 用来复现
+        # 平台拒收（实测 `zh-CN` 就是 `79011 不合法的语言`）。
+        subtitle_code: int = 0,
+        subtitle_message: str = "ok",
+        subtitle_error: Exception | None = None,
     ) -> None:
         self.archives = [dict(DEFAULT_ARCHIVE)] if archives is UNSET else list(archives or [])
         # 稿件列表有平台侧延迟。`archives_ok_after=N` 让**前 N 次**读取失败、之后成功，
@@ -184,6 +189,10 @@ class FakeBiliTransport:
         # 消失，用来验证 `find_season_section` 真的会退避重试、而不是读一次就判死。
         self.season_visible_after = season_visible_after
         self.season_reads = 0
+        self.subtitle_code = subtitle_code
+        self.subtitle_message = subtitle_message
+        self.subtitle_error = subtitle_error
+        self.subtitles: list[dict[str, Any]] = []
         self.season_add_error = season_add_error
         self.episodes_error = episodes_error
         self.comment_code = comment_code
@@ -296,6 +305,11 @@ class FakeBiliTransport:
                     },
                 }
             )
+        if url.endswith("/x/v2/dm/subtitle/draft/save"):
+            self.subtitles.append(dict(form or {}))
+            if self.subtitle_error is not None:
+                raise self.subtitle_error
+            return self._json({"code": self.subtitle_code, "message": self.subtitle_message, "data": None})
         if url.endswith("/x/web-interface/nav"):
             if self.account is None:
                 return self._json({"code": 0, "data": {"isLogin": False}})

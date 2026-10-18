@@ -16,11 +16,11 @@
 4. 同高度 HLS 单文件。
 5. 同高度单文件。
 
-`safari_hls` profile 会把同高度 HLS 单文件放到最前，见 [format_selector](../backend/app/ytdlp_formats.py#L9)。如果 ffmpeg 可用，后端允许 video+audio 合并并设置 `merge_output_format=mp4`；ffmpeg 不可用时会退化为单文件选择器，而需要合并的清晰度直接报错，见 [build_download_options](../backend/app/ytdlp_service.py#L446)。
+`safari_hls` profile 会把同高度 HLS 单文件放到最前，见 [format_selector](../backend/app/ytdlp_formats.py#L9)。如果 ffmpeg 可用，后端允许 video+audio 合并并设置 `merge_output_format=mp4`；ffmpeg 不可用时会退化为单文件选择器，而需要合并的清晰度直接报错，见 [build_download_options](../backend/app/ytdlp_service.py#L496)。
 
 ## 下载前预检测
 
-在实际下载前，`JobManager` 先调用 [prepare_download](../backend/app/ytdlp_service.py#L391) 让 yt-dlp 按当前 selector 选择计划下载格式。源视频清晰度匹配时不再额外 `extract_metadata`——这是上一轮性能修复的成果，见 [PLAN.md](../ai/perf/PLAN.md)。只有计划格式不可选时，才会再解析元数据并按降级原因分类。结果通过 [_apply_download_preparation](../backend/app/job_manager.py#L954) 写入：
+在实际下载前，`JobManager` 先调用 [prepare_download](../backend/app/ytdlp_service.py#L395) 让 yt-dlp 按当前 selector 选择计划下载格式。源视频清晰度匹配时不再额外 `extract_metadata`——这是上一轮性能修复的成果，见 [PLAN.md](../ai/perf/PLAN.md)。只有计划格式不可选时，才会再解析元数据并按降级原因分类。结果通过 [_apply_download_preparation](../backend/app/job_manager.py#L990) 写入：
 
 - `actual_width`
 - `actual_height`
@@ -37,6 +37,39 @@
 
 默认 `DownloadOptions` 使用 `resolution="1440p"`、`subtitle_source="both"`、`subtitle_format="best"`。当用户选择“两者都要”时，yt-dlp 会同时启用人工字幕和自动字幕；若其中一种不存在，只会写出另一种可用字幕。前端在已解析元数据中发现用户指定的人工/自动字幕来源不可用时，会把提交给后端的 `subtitle_source` fallback 到另一种可用来源，并在下载选项面板显示“来源”和“格式”；若两类字幕都没有，则显示“无字幕”。
 
+### 只处理中英，并按主语言挑一条
+
+上面那条是**界面**上的「来源偏好」。真正决定「这次下哪一条」的是后端算出的
+[`SubtitlePlan`](../backend/app/subtitle_plan.py#L59)（不联网、不读库，纯逻辑）：
+
+1. **只认中文与英文两族**。[`language_family`](../backend/app/subtitle_plan.py#L109) 是唯一入口，
+   其余语种返回 `None`（= 忽略）。粤语 `yue` **不算**中文 —— yt-dlp 也单列它，混进来会让「中文视频」
+   的判定漂到粤语内容上。界面列出字幕与下载选取共用同一份过滤，避免「界面能选 20 种、下载只认两种」。
+2. **主语言是平台给的，不是猜的**。yt-dlp 给**原始语音语言**那条 ASR 轨加 `-orig` 后缀
+   （源码注释：`Add an "-orig" label to the original language so that it can be distinguished`），
+   所以 `zh-Hans-orig` 存在 == 这个视频说的是中文。判不出来时退化为「人工字幕里的中/英」，
+   再退化为英文 —— **有界默认，不是随机猜**。
+3. **人工优先 → 降级 ASR → 跳过不中断**，这条优先级是**免费的**：yt-dlp 的 `process_subtitles`
+   本来就是「先把人工字幕放进候选，再用自动字幕补没被占掉的语言」。我们只要把 `subtitleslangs`
+   收敛成**一条**语言即可；同一族有多条轨时由 [`pick_track`](../backend/app/subtitle_plan.py#L188)
+   只挑一条（简体优先繁体、基础码优先地区变体、`-orig` 排后），否则会落下 `en` + `en-orig` 两份。
+
+**「跳过」不能用空语言列表表达。** yt-dlp 用 `fullmatch` 匹配语言代码，而真实轨是 `zh-Hans` /
+`en-orig` 这种带后缀的，所以请求族名 `zh` / `en` 匹配不到任何轨 ⇒ 一条都不下、**也不报错** —— 这
+正是「跳过下载、不中断流程」。反过来，**空列表会被当成「没给」**，yt-dlp 按自己的默认去挑英文，
+把「跳过」悄悄变成「下载英文」；退化成 `["all"]` 更糟（一次拉 20+ 条轨撞 HTTP 429，连视频本体一起
+失败）。所以 `SubtitlePlan.languages` 被设计成**永远 0 或 1 条**。
+
+### 落库信磁盘，不信计划
+
+[`_record_subtitle_result`](../backend/app/job_manager.py#L1020) 用**字幕文件是否真的在磁盘上**判定：
+yt-dlp 对「请求的语言不存在」是静默跳过（不报错），所以「计划说有」与「写出来了」是两件事。
+存一个不存在的文件路径，等于让一次上传在最后一刻才发现没有字幕。
+
+`subtitle_source` 的 `NULL` 与 `none` 也必须分开：`NULL` = 这一轮**没有结论**（`video_only`、
+或不需要降级的早退路径），`none` = 有结论（这个视频确实没有可用中英字幕）。混成一句会让用户
+刚提交任务就看到「无字幕」。
+
 ## 分辨率降级原因
 
 降级原因常量在 [fallback_policy.py](../backend/app/fallback_policy.py#L4)，**决策**（降到哪、为什么、降不了时报哪句话）在 [resolution_decisions.py](../backend/app/resolution_decisions.py#L87) —— 后者是纯函数，不联网、不读库，所以每条规则都能在 `backend/tests/test_resolution_decisions.py` 里单独验。降级策略分为下载前自动处理和媒体流失败提示两类。
@@ -52,7 +85,7 @@
 
 ## 稳定下载策略
 
-默认策略是稳定优先，而不是并发优先。核心参数在 [ytdlp_service.py](../backend/app/ytdlp_service.py#L42) 和 [build_download_options](../backend/app/ytdlp_service.py#L446)：
+默认策略是稳定优先，而不是并发优先。核心参数在 [ytdlp_service.py](../backend/app/ytdlp_service.py#L42) 和 [build_download_options](../backend/app/ytdlp_service.py#L496)：
 
 - `continuedl=True`，保留 `.part` 断点续传。
 - `fragment_retries=20`、`file_access_retries=5`、`extractor_retries=5`。
@@ -62,7 +95,7 @@
 - `http_chunk_size=16 MiB` 默认值。进度百分比不能用单个 chunk 的 `total_bytes` 当成分母；聚合器会结合计划文件大小计算，见 [实现文档](implementation.md#进度与平均速度)。
 - `throttledratelimit` **默认关闭**（`throttled_rate_kbps=0`）。它只按**单条流**的速度判定，低于阈值时 yt-dlp 会抛 `ThrottledDownload`（`ReExtractInfo` 子类），被其无计数重提取循环接住，表现为每约 5 秒中断并重新 extract 一次；并发越高，单流速度越低，越容易误触发。仅在并发 = 1 且确实需要「慢就换 fresh URL」时，用 `YTDL_THROTTLED_RATE_KBPS=32` 开启（不建议回到 64）。
 - 停滞看门狗：默认 90 秒内没有任何新增字节就抛出 `DownloadStalled`，让任务**可见地失败**而不是永久 `running`，见 [stall_guard.py](../backend/app/stall_guard.py)。判据是「历史最大字节是否被刷新」而不是「本轮是否增长」，因此能区分节流振荡（峰值从不刷新）与正常断点续传（恢复后会超过旧峰值）。`finished` 会重置基线，避免合并格式的视频流→音频流切换被误判。`DownloadStalled` 不会进入下一个 profile 重试，直接冒泡为失败。用 `YTDL_STALL_TIMEOUT_SECONDS=0` 可关闭。注意它依赖 yt-dlp 的 progress 回调：若完全阻塞在 socket 读而无回调，兜底仍是 `socket_timeout=30`。
-- aria2c（可选，默认关闭）：yt-dlp 内建 http 下载器是**单连接**，单条 URL 无法并行，因此 aria2c 是单视频任务唯一真实的提速手段。安装后仍需 `YTDL_ARIA2C_ENABLED=true` 才会启用，连接数由设置面板（界面上叫「单视频并发下载数（1–4）」）或 `YTDL_ARIA2C_CONNECTIONS` 控制（默认 2，上限 4）。**「启用」不等于「每次下载都走」**：`default_aria2c` 是 profile 链里的**第二个**，只有 `default` 因媒体流被挡（403 / 连接重置）、要求登录校验、或 JS 挑战解不出来而被放弃时才会轮到它（见 [_download_profiles](../backend/app/ytdlp_service.py#L791) 与 `should_try_next_profile`）；因此调大段数对本来就能成功的下载没有影响。另外 `--min-split-size` 是 16 MiB，**小于这个体积的单流不会被真正拆分**，此时调大段数同样没有效果。多连接是 YouTube 侧最敏感的触发条件，403/限速概率显著上升，出问题时应先把连接数降到 1 或关闭 aria2c。
+- aria2c（可选，默认关闭）：yt-dlp 内建 http 下载器是**单连接**，单条 URL 无法并行，因此 aria2c 是单视频任务唯一真实的提速手段。安装后仍需 `YTDL_ARIA2C_ENABLED=true` 才会启用，连接数由设置面板（界面上叫「单视频并发下载数（1–4）」）或 `YTDL_ARIA2C_CONNECTIONS` 控制（默认 2，上限 4）。**「启用」不等于「每次下载都走」**：`default_aria2c` 是 profile 链里的**第二个**，只有 `default` 因媒体流被挡（403 / 连接重置）、要求登录校验、或 JS 挑战解不出来而被放弃时才会轮到它（见 [_download_profiles](../backend/app/ytdlp_service.py#L841) 与 `should_try_next_profile`）；因此调大段数对本来就能成功的下载没有影响。另外 `--min-split-size` 是 16 MiB，**小于这个体积的单流不会被真正拆分**，此时调大段数同样没有效果。多连接是 YouTube 侧最敏感的触发条件，403/限速概率显著上升，出问题时应先把连接数降到 1 或关闭 aria2c。
 - 默认 worker 并发为 5，按**同时下载的视频数**计算（跨单视频任务和合集子项）；若追求稳定，可在设置面板或 `YTDL_YOUTUBE_MAX_PARALLEL_DOWNLOADS=1` 中降为 1。并发是视频级而不是流级：单视频任务只有 1 个 `JobItem`，因此**并发设置对单视频任务无效**。
 - 单个视频内部的视频流、音频流、字幕和缩略图之间不再插入 2–5 秒 `sleep_interval`；视频级节流由 worker 并发承担。解析和下载阶段的 player API 请求仍使用 `sleep_interval_requests=1.0`。
 
@@ -76,7 +109,7 @@ python scripts\bench_throttle_guard.py <临时目录> 64    # 节流守卫开启
 python scripts\bench_throttle_guard.py <临时目录> 0     # 关闭后的连续下载
 ```
 
-YouTube 媒体流 403 或连接中断时，`YtDlpService.download()` 会在同一清晰度下依次尝试 profile，见 [download](../backend/app/ytdlp_service.py#L526)：
+YouTube 媒体流 403 或连接中断时，`YtDlpService.download()` 会在同一清晰度下依次尝试 profile，见 [download](../backend/app/ytdlp_service.py#L576)：
 
 1. `default`
 2. `default_aria2c`，仅当显式启用 aria2c 且可执行文件存在
@@ -84,7 +117,7 @@ YouTube 媒体流 403 或连接中断时，`YtDlpService.download()` 会在同�
 4. `safari_hls`
 5. `chrome_default`
 
-媒体流阻断判断见 [is_media_stream_blocked_error](../backend/app/ytdlp_service.py#L682)。这类失败不会在下载中途自动降清晰度重下，任务中心会给出中文原因和可重启建议。
+媒体流阻断判断见 [is_media_stream_blocked_error](../backend/app/ytdlp_service.py#L732)。这类失败不会在下载中途自动降清晰度重下，任务中心会给出中文原因和可重启建议。
 
 ## 代理与网络出口
 
@@ -130,11 +163,11 @@ node --experimental-permission --no-warnings=ExperimentalWarning -e <probe>
 
 ## Cookies 与登录态
 
-Cookies 用于合法账号态、年龄确认或 bot 校验场景。解析阶段逻辑见 [_extract_metadata_with_cookies](../backend/app/api_support.py#L87)，下载阶段刷新逻辑见 [_download_with_cookie_refresh](../backend/app/job_manager.py#L710)。
+Cookies 用于合法账号态、年龄确认或 bot 校验场景。解析阶段逻辑见 [_extract_metadata_with_cookies](../backend/app/api_support.py#L87)，下载阶段刷新逻辑见 [_download_with_cookie_refresh](../backend/app/job_manager.py#L723)。
 
 浏览器导入器只保存 YouTube/Google 相关 cookies，过滤规则见 [YOUTUBE_COOKIE_DOMAIN_SUFFIXES](../backend/app/browser_cookies.py#L13)。Edge 锁库和 DPAPI fallback 处理见 [browser_cookies.py](../backend/app/browser_cookies.py#L117)。
 
-未配置 cookies 时，YouTube 媒体流 403 概率显著上升。任务中心的媒体流失败文案会前置「当前 cookies 状态：已配置 / 未配置」，见 [_media_stream_failure_message](../backend/app/job_manager.py#L1047)，便于先排除这个最常见的前置条件。
+未配置 cookies 时，YouTube 媒体流 403 概率显著上升。任务中心的媒体流失败文案会前置「当前 cookies 状态：已配置 / 未配置」，见 [_media_stream_failure_message](../backend/app/job_manager.py#L1119)，便于先排除这个最常见的前置条件。
 
 已配置的 cookies 是否真的可用，由 [cookie_health.py](../backend/app/cookie_health.py#L234) 判定（`POST /api/cookies/verify`）。它把两件事合成一个结论：
 
@@ -153,7 +186,7 @@ Cookies 用于合法账号态、年龄确认或 bot 校验场景。解析阶段�
 - `YTDL_YOUTUBE_VISITOR_DATA`
 - `YTDL_YOUTUBE_PO_BROWSER_PATH`
 
-这些值只传给 yt-dlp extractor 或 provider，不在诊断接口中回显原文。诊断只返回是否已配置，以及可用的 impersonation client 列表，见 [get_dependency_status](../backend/app/ytdlp_service.py#L292)。
+这些值只传给 yt-dlp extractor 或 provider，不在诊断接口中回显原文。诊断只返回是否已配置，以及可用的 impersonation client 列表，见 [get_dependency_status](../backend/app/ytdlp_service.py#L296)。
 
 ## aria2c fallback
 
@@ -162,7 +195,7 @@ Cookies 用于合法账号态、年龄确认或 bot 校验场景。解析阶段�
 - `YTDL_ARIA2C_ENABLED=true`
 - 系统 PATH 或 `YTDL_ARIA2C_PATH` 能找到 aria2c
 
-连接数参数来自 `aria2c_connections`（默认 2，上限 4，可在设置面板修改），参数拼装见 [_aria2c_args](../backend/app/ytdlp_service.py#L804)。该能力给单视频提供多连接下载，但多连接会显著提高 YouTube 风控面，因此默认关闭；诊断接口返回 `aria2c_available`、`aria2c_enabled`、`aria2c_path`、`aria2c_connections` 便于判断当前是否真的生效。
+连接数参数来自 `aria2c_connections`（默认 2，上限 4，可在设置面板修改），参数拼装见 [_aria2c_args](../backend/app/ytdlp_service.py#L854)。该能力给单视频提供多连接下载，但多连接会显著提高 YouTube 风控面，因此默认关闭；诊断接口返回 `aria2c_available`、`aria2c_enabled`、`aria2c_path`、`aria2c_connections` 便于判断当前是否真的生效。
 
 ## 失败排查顺序
 
@@ -185,7 +218,7 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 投稿走 `biliup-rs 0.2.4`（`biliup.exe`，安装方式 `winget install --id ForgQi.biliup-rs --exact`），命令组装在 [build_upload_argv](../backend/app/bili_bin.py#L143)。三个必须知道的事实：
 
 - **登录必须一路做到拿到投稿令牌。** `biliup` 的 `login_by_cookies` 在**发出任何投稿请求之前**会拿 `token_info.access_token` 去 `passport.bilibili.com/x/passport-login/oauth2/info` 校验一次；`access_token` 是空串时 B站 返回 `-400 请求错误`，`biliup` 随即以 `Err` 退出 —— 全程约 1 秒、一个字节都不会上传，而错误码本身读不出「缺令牌」这层意思。所以 [exchange_tv_token](../backend/app/bili_auth.py#L142) 会补上 TV 端三步交换（申请二维码 → 用用户自己的 cookies 替他确认 → 轮询换回 `token_info`），「登录」的完成判据是**拿到令牌**而不是「文件里有 SESSDATA」。详见 bug-fix 记录 [011](../ai/bug-fix/011-biliup-refuses-a-token-less-cookie-file.md)。
-- **返回码 0 只说明命令跑完了，不说明平台上多了稿**。所以 [run_single](../backend/app/bili_upload.py#L299) 在命令返回后一定进 [_verify](../backend/app/bili_upload.py#L245)：用 `GET https://member.bilibili.com/x/web/archives` 回读账号近期稿件，按标题前缀在列表里找（[find_archive](../backend/app/bili_api.py#L124)，带退避重试，因为平台侧列表有延迟）。**查不到就停在 `unverified`** —— 这是本功能唯一不肯妥协的一条，宁可让用户去创作中心确认，也不拿「命令没报错」冒充「已发布」。
+- **返回码 0 只说明命令跑完了，不说明平台上多了稿**。所以 [run_single](../backend/app/bili_upload.py#L346) 在命令返回后一定进 [_verify](../backend/app/bili_upload.py#L258)：用 `GET https://member.bilibili.com/x/web/archives` 回读账号近期稿件，按标题前缀在列表里找（[find_archive](../backend/app/bili_api.py#L127)，带退避重试，因为平台侧列表有延迟）。**查不到就停在 `unverified`** —— 这是本功能唯一不肯妥协的一条，宁可让用户去创作中心确认，也不拿「命令没报错」冒充「已发布」。
 - **`--submit` 这个开关照传，但它不起作用。** 上游 0.2.4 的 `match submit` 两个分支都调 `submit_by_app`（web 分支被注释掉了），实际提交永远走 `/x/vu/app/add`。早先文档里「`--submit web` 是必需的」是一条**写错的结论**：真正拦住投稿的是上面那次启动时的令牌校验，不是提交接口。
 
 
@@ -220,7 +253,7 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 「加稿」要的是该合集下某个**分区（section）**的编号，两者在平台上是两套独立编号
 （实测合集 `9343273` 对应「正片」分区 `10455347`）。传错时返回 `code=-404 message=啥都木有` ——
 既不像网络问题也不像权限问题，而且**重试不会自愈**（同一个错值再发一遍）。所以归集前必先
-[find_season_section](../backend/app/bili_api.py#L319) 回读合集列表、从 `sections.sections[]` 里取分区：
+[find_season_section](../backend/app/bili_api.py#L322) 回读合集列表、从 `sections.sections[]` 里取分区：
 优先 `type == 1`（平台自动建的「正片」），该合集被加过自定义分区、没有默认分区时按 `order` 取最靠前的。
 读不到分区就**不发加稿请求**，落成「合集建好了，但没读到它下面的分区」并把 `season_id` 带回 ——
 详见 [013](../ai/bug-fix/013-season-section-id-confusion.md)。
@@ -228,8 +261,8 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 ### 归集方式：`season_id` 预置就是全部的「加入已有」（单视频与合集共用）
 
 界面上让用户选**新建合集 / 加入已有合集 / 不归集**，但后端的新逻辑只有一行赋值：
-`submit_collection` / `submit_single` 把用户选中的编号写进 [BiliSeason.season_id](../backend/app/models.py#L179)，
-而 [_group_work](../backend/app/bili_manager.py#L1193) 本来就读它当 `existing_season_id`
+`submit_collection` / `submit_single` 把用户选中的编号写进 [BiliSeason.season_id](../backend/app/models.py#L195)，
+而 [_group_work](../backend/app/bili_manager.py#L1271) 本来就读它当 `existing_season_id`
 并据此跳过 `create_season`。**复用既有的「重试不重复建合集」机制，而不是另开一条归集分支** ——
 另开一条就要把「建集 + 加集 + 失败重试 + 状态收敛」再实现一遍。
 
@@ -251,26 +284,26 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 
 - **`new` 模式下 `season_id` 必须保持为空**。它一旦被预置成任何值（哪怕是对的 `0`），
   `_group_work` 就会跳过建集、对着不存在的编号加视频。所以这个字段不能「顺手填个默认值」。
-- **用户显式选择必须覆盖上一轮遗留的编号**。[_upsert_season](../backend/app/bili_manager.py#L775)
+- **用户显式选择必须覆盖上一轮遗留的编号**。[_upsert_season](../backend/app/bili_manager.py#L780)
   既有的「`season_id` 不清空」是为了重试不重复建合集；照搬到「用户从加入 A 改成加入 B」上，
   就会静默地继续往 A 里加 —— 用户选了什么完全不起作用。
 - **校验必须看原始输入，不能先归一**。`normalize_group_mode` 把非法值修成 `new` 之后再校验，
   等于把校验废掉了：一个手滑写坏的 `group_mode` 会被静默执行。归一只用于**通过校验之后**
   真正执行的那一步。（这条是被 `test_an_unknown_group_mode_is_400_not_silently_corrected`
   抓出来的，不是推理出来的。）
-- **空合集名拦在投稿之前**。[_require_group_ready](../backend/app/bili_manager.py#L886) 是路由那道
+- **空合集名拦在投稿之前**。[_require_group_ready](../backend/app/bili_manager.py#L891) 是路由那道
   400 之外的第二道闸，因为两个提交方法都是公开的：空标题会被 B站 打回来，而那时
   **视频已经投出去了** —— 那是一次不可回退的半成品状态。
 
-**「读不到」与「真的没有」必须分开**。[list_seasons](../backend/app/bili_api.py#L272) 自己吞掉
+**「读不到」与「真的没有」必须分开**。[list_seasons](../backend/app/bili_api.py#L275) 自己吞掉
 网络异常返回空表，所以未登录时由 manager 按登录态判断、把原因写进 `BiliSeasonListRead.error`。
 不去伪造那个区别，是因为界面上一旦显示成「这个账号还没有合集」，用户就会跑去新建一个重复的。
 同理，没有编号的合集整条跳过（归集要按编号提交），缺标题的保留并用编号兜名。
 
 **「不归集」在两条路径上的落库行为相反，这是刻意的**：
 
-- **合集**：落成终态 [skipped](../backend/app/models.py#L118) 而不是 `pending`。
-  [_maybe_group](../backend/app/bili_manager.py#L1168) 只自动归集 `pending`，留 `pending` 会让
+- **合集**：落成终态 [skipped](../backend/app/models.py#L129) 而不是 `pending`。
+  [_maybe_group](../backend/app/bili_manager.py#L1246) 只自动归集 `pending`，留 `pending` 会让
   「不归集」根本不管用，且界面上挂一个永远不会结束的徽标。但记录**照建** —— 不落库的话界面上
   什么都不显示，用户分不清是「没归集」还是「还没开始归」。
 - **单视频**：`_upsert_season(create_if_missing=False)` **一条记录都不建**。单视频的默认恰好
@@ -298,7 +331,42 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 
 ### 评论幂等
 
-评论走 `POST /x/v2/reply/add`（旧的 `/x/v2/reply/send` 已下线），置顶走 `/x/v2/reply/top`。重复评论返回 `12051`，所以策略是**先查自己的评论**（在 `/x/v2/reply/main` 里按 `mid` 匹配 + 找 marker 串），有就只补置顶；真撞上 `12051` 时换 `mode=2`（时间序）重找一次。marker 是 [COMMENT_MARKER](../backend/app/bili_upload.py#L85)，写在评论正文里，用来区分「这条评论是本应用发的」和「用户自己发的」。
+评论走 `POST /x/v2/reply/add`（旧的 `/x/v2/reply/send` 已下线），置顶走 `/x/v2/reply/top`。重复评论返回 `12051`，所以策略是**先查自己的评论**（在 `/x/v2/reply/main` 里按 `mid` 匹配 + 找 marker 串），有就只补置顶；真撞上 `12051` 时换 `mode=2`（时间序）重找一次。marker 是 [COMMENT_MARKER](../backend/app/bili_upload.py#L86)，写在评论正文里，用来区分「这条评论是本应用发的」和「用户自己发的」。
+
+### CC 字幕上传：`oid` 是 cid，语言只用白名单里的值
+
+视频投稿成功后，下载阶段落下的字幕会被转成 BCC 提交到
+`POST https://api.bilibili.com/x/v2/dm/subtitle/draft/save`
+（[save_subtitle](../backend/app/bili_api.py#L366)）。它是**字幕轨**而不是烧进画面的硬字幕，
+观众可以在播放器里关掉 —— 这是需求要的那一条。
+
+四个参数上的坑：
+
+| 坑 | 说明 |
+| --- | --- |
+| **`oid` 必须是 `cid`** | 不是 `aid`。字幕挂在**分P**上；混用的报错是那句没有信息量的 `-404 啥都木有` |
+| **布尔要发小写字面量** | Python 的 `True` 经 `urlencode` 变成 `True`，平台按字符串解析就认不出来。必须显式写 `"true"` / `"false"`（`sign=false`、`submit=true`） |
+| **BCC 的 `from` / `to` 是秒** | 按毫秒填会让整条字幕的时间轴放大 1000 倍 |
+| **`lan` 只用白名单里的值** | 见下 |
+
+**语言白名单（实测，不是从文档推的）**：接受 `zh` / `en` / `zh-Hant` / `zh-TW` / `zh-HK` / `ja` /
+`ko` / `yue` / `fr`；**拒绝** `zh-CN` / `en-US` / `zh-Hans` / `en-GB`，报
+`code=79011 不合法的语言`。所以 [`bilibili_language`](../backend/app/bili_subtitle.py#L83) 把
+`zh-Hans` / `zh-CN` 压成 `zh`，繁体三档**原样保留**（它们在白名单里，压平反而丢信息），英文一律
+`en`，认不出来退 `en`。判据是用 `submit=false`（只存草稿、不发布）逐个枚举候选值得到的 ——
+**真发一次投稿去试语言值，试错成本是一堆不可撤销的稿件。**
+
+三条行为约束：
+
+- **字幕失败不翻稿件状态**。`upload_subtitle` **不抛异常**，任何失败都落成 `failed` 结论。这一步挂在
+  「视频已经传成功」之后，抛出去会让一条**已发布**的稿件被标成失败，而用户看到的错误还是「字幕没传上去」。
+- **字幕的三档状态不进徽标**。徽标回答「传上去没有」；把「已发布 + 字幕失败」显示成一种新的失败档，
+  用户能做的唯一正确动作却是「重传字幕」而不是「重投视频」。
+- **补救只重传字幕**：已发布/审核中且 `subtitle_state=failed` 时，重试走 `_reverify_work` 并带上字幕，
+  回执「已重新上传字幕」。重投视频不可撤销，只重传字幕是幂等的。
+
+转换侧另有两条：读文件用 `utf-8-sig`（带 BOM 的 SRT 不是罕见情况）；**只合并相邻且内容完全相同**
+的字幕（ASR 常把一句话切成好几条，但「内容相同却不相邻」是副歌/重复台词，不能合并）。
 
 ### 登录与 biliup 探测
 

@@ -84,6 +84,8 @@ def _read_job_item(item: JobItem, job_download_dir: str | None) -> JobItemRead:
             item.status,
             item.fallback_reason,
         ),
+        subtitle_language=item.subtitle_language,
+        subtitle_source=item.subtitle_source,
         error=item.error,
         created_at=item.created_at,
         updated_at=item.updated_at,
