@@ -145,11 +145,11 @@ PlantUML 源文件：[download-data-flow.puml](diagrams/download-data-flow.puml)
 
 ### 解析链接
 
-`POST /api/analyze` → `YtDlpService.extract_metadata()`（`extract_flat="in_playlist"`，带 cookies）→ `AnalyzeResponse`。若 yt-dlp 抛出的错误同时命中 cookies 提示词，则自动导入浏览器 cookies 后**重试一次**，见 [extract_metadata_with_cookies](../backend/app/api_support.py#L87)。
+`POST /api/analyze` → `YtDlpService.extract_metadata()`（`extract_flat="in_playlist"`，带 cookies）→ `AnalyzeResponse`。若 yt-dlp 抛出的错误同时命中 cookies 提示词，则自动导入浏览器 cookies 后**重试一次**，见 [extract_metadata_with_cookies](../backend/app/api_support.py#L95)。
 
 ### 建任务与入队
 
-`POST /api/jobs` → 解析 → 选条目（单视频合成 1 条 `VideoEntry`）→ 写 `Job` + N 个 `JobItem` → `enqueue()` 把 queued item id 放进队列。playlist 任务会额外在下载根目录下按安全化标题创建子目录，见 [job_download_dir](../backend/app/api_support.py#L79)。
+`POST /api/jobs` → 解析 → 选条目（单视频合成 1 条 `VideoEntry`）→ 写 `Job` + N 个 `JobItem` → `enqueue()` 把 queued item id 放进队列。playlist 任务会额外在下载根目录下按安全化标题创建子目录，见 [job_download_dir](../backend/app/api_support.py#L87)。
 
 ### 下载与进度
 
@@ -237,7 +237,7 @@ B站 上传有**自己的两套状态**，与 `JobStatus` 无关：
 3. **无正式迁移框架**：`_ensure_columns` 只能加列。删除列、改类型或数据回填都需要手工 SQL，且没有版本记录表。
 4. **单视频无法内部并行**：yt-dlp 内建 http 下载器是单连接，`concurrent_fragment_downloads=1`，因此单视频提速只能靠 aria2c（默认关闭，且会推高 403 风险）。
 5. **profile 链是串行且昂贵的**：每个 profile 都是一次完整 extract，失败路径的耗时按 profile 数累加；`DownloadStalled` 与 `DownloadCancelled` 已跳过链路，其余错误仍会逐级重试。
-6. **`notify_on_complete` 未接线**：请求模型接受该字段但下载链路不消费，属于历史遗留字段。
+6. ~~**`notify_on_complete` 未接线**：请求模型接受该字段但下载链路不消费，属于历史遗留字段。~~ **已接线**（[`ai/bug-fix/014`](../ai/bug-fix/014-a-dead-notify-switch.md)）：提醒由前端在浏览器里完成（Web Audio 合成提示音 + 右下角自动缩回的浮层），后端只负责存偏好、并把逐任务开关从 `options_json` 抬进读模型。
 7. **`data/` 下的旧库可能存在大量历史 item**：影响验收统计，也说明缺少归档/清理策略。
 8. **B站 上传依赖两个外部前提，缺一不可**：本机的 `biliup` 工具，以及一份有效的登录文件。两者都不在仓库里，也无法由应用代装/代登（登录必须用户拿手机扫）。因此「能跑通」的前提是环境已备好，界面只能把缺什么说清楚并给出下一步。
 9. **合集归集依赖平台的「集合」接口，且有人工审核**：`season/add` 与 `season/section/episodes/add` 是页面接口而非稳定开放 API，平台改动会让归集失败（此时稿件仍已发布，可单独重试）。`grouped` 只表示「已提交归集」，不代表已上线。

@@ -41,7 +41,7 @@
 | [011](011-biliup-refuses-a-token-less-cookie-file.md) | 扫码登录只拿到 cookies，biliup 拒绝开工：投稿必失败且查不出原因 | 本次 | 登录文件里 `token_info.access_token` 是空串，`login_by_cookies` 会**无条件先**拿它去 `oauth2/info` 校验，空串被 B站 判成 `-400 请求错误` → biliup 在发出任何投稿请求之前退出（实测 1.4 s）；同时 `on_log` 没有任何调用方，失败建议却让人去 app.log 搜原文 —— 照做只会扑空 |
 | [012](012-preflight-contradicts-itself-and-the-server.md) | 投稿表单的本地预检有两处口径不对：列表还在读就要求用户去选合集、标签回显截断写死 12 个字 | 本次 | 两条 `...(cond ? […] : [])` 各自求值，「正在读取…」与「还没选是哪个合集」在列表未就绪时同时成立 → 表单自相矛盾；而回显截断写死 12（服务端是 `TAG_PREVIEW_MAX = 40`），12 < 单项上限 21，于是那个三元的不截断分支**从未执行过** —— 服务端注释早就点名了这个坑 |
 | [013](013-season-section-id-confusion.md) | 「新建合集」之后的归集把合集 id 当成分区 id，平台每次都 `-404` 且重试不自愈 | 本次 | `season/add` 回的是**合集** id，而归集接口的 `sectionId` 要的是**分区** id（实测 `9343273` → `10455347`）。两者都是 `int`、又被同一个变量名装着，替身还一律回 `code:0` —— 本地全绿、真账号必失败；重试读回落库的 `season_id`，于是同一个错值再发一遍 |
-| [014](014-a-dead-notify-switch.md) | 「完成后通知」是一个谁都没实现的开关 | 本次 | 字段在 `schemas.py`、开关在 `DownloadOptionsPanel`，但前后端**没有任何一行**消费它（检索 `notify` 只命中定义处）。现按「全局选方式 + 逐任务决定要不要」两层接线：提醒在浏览器里做（Web Audio 合成提示音 + 右下角自动缩回的浮层），后端只存偏好并把逐任务开关从 `options_json` 抬进 `JobRead` |
+| [014](014-a-dead-notify-switch.md) | 「完成后通知」是一个谁都没实现的开关 | `e74fddc` | 字段在 `schemas.py`、开关在 `DownloadOptionsPanel`，但前后端**没有任何一行**消费它（检索 `notify` 只命中定义处）。现按「全局选方式 + 逐任务决定要不要」两层接线：提醒在浏览器里做（Web Audio 合成提示音 + 右下角自动缩回的浮层），后端只存偏好并把逐任务开关从 `options_json` 抬进 `JobRead` |
 
 ## 本轮（2026-10-01）背景
 
