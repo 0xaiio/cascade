@@ -78,7 +78,7 @@ yt-dlp 的 `process_subtitles` 就是这个顺序：先把 `subtitles`
   所以 `SubtitlePlan.languages` 被设计成**永远有界**（0 或 1 条），返回 `["all"]` 在类型上就不可能。
 
 结论：`SubtitlePlan.languages` 返回 `[code]` 或 `[]`；没有可用轨时上层请求**族名**
-（[`_options_with_subtitle_plan`](../../../backend/app/job_manager.py#L977)），靠 `fullmatch` 落空实现跳过。
+（[`_options_with_subtitle_plan`](../../../backend/app/job_manager.py#L1019)），靠 `fullmatch` 落空实现跳过。
 
 ## 语言标识与平台白名单
 

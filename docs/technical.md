@@ -20,7 +20,7 @@
 
 ## 下载前预检测
 
-在实际下载前，`JobManager` 先调用 [prepare_download](../backend/app/ytdlp_service.py#L395) 让 yt-dlp 按当前 selector 选择计划下载格式。源视频清晰度匹配时不再额外 `extract_metadata`——这是上一轮性能修复的成果，见 [PLAN.md](../ai/perf/PLAN.md)。只有计划格式不可选时，才会再解析元数据并按降级原因分类。结果通过 [_apply_download_preparation](../backend/app/job_manager.py#L990) 写入：
+在实际下载前，`JobManager` 先调用 [prepare_download](../backend/app/ytdlp_service.py#L395) 让 yt-dlp 按当前 selector 选择计划下载格式。源视频清晰度匹配时不再额外 `extract_metadata`——这是上一轮性能修复的成果，见 [PLAN.md](../ai/perf/PLAN.md)。只有计划格式不可选时，才会再解析元数据并按降级原因分类。结果通过 [_apply_download_preparation](../backend/app/job_manager.py#L1032) 写入：
 
 - `actual_width`
 - `actual_height`
@@ -62,7 +62,7 @@
 
 ### 落库信磁盘，不信计划
 
-[`_record_subtitle_result`](../backend/app/job_manager.py#L1020) 用**字幕文件是否真的在磁盘上**判定：
+[`_record_subtitle_result`](../backend/app/job_manager.py#L1062) 用**字幕文件是否真的在磁盘上**判定：
 yt-dlp 对「请求的语言不存在」是静默跳过（不报错），所以「计划说有」与「写出来了」是两件事。
 存一个不存在的文件路径，等于让一次上传在最后一刻才发现没有字幕。
 
@@ -163,11 +163,11 @@ node --experimental-permission --no-warnings=ExperimentalWarning -e <probe>
 
 ## Cookies 与登录态
 
-Cookies 用于合法账号态、年龄确认或 bot 校验场景。解析阶段逻辑见 [_extract_metadata_with_cookies](../backend/app/api_support.py#L87)，下载阶段刷新逻辑见 [_download_with_cookie_refresh](../backend/app/job_manager.py#L723)。
+Cookies 用于合法账号态、年龄确认或 bot 校验场景。解析阶段逻辑见 [_extract_metadata_with_cookies](../backend/app/api_support.py#L87)，下载阶段刷新逻辑见 [_download_with_cookie_refresh](../backend/app/job_manager.py#L765)。
 
 浏览器导入器只保存 YouTube/Google 相关 cookies，过滤规则见 [YOUTUBE_COOKIE_DOMAIN_SUFFIXES](../backend/app/browser_cookies.py#L13)。Edge 锁库和 DPAPI fallback 处理见 [browser_cookies.py](../backend/app/browser_cookies.py#L117)。
 
-未配置 cookies 时，YouTube 媒体流 403 概率显著上升。任务中心的媒体流失败文案会前置「当前 cookies 状态：已配置 / 未配置」，见 [_media_stream_failure_message](../backend/app/job_manager.py#L1119)，便于先排除这个最常见的前置条件。
+未配置 cookies 时，YouTube 媒体流 403 概率显著上升。任务中心的媒体流失败文案会前置「当前 cookies 状态：已配置 / 未配置」，见 [_media_stream_failure_message](../backend/app/job_manager.py#L1161)，便于先排除这个最常见的前置条件。
 
 已配置的 cookies 是否真的可用，由 [cookie_health.py](../backend/app/cookie_health.py#L234) 判定（`POST /api/cookies/verify`）。它把两件事合成一个结论：
 

@@ -128,7 +128,7 @@ Linux/macOS：bash init/start.sh dev
 
 ## 环境变量
 
-配置类定义见 [AppSettings](../backend/app/config.py#L19)，前缀为 `YTDL_`，并会读取仓库根目录的 `.env`。`env_file` 用的是**绝对路径**（`REPO_ROOT / ".env"`），所以与你从哪个目录启动无关 —— 相对路径会按当前工作目录解析，而文档里的命令都是 `cd backend` 之后执行的。`.env` 已被 Git 忽略。下表列出 `AppSettings` 的全部 22 个字段及其当前默认值；另有 `YTDL_LOG_LEVEL`（默认 `INFO`）不经过 `AppSettings`，由 [configure_logging](../backend/app/logging_setup.py#L48) 直接读取。
+配置类定义见 [AppSettings](../backend/app/config.py#L19)，前缀为 `YTDL_`，并会读取仓库根目录的 `.env`。`env_file` 用的是**绝对路径**（`REPO_ROOT / ".env"`），所以与你从哪个目录启动无关 —— 相对路径会按当前工作目录解析，而文档里的命令都是 `cd backend` 之后执行的。`.env` 已被 Git 忽略。下表列出 `AppSettings` 的全部 27 个字段及其当前默认值；另有 `YTDL_LOG_LEVEL`（默认 `INFO`）不经过 `AppSettings`，由 [configure_logging](../backend/app/logging_setup.py#L48) 直接读取。
 
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -151,9 +151,14 @@ Linux/macOS：bash init/start.sh dev
 | `YTDL_ANTI403_HTTP_CHUNK_SIZE_MB` | `16` | HTTP chunk 大小，按块重开请求以降低 403 概率。 |
 | `YTDL_THROTTLED_RATE_KBPS` | `0`（关闭） | 单条流低速重取阈值。`> 0` 时会写入 yt-dlp 的 `throttledratelimit`，见 [技术文档](technical.md#稳定下载策略)。 |
 | `YTDL_STALL_TIMEOUT_SECONDS` | `90.0` | 停滞看门狗阈值；该秒数内没有任何新增字节就让任务失败。`0` 表示关闭。 |
+| `YTDL_ORPHAN_RECOVERY` | `resume` | 进程退出后残留在 `queued`/`running` 的条目怎么处理：`resume` = 重新排队并断点续传；`fail` = 标记失败并写明原因（适合清掉大批陈年积压）。只认 `fail`，其余取值按 `resume` 处理并打一条 warning。见 [排障手册](troubleshooting.md#重启后任务永远停在排队中)。 |
 | `YTDL_ARIA2C_ENABLED` | `false` | 是否启用 aria2c fallback。 |
 | `YTDL_ARIA2C_PATH` | 空 | aria2c 可执行文件路径或命令名；为空时按 PATH 查找。 |
 | `YTDL_ARIA2C_CONNECTIONS` | `2` | aria2c 每文件连接数，取值范围 `1..4`。连接越多，403/限速风险越高。 |
+| `YTDL_COMPLETION_NOTIFICATION` | `both` | 任务到终态时怎么提醒：`off` / `sound` / `toast` / `both`。非法值由 `api_support._completion_notification` 收敛，不会让应用起不来。见 [用户手册](user-manual.md)。 |
+| `YTDL_BILIUP_PATH` | 空 | `biliup` 可执行文件；留空时按「PATH → WinGet 包目录」探测，并逐级校验 PE 头（WinGet 留下的 0 字节空壳会被拒绝）。 |
+| `YTDL_BILI_COOKIE_FILENAME` | `bili_cookies.json` | B站 登录态文件名，落在 `data/` 下。 |
+| `YTDL_BILI_UPLOAD_GAP_SECONDS` | `20.0` | 合集逐个投稿之间强制留的间隔，用于规避 B站 账号级频控（错误码 601）。 |
 
 运行时可在设置面板修改的字段（下载目录、并发、默认清晰度、字幕语言、限速、重试次数、`aria2c_connections` —— 界面上叫「单视频并发下载数」）会写入 `Setting` 表并在下次启动时覆盖环境变量，见 [_apply_stored_settings](../backend/app/api_support.py#L141)。
 

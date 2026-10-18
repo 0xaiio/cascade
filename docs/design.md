@@ -29,7 +29,8 @@
 | [config.py](../backend/app/config.py#L19) | L1 契约 | 声明全部设置字段、默认值与约束、目录准备。 | 不读数据库（`Setting` 覆盖在 `api_support.py` 里做）。 |
 | [schemas.py](../backend/app/schemas.py#L14) | L1 契约 | 定义 HTTP 线上模型与枚举。 | 不引用 yt-dlp 类型，不含业务逻辑。 |
 | [models.py](../backend/app/models.py#L27) | L1 契约 | 定义持久化表结构与 `JobStatus`。 | 不做读写编排。 |
-| [job_manager.py](../backend/app/job_manager.py#L43) | L2 编排 | 队列、worker、并发、暂停/重启/删除、进度 hook、错误分类、终态收敛、事件发布。 | 不直接调用 yt-dlp（经 `YtDlpService`），不解析 yt-dlp 内部结构（经 formats 工具），**不做降级判定**（判定在 `resolution_decisions`）。 |
+| [job_manager.py](../backend/app/job_manager.py#L43) | L2 编排 | 队列、worker、并发、暂停/重启/删除、进度 hook、错误分类、终态收敛、事件发布、**启动时的孤儿条目恢复**。 | 不直接调用 yt-dlp（经 `YtDlpService`），不解析 yt-dlp 内部结构（经 formats 工具），**不做降级判定**（判定在 `resolution_decisions`），**不做孤儿条目的状态判定**（在 `orphan_recovery`）。 |
+| [orphan_recovery.py](../backend/app/orphan_recovery.py#L48) | L2 编排 | 启动时把上次进程退出留下的 `queued`/`running` 条目收敛成重启后成立的状态（恢复 / 失败 / 取消 / 暂停），返回「要重新排队哪些」；按任务创建时间与条目序号排序。 | **不决定任务终态**（回到 `job_manager._maybe_finish_job`），不启动 worker、不入队、不发事件。 |
 | [job_read_model.py](../backend/app/job_read_model.py#L12) | L2 编排 | 把表投影成 API 读模型：聚合分辨率/格式、`elapsed_seconds`、降级消息。 | 不写库、不改状态。 |
 | [events.py](../backend/app/events.py#L7) | L2 编排 | 进程内 SSE 扇出（每个订阅者一个队列）。 | 不持久化事件（持久化在 `job_manager`）。 |
 | [bili_manager.py](../backend/app/bili_manager.py#L328) | L2 编排 | B站 上传的队列与编排：单 worker 串行、投稿间隔（抗账号级频控）、状态写库与收敛、重启后把中断记录折成可重试失败、环境体检、事件发布。 | 不直接调 `biliup`（经 `bili_upload`），不解析 B站 内部结构（经 `bili_api`），不算界面徽标（经 `bili_read_model`）。 |
@@ -133,9 +134,10 @@ PlantUML 源文件：[runtime-concurrency.puml](diagrams/runtime-concurrency.pum
 由此推出三条必须遵守的约定：
 
 1. **进度 hook 在工作线程上执行**，所以它使用自己的 `Session` 写库，不能复用请求级 session。
-2. **从线程发布事件要跨回事件循环**：[_publish_threadsafe](../backend/app/job_manager.py#L1186) 先写 `JobEvent` 行，再 `loop.call_soon_threadsafe` 调度 `broker.publish`。异步路径直接用 [_publish](../backend/app/job_manager.py#L1173)。
+2. **从线程发布事件要跨回事件循环**：[_publish_threadsafe](../backend/app/job_manager.py#L1228) 先写 `JobEvent` 行，再 `loop.call_soon_threadsafe` 调度 `broker.publish`。异步路径直接用 [_publish](../backend/app/job_manager.py#L1215)。
 3. **锁只保护状态转换，不保护下载**：`_item_claim_lock` 只覆盖"刷新 → 校验 queued → 置 running → commit"；`_cookie_import_lock` 只在 403 后的 cookies 刷新导入期间持有。下载本身靠 `should_cancel` 回调协作取消，而不是靠锁。
 4. **单个条目的收尾出错不能带走 worker**：worker 循环对每条 item 的整段工作加了兜底 —— 崩溃的条目被标记为 `failed`（而不是永远停在 `running`），worker 继续消费队列。没有这层兜底，一个条目的记账错误就会静默地少掉一个并发口。见 [008](../ai/bug-fix/008-return-in-finally-swallows-the-real-error.md)。
+5. **队列不跨进程存活，所以启动时必须先对账**：`asyncio.Queue` 随进程消失，而库里还留着 `queued`/`running`。启动序列是「先改库、再 `start()`」——反过来 worker 会与被扫描的行并发读写。见 [015](../ai/bug-fix/015-orphan-items-never-resume.md)。
 
 并发度语义：并发是**视频级**的——worker 数等于当前并发设置，队列里流动的是 `JobItem` id。单视频任务只有 1 个 `JobItem`，因此并发设置对它无效；`set_concurrency()` 通过新增 worker 任务或投放 `None` 哨兵来调整规模。
 
@@ -184,7 +186,7 @@ yt-dlp 自己按「人工先占、自动只补缺」的顺序挑 → 下载成�
 
 ### 删除与文件清理
 
-删除统一走 `JobManager`：先删数据库记录与关联 `JobEvent`，再按需删除文件。文件删除只在"下载根目录"或"该任务下载目录"之内执行，并对 `output_path`、合并后的最终文件与 sidecar 分别枚举候选，见 [_delete_output_files](../backend/app/job_manager.py#L357)。删除 playlist 的最后一个子项时父任务一并删除。
+删除统一走 `JobManager`：先删数据库记录与关联 `JobEvent`，再按需删除文件。文件删除只在"下载根目录"或"该任务下载目录"之内执行，并对 `output_path`、合并后的最终文件与 sidecar 分别枚举候选，见 [_delete_output_files](../backend/app/job_manager.py#L399)。删除 playlist 的最后一个子项时父任务一并删除。
 
 ### 上传到 B站
 
@@ -224,8 +226,8 @@ yt-dlp 自己按「人工先占、自动只补缺」的顺序挑 → 下载成�
 `Job` 与 `JobItem` 共用 `JobStatus` 六态，但驱动者不同：
 
 - `JobItem` 由 worker 驱动：认领时置 `running`，结束按结果置 `succeeded` / `failed` / `cancelled` / `paused`。
-- `Job` 由 [_maybe_finish_job](../backend/app/job_manager.py#L499) 收敛：只要还有 running 或 queued 子项就保持 `running`；全部结束才由 [_finish_job](../backend/app/job_manager.py#L780) 判定终态（有失败项 → `failed`；被暂停 → `paused`；被取消 → `cancelled`；否则 `succeeded`）。
-- 任务级进度是子项进度的算术平均，见 [_refresh_job_counts](../backend/app/job_manager.py#L828)。
+- `Job` 由 [_maybe_finish_job](../backend/app/job_manager.py#L541) 收敛：只要还有 running 或 queued 子项就保持 `running`；全部结束才由 [_finish_job](../backend/app/job_manager.py#L822) 判定终态（有失败项 → `failed`；被暂停 → `paused`；被取消 → `cancelled`；否则 `succeeded`）。
+- 任务级进度是子项进度的算术平均，见 [_refresh_job_counts](../backend/app/job_manager.py#L870)。
 
 并发一致性依赖三点：单条 `JobItem` 只会被一个 worker 认领（`_item_claim_lock` + 状态校验）；worker 线程各自持有 session 并独立 commit；读模型只读不写，避免与写入路径争抢状态。
 

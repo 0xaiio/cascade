@@ -69,10 +69,10 @@
 
 | 位置 | 改动 |
 | --- | --- |
-| [_run_item](../../../backend/app/job_manager.py#L524) | 开跑前重置 `subtitle_language` / `subtitle_source` / `subtitle_path`（重跑不能留旧路径）；成功后调 `_record_subtitle_result` |
+| [_run_item](../../../backend/app/job_manager.py#L566) | 开跑前重置 `subtitle_language` / `subtitle_source` / `subtitle_path`（重跑不能留旧路径）；成功后调 `_record_subtitle_result` |
 | [_prepare_download](../../../backend/app/job_manager.py#L932) | 返回 `tuple[DownloadOptions, SubtitlePlan \| None]`；用 `getattr(preparation, "subtitle", None)` 取计划（测试的 fake 是 `SimpleNamespace`） |
-| [_options_with_subtitle_plan](../../../backend/app/job_manager.py#L977) | **只在用户没显式指定语言时**改写；填 `[plan.code or plan.language]` |
-| [_record_subtitle_result](../../../backend/app/job_manager.py#L1020) | **按磁盘证据落库**；`plan` 为 `None` 时仍然按磁盘发现认字幕，但 `subtitle_source` 留 `NULL`（没有来源结论 ≠ 结论是没有） |
+| [_options_with_subtitle_plan](../../../backend/app/job_manager.py#L1019) | **只在用户没显式指定语言时**改写；填 `[plan.code or plan.language]` |
+| [_record_subtitle_result](../../../backend/app/job_manager.py#L1062) | **按磁盘证据落库**；`plan` 为 `None` 时仍然按磁盘发现认字幕，但 `subtitle_source` 留 `NULL`（没有来源结论 ≠ 结论是没有） |
 
 ### `backend/app/models.py` / `db.py`
 

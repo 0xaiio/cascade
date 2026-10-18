@@ -19,7 +19,7 @@ PlantUML 源文件：[system-context.puml](diagrams/system-context.puml)。
 | React/Vite 前端 | 解析表单、下载选项、任务中心、cookies 操作和设置面板。 | [App.tsx](../frontend/src/App.tsx)、[api.ts](../frontend/src/api.ts#L37) |
 | FastAPI 后端 | HTTP API、SSE、任务调度、SQLite 持久化、调用 yt-dlp。 | [create_app](../backend/app/main.py#L40) |
 | 启动入口 | 解析命令行、启动前做端口预检并识别占用者、把实际监听地址打印出来，再交给 uvicorn。 | [__main__.py](../backend/app/__main__.py#L64)、[dev_server.py](../backend/app/dev_server.py#L44) |
-| 任务调度与执行 | 队列、worker、暂停/重启/删除、进度聚合、错误分类与终态收敛。 | [JobManager](../backend/app/job_manager.py#L50) |
+| 任务调度与执行 | 队列、worker、暂停/重启/删除、进度聚合、错误分类与终态收敛。 | [JobManager](../backend/app/job_manager.py#L51) |
 | SQLite | 存储任务、子任务、设置和事件。 | [models.py](../backend/app/models.py#L27)、[db.py](../backend/app/db.py#L27) |
 | yt-dlp 服务 | 元数据解析、下载参数构建、profile 重试、格式选择和依赖诊断。 | [YtDlpService](../backend/app/ytdlp_service.py#L189) |
 | 停滞看门狗 | 观测 progress 回调，把静默卡死转为可见失败。 | [StallGuard](../backend/app/stall_guard.py#L32) |
@@ -64,7 +64,7 @@ Playlist 解析后由前端提交选中的条目索引。后端为每个条目�
 
 PlantUML 源文件：[cookies-flow.puml](diagrams/cookies-flow.puml)。
 
-Cookies 可手动上传或从浏览器导入。解析阶段遇到需要登录或 bot 校验时，后端会尝试自动导入并重试一次，逻辑见 [_extract_metadata_with_cookies](../backend/app/api_support.py#L87)。下载阶段遇到同类错误时，任务管理器会刷新 cookies 并重试当前子视频，逻辑见 [_download_with_cookie_refresh](../backend/app/job_manager.py#L723)。
+Cookies 可手动上传或从浏览器导入。解析阶段遇到需要登录或 bot 校验时，后端会尝试自动导入并重试一次，逻辑见 [_extract_metadata_with_cookies](../backend/app/api_support.py#L87)。下载阶段遇到同类错误时，任务管理器会刷新 cookies 并重试当前子视频，逻辑见 [_download_with_cookie_refresh](../backend/app/job_manager.py#L765)。
 
 ### 上传到 B站
 
@@ -94,6 +94,8 @@ B站 上传有**自己的两套状态**，与 `JobStatus` 无关：
 - 字幕 `subtitle_state`：`skipped`（默认，没有字幕可传）→ `posted` / `failed`。它**不是** `BiliUploadStatus` 的一档：字幕挂在投稿**之后**，把「已发布 + 字幕失败」折成一种失败，用户能做的唯一正确动作（重传字幕）就被隐藏了。下载侧另有 `subtitle_source`（`human` / `auto` / `none`），其中 `none` 是「这个视频没有可用中英字幕」的**结论**，与 `NULL`（这一轮还没有结论）不同。
 
 进程重启后，停在 `uploading` 的记录（含 `queued`）一律折成**可重试的失败**，而不是永远停在「上传中」，见 [resume_interrupted](../backend/app/bili_manager.py#L375)。
+
+**下载侧的策略与它相反**：残留的 `queued`/`running` 条目默认**重新排队并断点续传**，见 [recover_orphaned_work](../backend/app/job_manager.py#L83)。判据是「重做一次的代价」：下载是幂等且可续传的（`.part` 接着用），最坏只是多下一遍；投稿重投会在平台上留下重复稿件。同一条原则在两个链路上导出两个相反的默认值 —— 别把其中一个当成通用规则。用户按过「暂停」的任务在任何策略下都不恢复。
 
 ## 数据模型
 

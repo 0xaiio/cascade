@@ -24,16 +24,16 @@
 | FR-2 | 支持选择 playlist 子项并创建下载任务。 | [`selected_entries`](../backend/app/api_support.py#L63)、[`CreateJobRequest`](../backend/app/schemas.py#L82) |
 | FR-3 | 支持视频+字幕、仅视频、仅字幕三种模式。 | [`DownloadMode`](../backend/app/schemas.py#L7) |
 | FR-4 | 用户只选择清晰度，默认 `1440p`；后端自动选择具体格式。 | [`format_selector`](../backend/app/ytdlp_formats.py#L9) |
-| FR-5 | 下载前预检测计划分辨率、格式和视频大小，任务中心展示实际值。 | [`prepare_download`](../backend/app/ytdlp_service.py#L395)、[`_apply_download_preparation`](../backend/app/job_manager.py#L990) |
+| FR-5 | 下载前预检测计划分辨率、格式和视频大小，任务中心展示实际值。 | [`prepare_download`](../backend/app/ytdlp_service.py#L395)、[`_apply_download_preparation`](../backend/app/job_manager.py#L1032) |
 | FR-6 | 支持明确的分辨率降级原因和重启建议。 | [`fallback_policy.py`](../backend/app/fallback_policy.py#L4)、[`resolution_decisions.py`](../backend/app/resolution_decisions.py#L87) |
 | FR-7 | 支持任务暂停、重启、删除、playlist 子视频删除、批量操作，以及本地播放/打开文件夹。 | [`batch_job_action`](../backend/app/routers/jobs.py#L80)、[`system_open.py`](../backend/app/system_open.py) |
 | FR-8 | 默认请求人工字幕和自动字幕；缺少某类字幕时 fallback 到另一类可用字幕，并显示来源与格式。 | [`DownloadOptions`](../backend/app/schemas.py#L63)、[`DownloadOptionsPanel`](../frontend/src/components/DownloadOptionsPanel.tsx#L26) |
 | FR-9 | 支持 cookies 上传、浏览器导入和清除。 | [`/api/cookies`](../backend/app/routers/cookies.py#L60)、[`BrowserCookieImporter`](../backend/app/browser_cookies.py#L67) |
-| FR-10 | 支持并发、限速、重试次数和单视频并发下载数（aria2c）作为运行时设置即时保存；限速/重试变更会让当前视频断点续传重启以应用新参数。 | [`SettingsUpdate`](../backend/app/schemas.py#L206)、[`set_runtime_download_defaults`](../backend/app/job_manager.py#L96) |
+| FR-10 | 支持并发、限速、重试次数和单视频并发下载数（aria2c）作为运行时设置即时保存；限速/重试变更会让当前视频断点续传重启以应用新参数。 | [`SettingsUpdate`](../backend/app/schemas.py#L206)、[`set_runtime_download_defaults`](../backend/app/job_manager.py#L138) |
 | FR-11 | 支持 SSE 事件流和任务轮询。 | [`/api/events`](../backend/app/routers/events.py#L15)、[`EventBroker`](../backend/app/events.py#L7) |
 | FR-12 | 支持诊断依赖状态、cookies 状态和稳定性参数。 | [`/api/diagnostics`](../backend/app/routers/diagnostics.py#L29)、[`get_dependency_status`](../backend/app/ytdlp_service.py#L296) |
 | FR-13 | 下载停滞可观测：在可配置窗口内没有新增字节时主动判为失败，而不是永久 `running`。 | [`StallGuard`](../backend/app/stall_guard.py#L32)、[`_download_once`](../backend/app/ytdlp_service.py#L637) |
-| FR-14 | 媒体流失败时在错误文案中带上当前 cookies 状态，便于区分「未配置 cookies」与网络问题。 | [`_media_stream_failure_message`](../backend/app/job_manager.py#L1119) |
+| FR-14 | 媒体流失败时在错误文案中带上当前 cookies 状态，便于区分「未配置 cookies」与网络问题。 | [`_media_stream_failure_message`](../backend/app/job_manager.py#L1161) |
 | FR-15 | 代理可作为配置项读写（留空=自动、`direct`=强制直连、其余按 URL），并能**真的发一次请求**验证连通性，返回状态码、耗时、字节数与原始异常。 | [`proxy.py`](../backend/app/proxy.py#L169)、[`POST /api/proxy/test`](../backend/app/routers/diagnostics.py#L65) |
 | FR-16 | 已配置的 cookies 可被校验：离线检查格式/域名/鉴权项/过期，可选联网确认登录态，输出「未配置 / 未登录 / 已登录」三档结论与证据。 | [`cookie_health.py`](../backend/app/cookie_health.py#L234)、[`POST /api/cookies/verify`](../backend/app/routers/cookies.py#L24) |
 | FR-17 | 依赖与 JS 运行时状态可在不重启应用的前提下重新探测，并把结论回显到界面。 | [`POST /api/diagnostics/runtime`](../backend/app/routers/diagnostics.py#L52)、[`runtime_env.py`](../backend/app/runtime_env.py#L58) |
@@ -49,8 +49,8 @@
 | FR-27 | B站 凭据只以文件形式保存，API 与界面**只回传名字与计数**（不返回值、不返回掩码前缀）；登录文件被 git 跟踪时单独作为一条阻断项报出。 | [`cookie_summary`](../backend/app/bili_auth.py#L379)、[`is_cookie_tracked_by_git`](../backend/app/bili_auth.py#L390) |
 | FR-28 | 字幕只处理**中文与英文**两族，其余语种一律忽略（粤语 `yue` 不算中文）。族判定只有一个入口，界面列出与下载选取共用同一份过滤。 | [`language_family`](../backend/app/subtitle_plan.py#L109)、[`_map_subtitles`](../backend/app/ytdlp_service.py#L1193) |
 | FR-29 | 按视频**主语言**决定下载目标：主语言判据是 yt-dlp 给原始语音 ASR 轨加的 `-orig` 后缀（平台信号，不是猜标题/频道），判不出时退回英文这一有界默认。 | [`detect_primary_language`](../backend/app/subtitle_plan.py#L140)、[`resolve_subtitle_plan`](../backend/app/subtitle_plan.py#L200) |
-| FR-30 | 同一语言内**人工/官方字幕优先**，缺失才降级到机器生成（ASR）；两者都没有则**跳过字幕、不中断下载**。「跳过」必须请求一个匹配不到任何轨的语言代码实现，不得退化成空列表或 `["all"]`。 | [resolve_subtitle_plan](../backend/app/subtitle_plan.py#L200)、[`_options_with_subtitle_plan`](../backend/app/job_manager.py#L977) |
-| FR-31 | 下载结论要记录**语言 + 来源类型（人工 / 自动生成）+ 文件路径**，供上传环节消费；落库判据是**磁盘上真的有那个文件**，不是下载前的计划。 | [`_record_subtitle_result`](../backend/app/job_manager.py#L1020)、[`find_subtitle_file`](../backend/app/output_paths.py#L162) |
+| FR-30 | 同一语言内**人工/官方字幕优先**，缺失才降级到机器生成（ASR）；两者都没有则**跳过字幕、不中断下载**。「跳过」必须请求一个匹配不到任何轨的语言代码实现，不得退化成空列表或 `["all"]`。 | [resolve_subtitle_plan](../backend/app/subtitle_plan.py#L200)、[`_options_with_subtitle_plan`](../backend/app/job_manager.py#L1019) |
+| FR-31 | 下载结论要记录**语言 + 来源类型（人工 / 自动生成）+ 文件路径**，供上传环节消费；落库判据是**磁盘上真的有那个文件**，不是下载前的计划。 | [`_record_subtitle_result`](../backend/app/job_manager.py#L1062)、[`find_subtitle_file`](../backend/app/output_paths.py#L162) |
 | FR-32 | 视频投稿成功后把已下载的字幕**一并提交为可关闭的 CC 字幕**（字幕轨而非硬字幕）：SRT/VTT 转成 BCC，挂在分P 的 `cid` 上，语言标识用**平台白名单里的值**。 | [`upload_subtitle`](../backend/app/bili_subtitle.py#L218)、[`save_subtitle`](../backend/app/bili_api.py#L366)、[`_attach_subtitle`](../backend/app/bili_upload.py#L305) |
 | FR-33 | 无可用字幕时**只跳过字幕上传**，视频投稿流程照常完成；字幕这一步失败**不把已发布的稿件翻成失败**，且提供**只重传字幕**（绝不重投视频）的重试。 | [`SubtitleOutcome`](../backend/app/bili_subtitle.py#L209)、[`retry_upload`](../backend/app/bili_manager.py#L921) |
 | FR-34 | 投稿表单在**提交前**告诉用户每条视频会带什么字幕（如 `en · 人工`、`无字幕`）；这句文案由服务端拼好，前端不自己拼一遍。 | [`subtitle_summary`](../backend/app/subtitle_plan.py#L92)、[`BiliPrefillItem.subtitle`](../backend/app/schemas.py#L407) |
