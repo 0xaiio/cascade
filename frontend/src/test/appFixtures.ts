@@ -51,6 +51,9 @@ export const jobPayload: Job = {
   current_item_title: "Running video",
   error: null,
   download_dir: null,
+  // 出厂给 false：既有用例里没有任何任务会跑到终态，勾了也无事发生；
+  // 要测提醒的用例自己覆盖成 true（见 completion-notification.test.tsx）。
+  notify_on_complete: false,
   items: [
     {
       id: "item-running",
@@ -222,7 +225,8 @@ export const settingsPayload: Settings = {
   proxy_source: "none",
   proxy_effective: null,
   cookies_enabled: false,
-  ffmpeg: { ffmpeg: true, ffprobe: true }
+  ffmpeg: { ffmpeg: true, ffprobe: true },
+  completion_notification: "both"
 };
 
 export const lockedEdgeCookieDetail = {

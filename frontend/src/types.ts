@@ -3,6 +3,14 @@ export type SubtitleSource = "human" | "auto" | "both";
 export type SubtitleFormat = "best" | "srt" | "vtt";
 export type JobBatchAction = "pause" | "restart" | "delete";
 
+/**
+ * 任务跑到终态时怎么提醒。取值与服务端 `schemas.CompletionNotification` 一一对应。
+ *
+ * `off` = 不提醒；`sound` = 提示音；`toast` = 右下角浮层（会自动缩回）；`both` = 两者都要。
+ * 提醒**发生在浏览器里**（Web Audio 合成的声音 + DOM 浮层），后端只负责存偏好。
+ */
+export type CompletionNotification = "off" | "sound" | "toast" | "both";
+
 export interface FormatOption {
   format_id: string;
   label: string;
@@ -56,6 +64,19 @@ export interface DownloadOptions {
   notify_on_complete: boolean;
 }
 
+/**
+ * 一条「任务跑完了」的提醒。
+ *
+ * `tone` 决定颜色：`ok` 成功、`warn` 部分成功、`bad` 失败。**不新造第四种** ——
+ * 每多一种颜色就多一处「这个状态到底是什么色」的口头约定。
+ */
+export interface CompletionNotice {
+  id: string;
+  tone: "ok" | "warn" | "bad";
+  title: string;
+  body: string;
+}
+
 export interface JobItem {
   id: string;
   job_id: string;
@@ -106,6 +127,8 @@ export interface Job {
   started_at: string | null;
   finished_at: string | null;
   elapsed_seconds: number;
+  /** 创建这个任务时勾没勾「完成后通知」。由服务端从 `options_json` 派生 —— 刷新页面后前端仍然拿得到。 */
+  notify_on_complete: boolean;
   items: JobItem[];
 }
 
@@ -133,6 +156,8 @@ export interface Settings {
   proxy_effective: string | null;
   cookies_enabled: boolean;
   ffmpeg: Record<string, boolean>;
+  /** 任务跑到终态时怎么提醒。`off` 时前端一个都不发。 */
+  completion_notification: CompletionNotification;
 }
 
 export interface CookieStatus {

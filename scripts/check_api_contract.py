@@ -57,6 +57,9 @@ SCHEMA_PAIRS: dict[str, str | None] = {
     "EnvironmentRisk": None,
     # 错误响应的 detail 不在运行时的 schemas 里（见 frontend/src/api.ts 的手写解析）。
     "ApiErrorDetail": None,
+    # 任务完成提醒的一条浮层。它是**前端内部结构**（提醒在浏览器里发生，后端只存偏好），
+    # 运行时没有对应 schema；登记为 None 仍然要求它不许被悄悄删掉。
+    "CompletionNotice": None,
     # B站 上传。后端用 `Read` 后缀区分「读模型」，前端只消费读模型；只有 `BiliAdvice` /
     # `BiliMetadata` / `BiliLimits` / `BiliPrefillItem` 两侧同名。
     # `BiliBadge` / `BiliBadgeTone` 是 `type` 别名，不进这张表（脚本只比对 `interface`）。

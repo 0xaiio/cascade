@@ -19,7 +19,15 @@ from .job_read_model import read_job
 from .models import Job, JobItem, Setting
 from .paths import safe_path_name
 from .proxy import redact_proxy_credentials
-from .schemas import AnalyzeResponse, CookieStatus, JobRead, SettingsRead, VideoEntry
+from .schemas import (
+    COMPLETION_NOTIFICATION_MODES,
+    DEFAULT_COMPLETION_NOTIFICATION,
+    AnalyzeResponse,
+    CookieStatus,
+    JobRead,
+    SettingsRead,
+    VideoEntry,
+)
 from .ytdlp_service import BrowserCookieImportError, YtDlpService
 
 
@@ -169,6 +177,9 @@ def apply_stored_settings(session: Session, settings: AppSettings, service: YtDl
         # 空串 = 未配置（自动），不是「强制直连」——见 app/proxy.py 的 DIRECT_PROXY_VALUES。
         settings.proxy = stored["proxy"].strip() or None
         service.proxy = settings.proxy
+    stored_notification = stored.get("completion_notification")
+    if stored_notification in COMPLETION_NOTIFICATION_MODES:
+        settings.completion_notification = stored_notification
 
 
 def settings_response(session: Session, settings: AppSettings, service: YtDlpService) -> SettingsRead:
@@ -187,7 +198,18 @@ def settings_response(session: Session, settings: AppSettings, service: YtDlpSer
         proxy_effective=redact_proxy_credentials(resolution.url),
         cookies_enabled=settings.cookies_path.exists(),
         ffmpeg=service.get_ffmpeg_status(),
+        completion_notification=_completion_notification(settings.completion_notification),
     )
+
+
+def _completion_notification(value: str) -> str:
+    """把提醒方式收敛到合法取值。
+
+    兜底为什么放在这里而不是入口：`completion_notification` 还能从环境变量（`YTDL_`
+    前缀）进来，那一路不经过 pydantic 的 `Literal` 校验。写错一个字母时，宁可退回默认
+    也不要把非法值发给前端 —— 前端拿它去比字符串，不匹配就是「选了却不响」。
+    """
+    return value if value in COMPLETION_NOTIFICATION_MODES else DEFAULT_COMPLETION_NOTIFICATION
 
 
 def select_directory_with_tkinter(initial_dir: Path) -> Path | None:

@@ -1850,3 +1850,154 @@ th {
     height: 140px;
   }
 }
+
+/* ------------------------------------------------- 任务完成提醒（右下角浮层） */
+
+/* `position: fixed` **不切断继承**：它只换containing block，字体/行高/颜色照样从祖先继承。
+   所以这一层自己重置 `white-space` / `word-break` / `font-weight` —— 挂在一个
+   `nowrap` + 粗体的宿主里时，不重置会被整块截断（见 ai/ui/003 的同一类坑）。 */
+.toast-stack {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-end;
+  max-width: min(360px, calc(100vw - 40px));
+  white-space: normal;
+  font-weight: 400;
+}
+
+.toast {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  width: 100%;
+  padding: 12px 12px 12px 14px;
+  border: 1px solid #d7e0ee;
+  border-left: 4px solid #94a3b8;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  /* 与浮层共用一条节奏：淡入 0.14s。缩回由 JS 的定时器负责，这里只管出现。 */
+  animation: toast-in 0.14s ease-out;
+}
+
+.toast.tone-ok {
+  border-left-color: #16a34a;
+}
+
+.toast.tone-warn {
+  border-left-color: #d97706;
+}
+
+.toast.tone-bad {
+  border-left-color: #dc2626;
+}
+
+.toast-icon {
+  flex: none;
+  margin-top: 1px;
+  color: #64748b;
+}
+
+.toast.tone-ok .toast-icon {
+  color: #16a34a;
+}
+
+.toast.tone-warn .toast-icon {
+  color: #d97706;
+}
+
+.toast.tone-bad .toast-icon {
+  color: #dc2626;
+}
+
+/* 长标题必须可断行：右栏那种「一个不可断行的 token 把整页撑宽」的教训（ai/ui/002）
+   在这里同样适用 —— 视频标题里出现一条长 URL 或一串无空格字符是常态。 */
+.toast-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.toast-text strong {
+  font-size: 14px;
+}
+
+.toast-text span {
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.toast-close {
+  flex: none;
+  display: inline-flex;
+  padding: 2px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: #94a3b8;
+}
+
+.toast-close:hover,
+.toast-close:focus-visible {
+  background: #f1f5f9;
+  color: #334155;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 设置里的提醒方式：下拉与「预览」同排。 */
+.notification-mode-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.notification-mode-row select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.notification-mode-row .ghost-button {
+  flex: none;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.notification-mode-hint {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* 「勾不动」的开关必须把原因写在旁边，否则它和「勾了没反应」是同一种名实不符。 */
+.toggle-disabled-note {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
+}

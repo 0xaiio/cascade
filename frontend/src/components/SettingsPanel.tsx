@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { Folder, Settings as SettingsIcon } from "lucide-react";
+import { Folder, Play, Settings as SettingsIcon } from "lucide-react";
 import { BiliLoginSection } from "./BiliLoginSection";
 import { HelpPopover } from "./HelpPopover";
 import { ProxyPortsPopover, ProxySection } from "./ProxySection";
 import { selectDownloadDirectory, updateSettings } from "../api";
-import type { Settings } from "../types";
+import { COMPLETION_NOTIFICATION_OPTIONS } from "../notifications";
+import type { CompletionNotification, Settings } from "../types";
 
 /**
  * 设置面板：下载目录、并发、单视频并发下载数（aria2c）、代理（含连通性检测）、B站 上传、保存状态回显。
@@ -69,17 +70,36 @@ function Aria2cHelpPopover() {
 export function SettingsPanel({
   settings,
   onSettingsChange,
-  onError
+  onError,
+  onPreviewNotification
 }: {
   settings: Settings;
   onSettingsChange: (settings: Settings) => void;
   /** B站 区的失败提示。这里只负责上报，显示交给页面顶部的公共提示条（与其它错误同一个出口）。 */
   onError: (message: string) => void;
+  /**
+   * 按**当前选中的方式**演示一次提醒（声音就响、弹窗就弹）。
+   *
+   * 为什么需要它：「提示音」这三个字说不出那声「叮」到底什么样，而没有它，用户只能
+   * 等一个真实任务跑完才知道自己选了什么 —— 那正是这一类开关最容易留下的疑问。
+   * 演示由 `App` 执行：声音与浮层都在那一层，这里只负责触发。
+   */
+  onPreviewNotification: () => void;
 }) {
   const [draft, setDraft] = useState(settings);
   const [saveMessage, setSaveMessage] = useState("");
 
   useEffect(() => setDraft(settings), [settings]);
+
+  const notificationMode = draft.completion_notification ?? "both";
+  // 必须写明它和下载选项里那个「完成后通知」的关系：那是「这一次要不要提醒」的逐任务开关，
+  // 这里是「提醒用什么方式」。只说方式不说关系，用户会遇到「我选了提示音，怎么没响」。
+  const notificationHint =
+    notificationMode === "off"
+      ? "任务跑完不做任何提示；下载选项里的「完成后通知」会显示成不可勾并说明原因。"
+      : `${
+          COMPLETION_NOTIFICATION_OPTIONS.find((option) => option.value === notificationMode)?.hint ?? ""
+        }。要不要提醒由下载选项里的「完成后通知」逐任务决定。`;
 
   async function saveConcurrency(value: number) {
     const nextConcurrency = Math.max(1, Number(value) || settings.default_concurrency);
@@ -128,6 +148,19 @@ export function SettingsPanel({
           proxy: nextProxy === "" ? null : nextProxy
         })
       );
+      setSaveMessage("已保存");
+    } catch {
+      setSaveMessage("保存失败");
+    } finally {
+      window.setTimeout(() => setSaveMessage(""), 1800);
+    }
+  }
+
+  async function saveCompletionNotification(mode: CompletionNotification) {
+    if (mode === settings.completion_notification) return;
+    setSaveMessage("保存中...");
+    try {
+      onSettingsChange(await updateSettings({ completion_notification: mode }));
       setSaveMessage("已保存");
     } catch {
       setSaveMessage("保存失败");
@@ -194,6 +227,38 @@ export function SettingsPanel({
           onChange={(event) => setDraft({ ...draft, aria2c_connections: Number(event.target.value) })}
           onBlur={(event) => void saveAria2cConnections(Number(event.currentTarget.value))}
         />
+      </div>
+      <div className="field">
+        <div className="field-label-row">
+          <label className="field-label" htmlFor="completion-notification">
+            任务完成提醒
+          </label>
+        </div>
+        <div className="notification-mode-row">
+          <select
+            id="completion-notification"
+            aria-label="任务完成提醒方式"
+            value={draft.completion_notification ?? "both"}
+            onChange={(event) => void saveCompletionNotification(event.target.value as CompletionNotification)}
+          >
+            {COMPLETION_NOTIFICATION_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="ghost-button"
+            disabled={(draft.completion_notification ?? "both") === "off"}
+            title={(draft.completion_notification ?? "both") === "off" ? "当前已关闭提醒" : "按当前方式演示一次"}
+            onClick={onPreviewNotification}
+          >
+            <Play size={14} />
+            预览
+          </button>
+        </div>
+        <p className="notification-mode-hint">{notificationHint}</p>
       </div>
       <div className="field">
         <div className="field-label-row">

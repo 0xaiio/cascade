@@ -3,7 +3,14 @@ import { SearchableLanguageSelect } from "./SearchableLanguageSelect";
 import { Toggle } from "./Toggle";
 import { buildResolutionOptions, formatResolutionLabel, resolutionHeight } from "../quality";
 import { formatSubtitleInfo } from "../subtitles";
-import type { AnalyzeResponse, DownloadMode, DownloadOptions, SubtitleFormat, SubtitleSource } from "../types";
+import type {
+  AnalyzeResponse,
+  CompletionNotification,
+  DownloadMode,
+  DownloadOptions,
+  SubtitleFormat,
+  SubtitleSource
+} from "../types";
 
 /**
  * 下载选项面板：模式、清晰度、字幕语言/来源/格式、开关项、限速与重试、提交按钮。
@@ -26,7 +33,8 @@ export function DownloadOptionsPanel({
   onOptionChange,
   onQualityChange,
   runtimeSaveMessage,
-  onRuntimeOptionChange
+  onRuntimeOptionChange,
+  notificationMode
 }: {
   analysis: AnalyzeResponse | null;
   ffmpegAvailable: boolean;
@@ -38,6 +46,11 @@ export function DownloadOptionsPanel({
   onQualityChange: (resolution: string) => void;
   runtimeSaveMessage: string;
   onRuntimeOptionChange: <K extends "speed_limit_kbps" | "retries">(key: K, value: DownloadOptions[K]) => void;
+  /**
+   * 设置里的全局提醒方式。`off` 时「完成后通知」勾不动 ——
+   * 一个勾了不响的开关比没有开关更糟，所以这里把它连同原因一起说明。
+   */
+  notificationMode: CompletionNotification;
 }) {
   const resolutionOptions = buildResolutionOptions(analysis);
   const qualityValue = `resolution:${options.resolution}`;
@@ -132,7 +145,14 @@ export function DownloadOptionsPanel({
         <Toggle icon={<FileText size={16} />} label="保存 metadata" checked={options.write_metadata} onChange={(value) => onOptionChange("write_metadata", value)} />
         <Toggle icon={<Captions size={16} />} label="保存缩略图" checked={options.write_thumbnail} onChange={(value) => onOptionChange("write_thumbnail", value)} />
         <Toggle icon={<RotateCcw size={16} />} label="跳过已下载" checked={options.skip_existing} onChange={(value) => onOptionChange("skip_existing", value)} />
-        <Toggle icon={<Bell size={16} />} label="完成后通知" checked={options.notify_on_complete} onChange={(value) => onOptionChange("notify_on_complete", value)} />
+        <Toggle
+          icon={<Bell size={16} />}
+          label="完成后通知"
+          checked={options.notify_on_complete}
+          onChange={(value) => onOptionChange("notify_on_complete", value)}
+          disabled={notificationMode === "off"}
+          disabledReason="提醒方式在设置里被设成了「不提醒」，所以这里勾不动；到设置里改成提示音或弹窗后即可勾选。"
+        />
       </div>
 
       <div className="two-col">

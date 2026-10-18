@@ -6,7 +6,7 @@ from sqlmodel import Session, select
 from .fallback_policy import build_resolution_fallback
 from .models import Job, JobItem, utc_now
 from .output_paths import discover_existing_output_path, resolve_existing_output_path
-from .schemas import JobItemRead, JobRead, ResolutionFallback
+from .schemas import DownloadOptions, JobItemRead, JobRead, ResolutionFallback
 
 
 def read_job(session: Session, job_id: str) -> JobRead | None:
@@ -36,8 +36,25 @@ def read_job(session: Session, job_id: str) -> JobRead | None:
         started_at=job.started_at,
         finished_at=job.finished_at,
         elapsed_seconds=elapsed_seconds(job.started_at, job.finished_at),
+        notify_on_complete=_notify_on_complete(job),
         items=[_read_job_item(item, job.download_dir) for item in items],
     )
+
+
+def _notify_on_complete(job: Job) -> bool:
+    """创建这个任务时勾没勾「完成后通知」。
+
+    它只是 `DownloadOptions` 的一个字段，只落在 `options_json` 里。读模型不把它抬出来，
+    前端就只剩「本次会话里提交的任务」这一份记忆 —— 刷新一次页面，同一个任务跑到终态时
+    就不再提醒了（SSE 每条事件只是重拉 `/api/jobs`，拿到的就是这份读模型）。
+
+    解析失败一律退回 `False`：那是「没能确认用户要提醒」，于是**不提醒**。反过来猜成
+    `True` 会在用户没要求的时候响，是更坏的那种错。
+    """
+    try:
+        return DownloadOptions.model_validate_json(job.options_json).notify_on_complete
+    except ValueError:
+        return False
 
 
 def _read_job_item(item: JobItem, job_download_dir: str | None) -> JobItemRead:

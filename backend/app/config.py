@@ -61,6 +61,11 @@ class AppSettings(BaseSettings):
     aria2c_enabled: bool = False
     aria2c_path: str | None = None
     aria2c_connections: int = Field(default=2, ge=1, le=4)
+    # 任务跑到终态时怎么提醒（off / sound / toast / both）。合法取值定义在 schemas.py 的
+    # `CompletionNotification` —— 这里不写 Literal 是**故意**的：config.py 不能反向依赖
+    # schemas.py（分层），而环境变量这一路本来也不经过 pydantic 校验，由
+    # `api_support._completion_notification` 统一收敛。
+    completion_notification: str = "both"
 
     # ---- B站 上传（见 ai/feature/bilibili-upload/02-design.md）----
     # biliup 可执行文件。留空时按「PATH -> WinGet 包目录」自动探测；探测实现见 app/bili_bin.py，

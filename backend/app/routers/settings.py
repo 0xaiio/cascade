@@ -68,6 +68,10 @@ async def update_app_settings(update: SettingsUpdate, session: SessionDep, ctx: 
         settings.proxy = update.proxy
         service.proxy = update.proxy
         api_support.set_setting(session, "proxy", (update.proxy or "").strip())
+    if update.completion_notification is not None:
+        # 取值合法由 `SettingsUpdate` 的 Literal 保证，不需要在这里再兜一遍。
+        settings.completion_notification = update.completion_notification
+        api_support.set_setting(session, "completion_notification", update.completion_notification)
     if runtime_options_changed:
         await ctx.manager.set_runtime_download_defaults(
             settings.default_speed_limit_kbps,

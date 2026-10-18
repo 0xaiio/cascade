@@ -30,6 +30,7 @@ import {
 } from "./api";
 import { AnalysisPanel } from "./components/AnalysisPanel";
 import { BiliUploadDialog } from "./components/BiliUploadDialog";
+import { CompletionToasts } from "./components/CompletionToasts";
 import { DownloadOptionsPanel } from "./components/DownloadOptionsPanel";
 import { JobQueue } from "./components/JobQueue";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -40,6 +41,15 @@ import { browserCookieLockFromError, type BrowserCookieLock } from "./cookieLock
 import { errorMessage } from "./errors";
 import { chooseAvailableResolution } from "./quality";
 import { effectiveSubtitleSourceForAnalysis } from "./subtitles";
+import {
+  ChimePlayer,
+  TERMINAL_JOB_STATUSES,
+  describeCompletion,
+  previewNotice,
+  useCompletionToasts,
+  wantsSound,
+  wantsToast
+} from "./notifications";
 import type {
   AnalyzeResponse,
   BiliGroupMode,
@@ -66,7 +76,8 @@ const INITIAL_OPTIONS: DownloadOptions = {
   skip_existing: true,
   speed_limit_kbps: null,
   retries: 10,
-  notify_on_complete: false
+  // 默认勾上：逐任务开关出厂若为关，「设置里选了提醒方式」就成了一句空话（选了却不响）。
+  notify_on_complete: true
 };
 
 /**
@@ -156,6 +167,11 @@ export default function App() {
   const [biliNotice, setBiliNotice] = useState<string | null>(null);
   /** 上一次观察到的徽标。用来区分「刚刚跑完」与「本来就是这状态」。 */
   const previousBiliBadges = useRef<Record<string, string>>({});
+  /** 上一次观察到的任务状态。同一件事，用来区分「刚刚跑完」与「一进来就已经跑完了」。 */
+  const previousJobStatuses = useRef<Record<string, string>>({});
+  /** 提示音。Web Audio 现场合成，没有一个音频文件要跟着仓库走。 */
+  const chime = useMemo(() => new ChimePlayer(), []);
+  const { toasts, push, dismiss, pause, resume } = useCompletionToasts();
 
   useEffect(() => {
     void getSettings().then(applySettings).catch((err) => setError(err.message));
@@ -195,6 +211,25 @@ export default function App() {
     const timer = window.setTimeout(() => setBiliNotice(null), BILI_NOTICE_MS);
     return () => window.clearTimeout(timer);
   }, [biliNotice]);
+
+  // 任务跑到终态时提醒。**必须比对上一次的状态**：`jobs` 在每条 SSE 事件后都会被整份重拉，
+  // 不比对就会把「一进来就已经是已完成」的旧任务反复播报一遍。
+  // 「上一次没见过这个任务」也不提醒（`undefined`）—— 那是打开页面时就已经跑完的历史任务。
+  useEffect(() => {
+    const finished = jobs.filter(
+      (job) =>
+        TERMINAL_JOB_STATUSES.has(job.status) &&
+        previousJobStatuses.current[job.id] !== undefined &&
+        !TERMINAL_JOB_STATUSES.has(previousJobStatuses.current[job.id]) &&
+        job.notify_on_complete
+    );
+    previousJobStatuses.current = Object.fromEntries(jobs.map((job) => [job.id, job.status]));
+    if (!finished.length) return;
+    const mode = settings?.completion_notification ?? "both";
+    if (mode === "off") return;
+    if (wantsSound(mode)) chime.play();
+    if (wantsToast(mode)) for (const job of finished) push(describeCompletion(job));
+  }, [jobs, settings, chime, push]);
 
   useEffect(
     () => () => {
@@ -269,6 +304,9 @@ export default function App() {
   async function handleCreateJob() {
     if (!analysis) return;
     setError(null);
+    // 浏览器只允许用户手势之后出声。提交任务这一步用户**必然**会点，顺手在这里把音频解锁，
+    // 否则等任务跑完再去 resume 已经没有手势了 —— 那时多半被拒，表现为「选了提示音却不响」。
+    chime.prime();
     setIsSubmitting(true);
     const playlistItems = analysis.is_playlist ? Array.from(selectedItems).sort((a, b) => a - b) : null;
     try {
@@ -329,6 +367,18 @@ export default function App() {
 
   function updateQuality(resolution: string) {
     setOptions((current) => ({ ...current, resolution, format_id: null }));
+  }
+
+  /**
+   * 按**当前选中的方式**演示一次提醒。
+   *
+   * 刻意与真实触发走同一条路（同样的 `wantsSound` / `wantsToast` 判定）：预览如果自己另写一套，
+   * 就会变成「预览是对的、真跑起来不对」—— 那正是这类开关最典型的翻车方式。
+   */
+  function previewCompletionNotification() {
+    const mode = settings?.completion_notification ?? "both";
+    if (wantsSound(mode)) chime.play();
+    if (wantsToast(mode)) push(previewNotice());
   }
 
   async function handleCookieUpload(file: File | null) {
@@ -697,8 +747,16 @@ export default function App() {
               onRuntimeOptionChange={(key, value) =>
                 void updateRuntimeDownloadOption(key, value).catch((err) => handleAppError(err, "保存下载设置失败"))
               }
+              notificationMode={settings?.completion_notification ?? "both"}
             />
-            {settings && <SettingsPanel settings={settings} onSettingsChange={applySettings} onError={setError} />}
+            {settings && (
+              <SettingsPanel
+                settings={settings}
+                onSettingsChange={applySettings}
+                onError={setError}
+                onPreviewNotification={previewCompletionNotification}
+              />
+            )}
           </aside>
         </section>
       </section>
@@ -715,6 +773,7 @@ export default function App() {
           onSubmit={handleBiliSubmit}
         />
       )}
+      <CompletionToasts toasts={toasts} onDismiss={dismiss} onPause={pause} onResume={resume} />
     </main>
   );
 }

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Literal, get_args
 
 from pydantic import BaseModel, Field, HttpUrl
 
@@ -9,6 +9,13 @@ SubtitleSource = Literal["human", "auto", "both"]
 SubtitleFormat = Literal["best", "srt", "vtt"]
 JobBatchAction = Literal["pause", "restart", "delete"]
 CookieSource = Literal["none", "file", "browser"]
+
+# 任务跑到终态时怎么提醒。`off` 不提醒；`sound` 提示音；`toast` 右下角浮层；`both` 两者都要。
+# 提醒本身在**前端**发生（浏览器里播声音、浮层也是 DOM），后端只负责把这个偏好存下来并读回去
+# —— 不然用户换一台机器打开同一个后端，偏好就丢了。
+CompletionNotification = Literal["off", "sound", "toast", "both"]
+COMPLETION_NOTIFICATION_MODES: tuple[str, ...] = get_args(CompletionNotification)
+DEFAULT_COMPLETION_NOTIFICATION: CompletionNotification = "both"
 
 
 class AnalyzeRequest(BaseModel):
@@ -66,7 +73,10 @@ class DownloadOptions(BaseModel):
     skip_existing: bool = True
     speed_limit_kbps: int | None = Field(default=None, ge=1)
     retries: int = Field(default=10, ge=0, le=20)
-    notify_on_complete: bool = False
+    # 默认**开着**：这是「要不要提醒我这一次」的逐任务开关，提醒**方式**由全局设置决定。
+    # 出厂若为 False，用户就必须在每次提交前记得勾一下 —— 那等于把「设置里选了提醒方式」
+    # 变成一句空话（选了却不响，正是本目录要消灭的那类名实不符）。
+    notify_on_complete: bool = True
 
 
 class CreateJobRequest(BaseModel):
@@ -147,6 +157,10 @@ class JobRead(BaseModel):
     started_at: datetime | None = None
     finished_at: datetime | None = None
     elapsed_seconds: int = 0
+    # 创建这个任务时勾没勾「完成后通知」。它只存在于 `options_json` 里，读模型不把它抬出来的话，
+    # 前端刷新页面后就再也拿不到了（SSE 每次事件只是重拉 `/api/jobs`）—— 于是「这次会话里
+    # 提交的任务会提醒、重开页面后同一个任务就不提醒」。
+    notify_on_complete: bool = False
     items: list[JobItemRead] = Field(default_factory=list)
 
 
@@ -177,6 +191,9 @@ class SettingsRead(BaseModel):
     proxy_effective: str | None = None
     cookies_enabled: bool
     ffmpeg: dict[str, bool]
+    # 任务跑到终态时怎么提醒。默认 `both`；`off` 时前端一个都不发 —— 下载选项里那个逐任务
+    # 开关会显示成不可勾并说明原因，否则「勾了不响」又是一次名实不符。
+    completion_notification: CompletionNotification = DEFAULT_COMPLETION_NOTIFICATION
 
 
 class SettingsUpdate(BaseModel):
@@ -188,6 +205,7 @@ class SettingsUpdate(BaseModel):
     default_retries: int | None = Field(default=None, ge=0, le=20)
     aria2c_connections: int | None = Field(default=None, ge=1, le=4)
     proxy: str | None = None
+    completion_notification: CompletionNotification | None = None
 
 
 class CookieStatus(BaseModel):
