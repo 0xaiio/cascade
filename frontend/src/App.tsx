@@ -18,6 +18,8 @@ import {
   listJobs,
   openJobFolder,
   openJobItemFolder,
+  openJobItemSubtitle,
+  openJobSubtitle,
   pauseJob,
   playJobItemVideo,
   playJobVideo,
@@ -724,6 +726,9 @@ export default function App() {
               onOpenFolder={(jobId) => openJobFolder(jobId)}
               onOpenItemFolder={(jobId, itemId) => openJobItemFolder(jobId, itemId)}
               onOpenSourcePage={openExternalPage}
+              onOpenSubtitle={(jobId, itemId, mode) =>
+                itemId ? openJobItemSubtitle(jobId, itemId, mode) : openJobSubtitle(jobId, mode)
+              }
               onOpenVideoPage={openExternalPage}
               onPlay={(jobId) => playJobVideo(jobId)}
               onPlayItem={(jobId, itemId) => playJobItemVideo(jobId, itemId)}

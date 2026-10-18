@@ -33,6 +33,9 @@ class ApiContext:
     pick_directory: Callable[[Path], Path | None]
     open_local_path: Callable[[Path], None]
     open_video_path: Callable[[Path, str | None], None]
+    # 「让系统弹『打开方式』」——与 `open_local_path` 的区别只是**由谁挑程序**：
+    # 前者用已记住的关联，这个让用户当场选。两个都在 `system_open` 里定义。
+    open_with_chooser: Callable[[Path], None]
 
 
 def get_context(request: Request) -> ApiContext:

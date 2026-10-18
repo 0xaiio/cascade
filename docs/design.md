@@ -24,7 +24,7 @@
 | [routers/](../backend/app/routers/__init__.py#L21) | L0 入口 | 按资源分模块声明 HTTP 路由（`diagnostics` / `cookies` / `analyze` / `jobs` / `job_files` / `settings` / `events` / `bilibili`）：取参、调辅助、定状态码。 | 不做状态转换，不直接调用 yt-dlp，不写领域规则（产物定位见 `job_artifacts`，设置与错误映射见 `api_support`）。 |
 | [api_context.py](../backend/app/api_context.py#L28) | L0 入口 | 请求级依赖容器 `ApiContext`（`frozen` dataclass）+ `get_context` / `get_session` 依赖别名。 | 不装配依赖（装配在 `main.py`），不写业务规则。 |
 | [api_support.py](../backend/app/api_support.py#L26) | L0 入口 | 路由支撑：任务/条目定位与 404、设置读写与响应构造、cookies 元数据提取、目录选择。 | 不声明路由，不做状态转换。 |
-| [job_artifacts.py](../backend/app/job_artifacts.py#L29) | L0 入口 | 产物**定位**（一条候选链）与本机**打开**（播放 / 打开所在目录）。 | 不删文件（删除带白名单校验，属 `job_manager`），不决定用什么播放器（属 `system_open`）。 |
+| [job_artifacts.py](../backend/app/job_artifacts.py#L31) | L0 入口 | 产物**定位**（一条候选链）与本机**打开**（播放 / 打开所在目录 / 打开字幕）。 | 不删文件（删除带白名单校验，属 `job_manager`），不决定用什么播放器或查看器（属 `system_open`）。 |
 | [__main__.py](../backend/app/__main__.py#L64) | L0 入口 | 本地启动入口：解析命令行、启动前做端口预检并识别占用者、交给 uvicorn。 | 不装配应用（那是 `main.py`），不写业务规则。 |
 | [config.py](../backend/app/config.py#L19) | L1 契约 | 声明全部设置字段、默认值与约束、目录准备。 | 不读数据库（`Setting` 覆盖在 `api_support.py` 里做）。 |
 | [schemas.py](../backend/app/schemas.py#L14) | L1 契约 | 定义 HTTP 线上模型与枚举。 | 不引用 yt-dlp 类型，不含业务逻辑。 |
@@ -60,7 +60,7 @@
 | [bili_auth.py](../backend/app/bili_auth.py#L75) | L3 领域 | 扫码登录（生成二维码 / 轮询状态）、**TV 端三步换投稿令牌**、登录文件读写（四形态兼容）、**凭据摘要（只回传名字与计数，无值、无前缀）**、是否被 git 跟踪。 | 不发 B站 业务请求、不写库。 |
 | [bili_meta.py](../backend/app/bili_meta.py#L202) | L3 领域 | 投稿元数据：模板占位符渲染（显式替换，不用 `str.format`）、标签派生与收敛、分区小词表、平台硬限校验。 | 超限只报错不截断；不计长度之外的事，不读库、不发请求。 |
 | [bili_policy.py](../backend/app/bili_policy.py#L38) | L3 领域 | B站 上传的**文案与分类常量**：平台状态码→人话、记录状态→人话、错误输出→（结论 + 下一步）、徽标档位与配色。 | 不做判定（判定在 `bili_upload` / `bili_manager` / `bili_read_model`）。 |
-| [system_open.py](../backend/app/system_open.py#L23) | L3 领域 | 选择可解码播放器、打开目录、窗口置前。 | 不校验文件是否存在（调用方先解析路径）。 |
+| [system_open.py](../backend/app/system_open.py#L28) | L3 领域 | 选择可解码播放器、打开目录、**把文件交给系统打开（默认关联 / 系统「打开方式」窗口）**、窗口置前。 | 不校验文件是否存在（调用方先解析路径）；**不维护编辑器/播放器清单之外的「程序偏好」**，用哪个程序由系统记。 |
 | [db.py](../backend/app/db.py#L27) | L4 基础设施 | engine 创建、SQLite pragma、补列、WAL checkpoint、session 依赖。 | 不知道业务表语义。 |
 | [logging_setup.py](../backend/app/logging_setup.py#L48) | L4 基础设施 | 配置 root/uvicorn logger，落盘 `data/logs/app.log` 并轮转。 | 不决定打什么日志，不解析业务语义。 |
 | [bili_http.py](../backend/app/bili_http.py#L66) | L4 基础设施 | B站 请求的 HTTP 接缝：标准库 `urllib` 实现、**强制直连（清空 ProxyHandler）**、4xx/5xx 也带回正文与 `Set-Cookie`。 | 不知道任何端点的语义（端点与参数在 `bili_api` / `bili_auth`）。 |
@@ -84,7 +84,8 @@
 | [CookieSection.tsx](../frontend/src/components/CookieSection.tsx#L121) | cookies 状态、校验按钮与结论展示；两个说明浮层（[获取方式](../frontend/src/components/CookieSection.tsx#L53)、[结论解读](../frontend/src/components/CookieSection.tsx#L96)）就近挂在这里。 | 不决定用哪份 cookies（后端决定），不构造请求体。 |
 | [ProxySection.tsx](../frontend/src/components/ProxySection.tsx#L140) | 代理检测结果展示与「真的发一次请求」的入口；[常用端口](../frontend/src/components/ProxySection.tsx#L75)与[排查顺序](../frontend/src/components/ProxySection.tsx#L112)两个说明浮层。 | 不解析代理来源（后端回传 `proxy_source`），不保存设置（保存由 `SettingsPanel` 触发）。 |
 | [HelpPopover.tsx](../frontend/src/components/HelpPopover.tsx#L42) | **通用非模态说明浮层**：定位、钉住、关闭、记忆，以及窄屏抽屉形态。所有辅助说明共用它。 | 不含任何业务文案（文案由调用方以 children 传入）。 |
-| [JobQueue.tsx](../frontend/src/components/JobQueue.tsx#L21) | 任务中心展示与本地文件操作入口。 | 不直接访问本机文件系统（一律走后端受控打开/删除接口）。 |
+| [JobQueue.tsx](../frontend/src/components/JobQueue.tsx#L23) | 任务中心展示与本地文件操作入口（播放 / 打开文件夹 / 打开字幕 / 删除）。 | 不直接访问本机文件系统（一律走后端受控打开/删除接口）。 |
+| [SubtitleOpenButton.tsx](../frontend/src/components/SubtitleOpenButton.tsx#L17) | 「打开字幕」的**组合控件**：主段用系统关联打开、右段弹系统的「打开方式」。两段都不指定程序。 | 不维护编辑器清单、不记住「上次用的程序」（那是系统的职责，见 [technical.md](technical.md#打开字幕文件)），不发请求（`onOpen` 归 `App`）。 |
 | [BiliIcon.tsx](../frontend/src/components/BiliIcon.tsx#L12) | B站 图标：圆角机身 + 两根天线 + 两只眼睛的**手绘** SVG，描边走 `currentColor` 由调用方决定颜色。 | 不含任何布局与文案；品牌色只落在这个图标上，不扩散成按钮配色。 |
 | [BiliUploadButton.tsx](../frontend/src/components/BiliUploadButton.tsx#L19) | 任务行/条目行上的上传入口：**图标 + 一句人话**。`idle` 档显示动作词（「上传到 B站」），其余档原样显示后端徽标文案 —— 前端不自己造一套状态文案，两处必然会漂移。 | 不请求、不判断能不能传（`disabledReason` 由 `App` 给），不决定上传什么。 |
 | [BiliUploadDialog.tsx](../frontend/src/components/BiliUploadDialog.tsx#L41) | 上传表单模态框，**单视频与合集共用**：单视频填的就是最终内容，合集填的是模板（`{index}` `{title}` `{count}` `{job}` 占位符）并带一张逐条预览表。硬限数字来自 `prefill.limits`，超限只报错不截断，未就绪的条目先标出来。预览表还有一列**字幕**，显示服务端算好的 `item.subtitle`。 | 不渲染模板（渲染在后端 `bili_meta`，前端只显示服务端给的结果），不校验硬限（只显示 `12/80`），不拼字幕文案（那句由后端 `subtitle_summary` 给），不发请求（`onSubmit` 归 `App`）。 |
@@ -93,7 +94,7 @@
 | [subtitles.ts](../frontend/src/subtitles.ts#L12) | 字幕文案与来源归一：`formatSubtitleInfo`（那行「字幕：来源 X · 格式 Y」）、`effectiveSubtitleSourceForAnalysis`（提交前把「两者都要」收敛成该视频真有的那一类）。 | 不做请求、不读存储。 |
 | [cookieLock.ts](../frontend/src/cookieLock.ts#L20) | 把后端 `browser_locked` 错误映射成界面状态（含 `pendingAnalyzeUrl`，用于「关闭 Edge 并导入」后自动补一次解析）。判据是 `detail.code`，不是文案。 | 不渲染界面（渲染在 `UrlAnalyzer`）。 |
 | [biliForm.ts](../frontend/src/biliForm.ts#L133) | 投稿表单的**词汇表与预检**：版权/归集方式的取值、标签计数与最长标签、三种说明与回执文案、提交前的本地预检。硬限数字一律取自 `prefill.limits`，**不写死**（含「报超长标签时回显多少个字」，那是 `limits.tag_preview`）。 | 不改 `input`（报错而不是修好再提交，与服务端 `bili_meta.validate` 同一条约定）；不渲染、不发请求。 |
-| [biliStatus.ts](../frontend/src/biliStatus.ts#L24) | 稿件/合集状态的**判定**：能不能重试、算不算出问题、哪一档徽标是「还没上传」。判据一律是「用户此刻该做什么」，取值本身在 [types.ts](../frontend/src/types.ts#L222)。 | 不造文案（徽标文案来自服务端 `badge_text`）；不决定重试动作（后端按终态三选一）。 |
+| [biliStatus.ts](../frontend/src/biliStatus.ts#L24) | 稿件/合集状态的**判定**：能不能重试、算不算出问题、哪一档徽标是「还没上传」。判据一律是「用户此刻该做什么」，取值本身在 [types.ts](../frontend/src/types.ts#L266)。 | 不造文案（徽标文案来自服务端 `badge_text`）；不决定重试动作（后端按终态三选一）。 |
 | [errors.ts](../frontend/src/errors.ts#L15) | 异常 → 一句可显示的话（`errorMessage`）。收口原先散在十几处的 `err instanceof Error ? err.message : fallback`——重写一遍的代价不是行数，而是**语义各自漂移**（有的在 `message` 为空时兜到 fallback，有的不兜）。 | 不看 `ApiError.detail`：把 `advice` 拼进文案只在 `App.biliMessage`，只有那条链路会带 `advice`。 |
 
 说明浮层的设计约束（这几条是界面改版时最容易破坏的，改之前先读）：
@@ -187,6 +188,22 @@ yt-dlp 自己按「人工先占、自动只补缺」的顺序挑 → 下载成�
 ### 删除与文件清理
 
 删除统一走 `JobManager`：先删数据库记录与关联 `JobEvent`，再按需删除文件。文件删除只在"下载根目录"或"该任务下载目录"之内执行，并对 `output_path`、合并后的最终文件与 sidecar 分别枚举候选，见 [_delete_output_files](../backend/app/job_manager.py#L399)。删除 playlist 的最后一个子项时父任务一并删除。
+
+### 播放与打开本地文件
+
+`POST /api/jobs/{id}/play`、`.../open-folder`、`.../open-subtitle`（以及条目级的同名三条）都不收路径：后端按
+`job_artifacts` 的候选链定位，再交给 `system_open`。**「用哪个程序」这条判断只在 `system_open` 里出现一次**：
+
+- 播视频要挑一个**能解码当前格式**的播放器（`mkv`/`vp9`/`opus` 这类默认关联可能打不开），
+  所以它有一份候选清单与一条降级规则；
+- 打开目录要新开一个 Explorer 窗口并尽量置前（只在任务栏闪烁等于没打开）；
+- 打开字幕**不挑程序**：文本文件谁都能开，挑程序只会是「系统那份处理器列表的子集」。
+  `mode=default` 走文件关联，`mode=chooser` 弹系统的「打开方式」窗口 —— 两个取值就是系统那边的两个 verb，
+  应用侧不存「上次用的是谁」。若 Windows 还没有该后缀的关联，默认模式**自动改弹选择器**而不是报错
+  （资源管理器也是这个行为）。
+
+三条路都把失败翻译成「用户能据以行动」的状态码：文件/产物没有 → 409，任务或条目不存在 → 404，
+系统打开器本身失败 → 400，前端在对应那一行就地显示。
 
 ### 上传到 B站
 

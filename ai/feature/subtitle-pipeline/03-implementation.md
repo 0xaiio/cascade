@@ -150,3 +150,44 @@
 4. `subtitle_source` 只有在**跑过预检并留下计划**时才有值；`video_only` 模式与不需降级的早退路径
    会留 `NULL`（有字幕文件、但没有来源结论）—— 界面上显示为空白而不是「无字幕」。
 5. 主语言判定依赖 `-orig` 标记；平台不给时退化为人工字幕的中/英，再退化为 `en`。
+
+## 增量实现：打开字幕（2026-10-18 下午）
+
+设计理由在 [02-design.md](02-design.md#增量设计打开字幕为什么不自己挑程序)，这里只列改动落点。
+
+### 后端（通用能力，落在已有的「本机打开」模块）
+
+| 落点 | 位置 | 做什么 |
+| --- | --- | --- |
+| `system_open.ERROR_NO_ASSOCIATION` | [L18](../../../backend/app/system_open.py#L18) | `1155` 的命名常量：不是打开失败，是「还没人认领这个后缀」 |
+| `open_path_with_default_app` | [L28](../../../backend/app/system_open.py#L28) | Windows 分支加 `try/except`：**只有** 1155 降级成弹选择器，其它 `OSError` 原样抛 |
+| `open_path_with_chooser` | [L46](../../../backend/app/system_open.py#L46) | 新增。Windows 起系统的「打开方式」入口（shell 的 `OpenAs_RunDLL`）；其它平台退化成默认打开（没有等价选择器） |
+| `existing_subtitle_file` | [L184](../../../backend/app/output_paths.py#L184) | 新增。字幕位置的**唯一计算处**：记录值优先（只验存在）→ 视频旁边的同名字幕。视频路径由调用方给，不自己发现一遍（读模型每次轮询都要问） |
+| `subtitle_file` | [L56](../../../backend/app/job_artifacts.py#L56) | 新增。定位失败 → `409 字幕文件尚不可用。`（不是 404：条目在库里） |
+| `SubtitleOpenMode` / `_subtitle_opener` | [L23](../../../backend/app/routers/job_files.py#L23) | `Literal["default", "chooser"]`；按 mode 选 opener，路由本身仍然只定状态码 |
+| 两条路由 | [L46](../../../backend/app/routers/job_files.py#L46) / [L80](../../../backend/app/routers/job_files.py#L80) | 任务级与条目级各一条 `POST .../open-subtitle` |
+| `ApiContext.open_with_chooser` | [L38](../../../backend/app/api_context.py#L38) | 新注入位。`create_app(chooser_opener=…)`；**注入了 `system_opener` 时默认沿用它**，否则一个单测就会在桌面上弹窗（[main.py L91](../../../backend/app/main.py#L91)） |
+| `JobItemRead.subtitle_path` | [L140](../../../backend/app/schemas.py#L140) | 新增字段，前端据此决定按钮可点性 |
+| `_project_subtitle_path` | [L110](../../../backend/app/job_read_model.py#L110) | 复用它上面刚算好的 `output_path` 当视频路径，**不再自己发现一遍**；只回「真的存在」的路径 |
+
+### 前端
+
+| 落点 | 位置 | 做什么 |
+| --- | --- | --- |
+| `SubtitleOpenButton` | [L17](../../../frontend/src/components/SubtitleOpenButton.tsx#L17) | 新增组合控件：主段 + 右段小箭头，两段都只发一个 `mode` |
+| `JobQueue` | [L276](../../../frontend/src/components/JobQueue.tsx#L276) / [L453](../../../frontend/src/components/JobQueue.tsx#L453) | 单视频任务行与条目行，紧跟在文件夹按钮之后 |
+| `api.openJobSubtitle` / `openJobItemSubtitle` | [L131](../../../frontend/src/api.ts#L131) / [L135](../../../frontend/src/api.ts#L135) | 总带 `?mode=…`，URL 稳定可断言 |
+| `SubtitleOpenMode` | [L15](../../../frontend/src/types.ts#L15) | 与后端枚举同名同值，注释写明「不表示具体程序」 |
+| `.split-button` | [L858](../../../frontend/src/styles.css#L858) | 两段共用一个外框：圆角只留外侧，中间留**一条** 1px 分隔线（主段右框；右段 `border-left:0` 防叠成 2px） |
+
+### 契约
+
+`JobItemRead` 加 `subtitle_path` ⇒ 三处同步：`schemas.py` ↔ [types.ts](../../../frontend/src/types.ts) ↔
+[openapi.yaml](../../../docs/openapi.yaml)（两条新路径 + `mode` 参数）。`check_api_contract.py` 现在比对
+**76 个条目**（上一轮 74）。
+
+### 一处需要说明的取舍
+
+`open_with_chooser = chooser_opener or system_opener or open_path_with_chooser`：注入了 `system_opener`
+的调用方等于声明「本机打开这件事由我接管」，那么选择器也不该真去起外部进程 —— 否则写一个
+`mode=chooser` 的接口测试，就会在你桌面上弹一个「打开方式」窗口。测试要区分两条路时显式传 `chooser_opener`。

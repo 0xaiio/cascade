@@ -52,7 +52,7 @@ def make_settings(tmp_path: Path) -> AppSettings:
     )
 
 
-def make_client(tmp_path: Path, service=None, directory_picker=None, system_opener=None):
+def make_client(tmp_path: Path, service=None, directory_picker=None, system_opener=None, chooser_opener=None):
     settings = make_settings(tmp_path)
     return TestClient(
         create_app(
@@ -60,6 +60,7 @@ def make_client(tmp_path: Path, service=None, directory_picker=None, system_open
             ytdlp_service=service or FakeYtDlpService(),
             directory_picker=directory_picker,
             system_opener=system_opener,
+            chooser_opener=chooser_opener,
         )
     )
 
@@ -71,6 +72,7 @@ def seed_job(
     output_path: Path | None = None,
     download_dir: Path | None = None,
     options: DownloadOptions | None = None,
+    subtitle_path: Path | None = None,
 ) -> None:
     engine = create_app_engine(make_settings(tmp_path))
     init_db(engine)
@@ -95,6 +97,7 @@ def seed_job(
                 index=1,
                 status=status,
                 output_path=str(output_path) if output_path else None,
+                subtitle_path=str(subtitle_path) if subtitle_path else None,
             )
         )
         session.commit()
@@ -2035,6 +2038,174 @@ def test_open_playlist_item_folder_opens_output_parent(tmp_path: Path) -> None:
 
     assert response.status_code == 204
     assert opened == [playlist_dir]
+
+
+def test_open_single_video_subtitle_hands_the_file_to_the_os(tmp_path: Path) -> None:
+    opened: list[Path] = []
+    downloads = tmp_path / "downloads"
+    video = downloads / "Running [job-subtitle].mp4"
+    subtitle = downloads / "Running [job-subtitle].en.vtt"
+    downloads.mkdir(parents=True)
+    for path in (video, subtitle):
+        path.write_text("x", encoding="utf-8")
+    seed_job(tmp_path, "job-subtitle", status="succeeded", output_path=video, subtitle_path=subtitle)
+    client = make_client(tmp_path, system_opener=opened.append)
+
+    response = client.post("/api/jobs/job-subtitle/open-subtitle")
+
+    assert response.status_code == 204
+    # 后端只负责「把这个文件交给系统」，用哪个程序由系统关联决定。
+    assert opened == [subtitle]
+
+
+def test_open_subtitle_can_let_the_system_ask_which_program(tmp_path: Path) -> None:
+    opened: list[Path] = []
+    chosen: list[Path] = []
+    downloads = tmp_path / "downloads"
+    video = downloads / "Running [job-subtitle-choose].mp4"
+    subtitle = downloads / "Running [job-subtitle-choose].zh-Hans.srt"
+    downloads.mkdir(parents=True)
+    for path in (video, subtitle):
+        path.write_text("x", encoding="utf-8")
+    seed_job(
+        tmp_path,
+        "job-subtitle-choose",
+        status="succeeded",
+        output_path=video,
+        subtitle_path=subtitle,
+    )
+    client = make_client(tmp_path, system_opener=opened.append, chooser_opener=chosen.append)
+
+    response = client.post("/api/jobs/job-subtitle-choose/open-subtitle?mode=chooser")
+
+    assert response.status_code == 204
+    # 两条路必须真的不同：都走默认打开的话，「选程序」这个动作就是假的。
+    assert chosen == [subtitle]
+    assert opened == []
+
+
+def test_open_playlist_item_subtitle_uses_the_item_not_the_job(tmp_path: Path) -> None:
+    opened: list[Path] = []
+    playlist_dir = tmp_path / "downloads" / "Course"
+    subtitle = playlist_dir / "two.zh-Hans.vtt"
+    playlist_dir.mkdir(parents=True)
+    subtitle.write_text("subs", encoding="utf-8")
+    engine = create_app_engine(make_settings(tmp_path))
+    init_db(engine)
+    with Session(engine) as session:
+        session.add(
+            Job(
+                id="job-playlist-item-subtitle",
+                url="https://youtube.com/playlist?list=abc",
+                title="Course",
+                status="succeeded",
+                options_json="{}",
+                total_items=1,
+                download_dir=str(playlist_dir),
+            )
+        )
+        session.add(
+            JobItem(
+                id="item-two",
+                job_id="job-playlist-item-subtitle",
+                source_url="https://youtu.be/two",
+                title="Part two",
+                index=2,
+                status="succeeded",
+                subtitle_path=str(subtitle),
+            )
+        )
+        session.commit()
+    client = make_client(tmp_path, system_opener=opened.append)
+
+    response = client.post("/api/jobs/job-playlist-item-subtitle/items/item-two/open-subtitle")
+
+    assert response.status_code == 204
+    assert opened == [subtitle]
+
+
+def test_open_subtitle_without_any_subtitle_is_409(tmp_path: Path) -> None:
+    opened: list[Path] = []
+    downloads = tmp_path / "downloads"
+    video = downloads / "Running [job-no-subtitle].mp4"
+    downloads.mkdir(parents=True)
+    video.write_text("x", encoding="utf-8")
+    seed_job(tmp_path, "job-no-subtitle", status="succeeded", output_path=video)
+    client = make_client(tmp_path, system_opener=opened.append)
+
+    response = client.post("/api/jobs/job-no-subtitle/open-subtitle")
+
+    assert response.status_code == 409
+    assert "字幕" in response.json()["detail"]
+    assert opened == []
+
+
+def test_open_subtitle_rejects_an_unknown_mode(tmp_path: Path) -> None:
+    opened: list[Path] = []
+    seed_job(tmp_path, "job-subtitle-mode", status="succeeded", subtitle_path=tmp_path / "whatever.en.vtt")
+    client = make_client(tmp_path, system_opener=opened.append)
+
+    response = client.post("/api/jobs/job-subtitle-mode/open-subtitle?mode=editor")
+
+    # 只有两种系统 verb。多一个取值就是多一条没人实现过的分支，宁可当场 422。
+    assert response.status_code == 422
+    assert opened == []
+
+
+def test_job_item_reports_the_subtitle_file_it_will_open(tmp_path: Path) -> None:
+    downloads = tmp_path / "downloads"
+    video = downloads / "Running [job-subtitle-read].mp4"
+    subtitle = downloads / "Running [job-subtitle-read].en.vtt"
+    downloads.mkdir(parents=True)
+    for path in (video, subtitle):
+        path.write_text("x", encoding="utf-8")
+    seed_job(tmp_path, "job-subtitle-read", status="succeeded", output_path=video, subtitle_path=subtitle)
+    client = make_client(tmp_path)
+
+    payload = client.get("/api/jobs/job-subtitle-read").json()
+
+    # 前端拿它决定按钮能不能点 —— 不能点却点得下去（409）比灰着更让人困惑。
+    assert payload["items"][0]["subtitle_path"] == str(subtitle)
+
+
+def test_job_item_finds_a_legacy_subtitle_next_to_the_video(tmp_path: Path) -> None:
+    """`subtitle_path` 是后加的列：此前的任务那一列为空，字幕却躺在视频旁边。"""
+    downloads = tmp_path / "downloads"
+    video = downloads / "Legacy [job-legacy-subtitle].mp4"
+    subtitle = downloads / "Legacy [job-legacy-subtitle].zh-Hans.srt"
+    downloads.mkdir(parents=True)
+    for path in (video, subtitle):
+        path.write_text("x", encoding="utf-8")
+    seed_job(tmp_path, "job-legacy-subtitle", status="succeeded", output_path=video)
+    opened: list[Path] = []
+    client = make_client(tmp_path, system_opener=opened.append)
+
+    payload = client.get("/api/jobs/job-legacy-subtitle").json()
+    response = client.post("/api/jobs/job-legacy-subtitle/open-subtitle")
+
+    assert payload["items"][0]["subtitle_path"] == str(subtitle)
+    assert response.status_code == 204
+    assert opened == [subtitle]
+
+
+def test_job_item_subtitle_path_is_null_when_the_file_is_gone(tmp_path: Path) -> None:
+    """记录还在、文件没了 —— 不能回显一个点下去必然报错的按钮。"""
+    downloads = tmp_path / "downloads"
+    video = downloads / "Gone [job-gone-subtitle].mp4"
+    downloads.mkdir(parents=True)
+    video.write_text("x", encoding="utf-8")
+    seed_job(
+        tmp_path,
+        "job-gone-subtitle",
+        status="succeeded",
+        output_path=video,
+        subtitle_path=downloads / "Gone [job-gone-subtitle].en.vtt",
+    )
+    client = make_client(tmp_path)
+
+    payload = client.get("/api/jobs/job-gone-subtitle").json()
+
+    assert payload["items"][0]["subtitle_path"] is None
 
 
 def test_open_playlist_folder_opens_job_download_dir(tmp_path: Path) -> None:

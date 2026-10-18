@@ -14,6 +14,7 @@ from app.output_paths import (
     discover_output_file_candidates,
     existing_item_folder,
     existing_output_file,
+    existing_subtitle_file,
     find_subtitle_file,
     item_artifact_candidates,
     resolve_existing_output_path,
@@ -196,3 +197,32 @@ def test_language_code_comes_from_the_last_dot_segment() -> None:
     assert subtitle_language_from_path(Path("C++ Weekly - Ep 3.1 [abc].en.vtt")) == "en"
     assert subtitle_language_from_path(Path("作品 [abc].zh-Hans.srt")) == "zh-Hans"
     assert subtitle_language_from_path(Path("no-dot-here.vtt")) is None
+
+
+def test_existing_subtitle_file_prefers_the_recorded_path(tmp_path: Path) -> None:
+    """记录值优先：同一段视频旁边可能既有 `en` 又有 `zh-Hans`，而**下载当时**结论是哪条由记录决定。"""
+    _seed(tmp_path, ["作品 [abc].mp4", "作品 [abc].en.vtt", "作品 [abc].zh-Hans.srt"])
+    recorded = tmp_path / "作品 [abc].zh-Hans.srt"
+
+    assert existing_subtitle_file(str(recorded), tmp_path / "作品 [abc].mp4") == recorded
+
+
+def test_existing_subtitle_file_falls_back_to_the_video_neighbour(tmp_path: Path) -> None:
+    """`subtitle_path` 是后来才加的列：此前的任务那一列为空，字幕却好端端躺在视频旁边。"""
+    _seed(tmp_path, ["作品 [abc].mp4", "作品 [abc].en.vtt"])
+
+    assert existing_subtitle_file(None, tmp_path / "作品 [abc].mp4") == tmp_path / "作品 [abc].en.vtt"
+
+
+def test_existing_subtitle_file_ignores_a_record_whose_file_is_gone(tmp_path: Path) -> None:
+    """记录可能指向已经被删掉的文件 —— 回显它就是给界面一个点下去必然报错的按钮。"""
+    _seed(tmp_path, ["作品 [abc].mp4"])
+
+    assert existing_subtitle_file(str(tmp_path / "作品 [abc].en.vtt"), None) is None
+
+
+def test_existing_subtitle_file_is_none_without_a_video(tmp_path: Path) -> None:
+    """视频都没定位到时不去扫目录：这条链的上游已经算过一遍「成品在哪」。"""
+    _seed(tmp_path, ["作品 [abc].en.vtt"])
+
+    assert existing_subtitle_file(None, None) is None

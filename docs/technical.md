@@ -200,7 +200,7 @@ Cookies 用于合法账号态、年龄确认或 bot 校验场景。解析阶段�
 ## 失败排查顺序
 
 0. 先看 `data/logs/app.log`（路径见 `/api/diagnostics.log_file`）。启动三行快照 `proxy resolved` / `js runtime ...` / `dependencies ready` 能立刻排除环境问题；失败处有 `category=` 与紧随其后的 `诊断 / 原因 / 建议N`。
-1. 查看任务中心具体错误；单视频失败时 `Job.error` 会透传唯一失败 `JobItem.error`，见 [job_read_model.py](../backend/app/job_read_model.py#L122)。
+1. 查看任务中心具体错误；单视频失败时 `Job.error` 会透传唯一失败 `JobItem.error`，见 [job_read_model.py](../backend/app/job_read_model.py#L160)。
 2. 查看 `/api/diagnostics`，确认 ffmpeg、JS runtime（含 `js_runtime_error`）、impersonation、PO-token provider、cookies、代理、aria2c 状态。代理通不通用 `POST /api/proxy/test`；cookies 是否真能登录用 `POST /api/cookies/verify`。
 3. 重新从浏览器导入 cookies，并用 `POST /api/cookies/verify` 确认结论（域名与鉴权项都可能是「文件存在但全是匿名」的假象）。
 4. 若浏览器可正常播放但应用仍遇到媒体流 403，配置 PO token、visitor data 或浏览器路径。
@@ -318,7 +318,7 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 `curl --max-time 40` 实测 **40 秒不返回** —— 而网络层用的 `socket` 超时**不覆盖 DNS 解析**，
 所以那次请求等于没有超时，界面上是一个**没有终点**的「正在读取…」。
 
-现在的两道保险都在前端 [App.tsx](../frontend/src/App.tsx#L402)：
+现在的两道保险都在前端 [App.tsx](../frontend/src/App.tsx#L400)：
 `seasonsRequested` 去重（弹窗每收到一条 SSE 事件就重渲染一次，没有去重会反复发请求），
 以及 `SEASON_LIST_TIMEOUT_MS = 12_000` 到点写下一个**读完了、但读不到**的结论
 （`SEASON_LIST_UNREADABLE`，带可操作的建议）。迟到的真结果会**覆盖**这条兜底 ——
@@ -377,6 +377,36 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 ### 表单与硬限
 
 预填与硬限的权威值都在 [bili_meta.py](../backend/app/bili_meta.py)：标题 ≤ 80、简介 ≤ 250、标签逗号分隔总长 < 200（最多 10 个、单个 ≤ 20）、评论 ≤ 1000（`COMMENT_MAX`）。默认分区 `tid=122`（野生技术协会）。合集按模板批量生成时，`{index}` / `{title}` 这类占位符在 [render](../backend/app/bili_meta.py#L272) 里替换，未知占位符由 `unknown_placeholders` 挑出来单独报错。前端的预填数字全部来自服务端，不写死在组件里。
+
+## 打开字幕文件
+
+任务中心的「打开字幕」只是把**文件**交给操作系统，程序的选择权也一起交给它。这条路上有三件事容易做歪：
+
+**一、不要自建编辑器清单。** 系统已经有一份完整的处理器注册表（`.srt` / `.vtt` → 谁），自己再列一份
+notepad / VS Code / Sublime 只能是它的子集：用户装了别的我们不知道，各平台的清单还得各维护一份。
+所以这里只有两个动作，正好对应 shell 的两个 verb：
+
+| 动作 | Windows 实现 | 谁决定程序 |
+| --- | --- | --- |
+| 默认打开 | `os.startfile(path)` | 该后缀的关联程序（`HKCU\...\FileExts\<ext>\UserChoice`） |
+| 选择打开方式 | `rundll32.exe shell32.dll,OpenAs_RunDLL <path>` | 用户当场在系统窗口里挑 |
+
+**二、「记住上次用的程序」由系统负责，应用侧不存第二份。** 用户在「打开方式」窗口里勾「始终使用此应用」，
+系统就改了这个后缀的关联，下次点主按钮直接就是那个程序。看起来像「没实现记忆」，实际上是**记忆只有一个
+所有者**：应用再存一份「上次用的查看器」，它迟早会和系统的关联结论打架，而用户根本无法判断该信谁。
+（代价：改回来要去系统的「打开方式」里改，我们提供入口，但不代管这份状态。）
+
+**三、没有关联不是错误。** 在干净的 Windows 上点一个 `.srt`，`os.startfile` 抛的是
+`OSError [WinError 1155] 没有应用程序与此操作的指定文件有关联`。这不是「打不开」，是「还没人认领这个
+后缀」—— 正确反应是像资源管理器那样**弹「打开方式」**（[open_path_with_default_app](../backend/app/system_open.py#L28)
+里只对这一种 `winerror` 降级，其它错误照原样抛：把「拒绝访问」也悄悄变成弹窗，就是把真问题藏起来）。
+
+其它平台没有等价的「选择器」（macOS 的 `open -a` 要的是应用名，Linux 的 `xdg-open` 只有默认），
+`mode=chooser` 在那里退化成默认打开，见 [open_path_with_chooser](../backend/app/system_open.py#L46)。
+
+前端因此是一个**组合控件**（[SubtitleOpenButton](../frontend/src/components/SubtitleOpenButton.tsx#L17)）：
+主段 `title="打开字幕文件"`，右段是一个小箭头、`title="选择打开方式"`。做成一个按钮加修饰键（Shift 点击）
+是不行的 —— 界面上看不见的入口等于没做。
 
 ## 文件删除语义
 

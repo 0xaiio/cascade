@@ -29,7 +29,7 @@
 | FR-7 | 支持任务暂停、重启、删除、playlist 子视频删除、批量操作，以及本地播放/打开文件夹。 | [`batch_job_action`](../backend/app/routers/jobs.py#L80)、[`system_open.py`](../backend/app/system_open.py) |
 | FR-8 | 默认请求人工字幕和自动字幕；缺少某类字幕时 fallback 到另一类可用字幕，并显示来源与格式。 | [`DownloadOptions`](../backend/app/schemas.py#L63)、[`DownloadOptionsPanel`](../frontend/src/components/DownloadOptionsPanel.tsx#L26) |
 | FR-9 | 支持 cookies 上传、浏览器导入和清除。 | [`/api/cookies`](../backend/app/routers/cookies.py#L60)、[`BrowserCookieImporter`](../backend/app/browser_cookies.py#L67) |
-| FR-10 | 支持并发、限速、重试次数和单视频并发下载数（aria2c）作为运行时设置即时保存；限速/重试变更会让当前视频断点续传重启以应用新参数。 | [`SettingsUpdate`](../backend/app/schemas.py#L206)、[`set_runtime_download_defaults`](../backend/app/job_manager.py#L138) |
+| FR-10 | 支持并发、限速、重试次数和单视频并发下载数（aria2c）作为运行时设置即时保存；限速/重试变更会让当前视频断点续传重启以应用新参数。 | [`SettingsUpdate`](../backend/app/schemas.py#L210)、[`set_runtime_download_defaults`](../backend/app/job_manager.py#L138) |
 | FR-11 | 支持 SSE 事件流和任务轮询。 | [`/api/events`](../backend/app/routers/events.py#L15)、[`EventBroker`](../backend/app/events.py#L7) |
 | FR-12 | 支持诊断依赖状态、cookies 状态和稳定性参数。 | [`/api/diagnostics`](../backend/app/routers/diagnostics.py#L29)、[`get_dependency_status`](../backend/app/ytdlp_service.py#L296) |
 | FR-13 | 下载停滞可观测：在可配置窗口内没有新增字节时主动判为失败，而不是永久 `running`。 | [`StallGuard`](../backend/app/stall_guard.py#L32)、[`_download_once`](../backend/app/ytdlp_service.py#L637) |
@@ -44,7 +44,7 @@
 | FR-22 | 提供 B站 环境体检（投稿工具是否可用、ffmpeg、登录态、缺项清单），每条结论文案必须自带「下一步」；并支持修复投稿工具、扫码登录、导入已有登录文件三种前置动作。 | [`bili_status`](../backend/app/routers/bilibili.py#L67)、[`BiliLoginSection`](../frontend/src/components/BiliLoginSection.tsx#L29) |
 | FR-23 | 投稿命令返回成功**不等于**已发布：必须回读账号稿件列表对账；对不上的记录进入「待核对」而非「已发布」或「失败」，且两者的推荐动作不同。 | [`find_archive`](../backend/app/bili_api.py#L127)、[`UPLOAD_UNVERIFIED`](../backend/app/bili_policy.py#L267) |
 | FR-24 | 任务行与条目行各有 B站 上传图标，状态由**后端**按该任务的全部记录聚合出一档徽标（未上传/上传中/已上传/待核对/部分失败/失败），前端不自行推导。 | [`derive_badge`](../backend/app/bili_read_model.py#L60)、[`BiliUploadButton`](../frontend/src/components/BiliUploadButton.tsx#L19) |
-| FR-25 | 失败与待核对可单条重试，动作按终态三选一：重新投稿 / **只**重新核对（不重投）/ 什么都不做；合集归集失败可单独重试，且**不会重复建合集**。 | [`BiliRetryRead`](../backend/app/schemas.py#L576)、[`bili_retry_season`](../backend/app/routers/bilibili.py#L311) |
+| FR-25 | 失败与待核对可单条重试，动作按终态三选一：重新投稿 / **只**重新核对（不重投）/ 什么都不做；合集归集失败可单独重试，且**不会重复建合集**。 | [`BiliRetryRead`](../backend/app/schemas.py#L580)、[`bili_retry_season`](../backend/app/routers/bilibili.py#L311) |
 | FR-26 | 投稿可自动生成封面（ffmpeg 抽帧）并自动发送、置顶一条评论；评论发送失败不影响稿件本身的状态。 | [`extract_cover_frame`](../backend/app/bili_bin.py#L288)、[`send_and_top_comment`](../backend/app/bili_api.py#L441) |
 | FR-27 | B站 凭据只以文件形式保存，API 与界面**只回传名字与计数**（不返回值、不返回掩码前缀）；登录文件被 git 跟踪时单独作为一条阻断项报出。 | [`cookie_summary`](../backend/app/bili_auth.py#L379)、[`is_cookie_tracked_by_git`](../backend/app/bili_auth.py#L390) |
 | FR-28 | 字幕只处理**中文与英文**两族，其余语种一律忽略（粤语 `yue` 不算中文）。族判定只有一个入口，界面列出与下载选取共用同一份过滤。 | [`language_family`](../backend/app/subtitle_plan.py#L109)、[`_map_subtitles`](../backend/app/ytdlp_service.py#L1193) |
@@ -53,7 +53,10 @@
 | FR-31 | 下载结论要记录**语言 + 来源类型（人工 / 自动生成）+ 文件路径**，供上传环节消费；落库判据是**磁盘上真的有那个文件**，不是下载前的计划。 | [`_record_subtitle_result`](../backend/app/job_manager.py#L1062)、[`find_subtitle_file`](../backend/app/output_paths.py#L162) |
 | FR-32 | 视频投稿成功后把已下载的字幕**一并提交为可关闭的 CC 字幕**（字幕轨而非硬字幕）：SRT/VTT 转成 BCC，挂在分P 的 `cid` 上，语言标识用**平台白名单里的值**。 | [`upload_subtitle`](../backend/app/bili_subtitle.py#L218)、[`save_subtitle`](../backend/app/bili_api.py#L366)、[`_attach_subtitle`](../backend/app/bili_upload.py#L305) |
 | FR-33 | 无可用字幕时**只跳过字幕上传**，视频投稿流程照常完成；字幕这一步失败**不把已发布的稿件翻成失败**，且提供**只重传字幕**（绝不重投视频）的重试。 | [`SubtitleOutcome`](../backend/app/bili_subtitle.py#L209)、[`retry_upload`](../backend/app/bili_manager.py#L921) |
-| FR-34 | 投稿表单在**提交前**告诉用户每条视频会带什么字幕（如 `en · 人工`、`无字幕`）；这句文案由服务端拼好，前端不自己拼一遍。 | [`subtitle_summary`](../backend/app/subtitle_plan.py#L92)、[`BiliPrefillItem.subtitle`](../backend/app/schemas.py#L407) |
+| FR-34 | 投稿表单在**提交前**告诉用户每条视频会带什么字幕（如 `en · 人工`、`无字幕`）；这句文案由服务端拼好，前端不自己拼一遍。 | [`subtitle_summary`](../backend/app/subtitle_plan.py#L92)、[`BiliPrefillItem.subtitle`](../backend/app/schemas.py#L411) |
+| FR-35 | 任务中心每个已下到字幕的视频条目都能**用本机的程序打开字幕文件**：按钮位于「打开视频所在文件夹」右侧、图标是字幕（CC）、悬停提示「打开字幕文件」。点主段用系统关联打开，点右段弹系统的「打开方式」窗口自行挑程序。**不自己维护编辑器清单、不自己记「上次用的程序」**——那两件事的所有者是操作系统。 | [`SubtitleOpenButton`](../frontend/src/components/SubtitleOpenButton.tsx#L17)、[`open_path_with_chooser`](../backend/app/system_open.py#L46)、[`subtitle_file`](../backend/app/job_artifacts.py#L56) |
+| FR-36 | 没有字幕文件的条目，该按钮**必须置灰**并说明原因；后端对这种情况返回 `409`，而不是 204 空转。按钮的可点性只看读模型给的 `subtitle_path`（真的存在才给值）。 | [`_project_subtitle_path`](../backend/app/job_read_model.py#L110)、[`existing_subtitle_file`](../backend/app/output_paths.py#L184) |
+| FR-37 | 「打开字幕」不接收前端传入的路径；`mode` 只有 `default` / `chooser` 两个取值，其余一律 `422`。打开失败的原因显示在**对应那一行**，不进全局提示区。 | [`SubtitleOpenMode`](../backend/app/routers/job_files.py#L23)、[`runLocalFileAction`](../frontend/src/components/JobQueue.tsx#L125) |
 
 ## 非功能需求
 

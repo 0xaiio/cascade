@@ -1,15 +1,17 @@
 """任务产物的**定位**与**本机打开**。
 
-一个条目下载完之后，界面上能对它做的本地操作只有两类：播放、打开它所在的文件夹。
+一个条目下载完之后，界面上能对它做的本地操作只有三类：播放、打开它所在的文件夹、
+用系统程序打开它的字幕文件。
 「文件在哪」走的是一条候选链：数据库里记的 `output_path` → 按视频 id 在下载目录里发现的候选
 → 合并/后缀变体（`.f137.mp4` 这类）。
 
 **这条链只定义一次**，在 [`output_paths.py`](output_paths.py)（`existing_output_file` /
-`existing_item_folder`）。本模块只做两件事：把「找不到」翻译成合适的状态码，以及把打开动作
-交给 [`system_open`](system_open.py)。
+`existing_item_folder` / `existing_subtitle_file`）。本模块只做两件事：把「找不到」翻译成
+合适的状态码，以及把打开动作交给 [`system_open`](system_open.py)。
 
 不负责：删文件（删除带白名单校验，属 [`job_manager.py`](job_manager.py)），
-不负责决定用什么播放器（属 [`system_open.py`](system_open.py)）。
+不负责决定用什么播放器 / 用什么查看器（属 [`system_open.py`](system_open.py)）——
+**「用哪个程序打开」一概交给系统**，本模块只挑 `default`（默认关联）还是 `chooser`（系统选择器）。
 """
 
 from __future__ import annotations
@@ -22,7 +24,7 @@ from fastapi import HTTPException
 from sqlmodel import Session, select
 
 from .models import Job, JobItem
-from .output_paths import existing_item_folder, existing_output_file
+from .output_paths import existing_item_folder, existing_output_file, existing_subtitle_file
 from .system_open import LocalOpenError
 
 
@@ -49,6 +51,21 @@ def item_folder(item: JobItem, base_dir: str | Path | None = None) -> Path:
 
 def output_folder(item: JobItem, base_dir: str | Path | None = None) -> Path:
     return item_folder(item, base_dir)
+
+
+def subtitle_file(item: JobItem, base_dir: str | Path | None = None) -> Path:
+    """条目已下载的字幕文件。**没有就是 409**：这个条目在库里，只是它没有可用字幕。
+
+    候选链在 `output_paths.existing_subtitle_file` 里（记录值 → 视频旁边的同名字幕）。
+    404 会误导用户以为「这个视频不存在」，而 204 空转则会静默什么都不做 —— 两者都不如
+    明说「这条没有字幕」。前端按 `subtitle_path` 置灰按钮，正常情况下点不到这里。
+    """
+    base_path = _base_path(base_dir)
+    video = existing_output_file(item.output_path, item.source_url, base_path)
+    path = existing_subtitle_file(item.subtitle_path, video, base_path)
+    if path is None:
+        raise HTTPException(status_code=409, detail="字幕文件尚不可用。")
+    return path
 
 
 def job_folder(session: Session, job: Job) -> Path:

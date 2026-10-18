@@ -5,7 +5,7 @@ from sqlmodel import Session, select
 
 from .fallback_policy import build_resolution_fallback
 from .models import Job, JobItem, utc_now
-from .output_paths import discover_existing_output_path, resolve_existing_output_path
+from .output_paths import discover_existing_output_path, existing_subtitle_file, resolve_existing_output_path
 from .schemas import DownloadOptions, JobItemRead, JobRead, ResolutionFallback
 
 
@@ -58,6 +58,8 @@ def _notify_on_complete(job: Job) -> bool:
 
 
 def _read_job_item(item: JobItem, job_download_dir: str | None) -> JobItemRead:
+    base_dir = Path(job_download_dir) if job_download_dir else None
+    output_path = _project_output_path(item, job_download_dir)
     return JobItemRead(
         id=item.id,
         job_id=item.job_id,
@@ -71,7 +73,7 @@ def _read_job_item(item: JobItem, job_download_dir: str | None) -> JobItemRead:
         duration=item.duration,
         speed=item.speed,
         eta=item.eta,
-        output_path=_project_output_path(item, job_download_dir),
+        output_path=output_path,
         actual_width=item.actual_width,
         actual_height=item.actual_height,
         actual_format=item.actual_format,
@@ -86,6 +88,7 @@ def _read_job_item(item: JobItem, job_download_dir: str | None) -> JobItemRead:
         ),
         subtitle_language=item.subtitle_language,
         subtitle_source=item.subtitle_source,
+        subtitle_path=_project_subtitle_path(item, output_path, base_dir),
         error=item.error,
         created_at=item.created_at,
         updated_at=item.updated_at,
@@ -102,6 +105,21 @@ def _project_output_path(item: JobItem, job_download_dir: str | None) -> str | N
         return str(resolved or item.output_path)
     discovered = discover_existing_output_path(item.source_url, base_dir)
     return str(discovered) if discovered else None
+
+
+def _project_subtitle_path(item: JobItem, output_path: str | None, base_dir: Path | None) -> str | None:
+    """条目已下载到磁盘的字幕文件；没有就是 `None`。
+
+    **前端拿它决定「打开字幕」按钮能不能点**，所以只报「真的存在」的那种：
+    把一条已经不存在的旧记录回显出去，界面上就是一个点下去必然 409 的按钮。
+
+    视频路径复用上面刚算好的 `output_path`，**不再自己发现一遍** —— 这份读模型每次轮询
+    都会为每个条目跑一次，多扫一遍目录是白花的钱。定位规则本身仍在
+    `output_paths.existing_subtitle_file`（唯一计算处）。
+    """
+    video = Path(output_path) if output_path else None
+    path = existing_subtitle_file(item.subtitle_path, video, base_dir)
+    return str(path) if path else None
 
 
 def _actual_resolution(items: list[JobItem]) -> str | None:

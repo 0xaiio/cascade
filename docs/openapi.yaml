@@ -857,6 +857,59 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /api/jobs/{job_id}/open-subtitle:
+    post:
+      tags: [local-files]
+      operationId: openJobSubtitle
+      summary: Open the downloaded subtitle of a single-video task
+      description: |
+        Hands the subtitle file (`JobItem.subtitle_path`) to the operating system —
+        the backend never picks a program itself.
+
+        - `mode=default`: run the registered handler for the file type. If Windows has
+          no association for the extension yet, the system's "Open with" dialog is
+          shown instead of failing.
+        - `mode=chooser`: always show the system's "Open with" dialog, so the user can
+          pick another program and let Windows remember it ("always use this app").
+
+        There is deliberately no editor list on this side: the OS already owns the
+        handler registry and the per-extension association, and a second copy would
+        only be a subset of it.
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+        - name: mode
+          in: query
+          required: false
+          description: Which shell verb to use. `default` = the remembered association,
+            `chooser` = the system "Open with" dialog.
+          schema:
+            type: string
+            enum: [default, chooser]
+            default: default
+      responses:
+        "204":
+          description: The subtitle was handed to the operating system. No content.
+        "400":
+          description: The operating system opener failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: This item has no subtitle file on disk.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Unknown `mode`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /api/jobs/{job_id}/items/{item_id}/play:
     post:
       tags: [local-files]
@@ -904,6 +957,49 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           description: The folder is not available yet.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/jobs/{job_id}/items/{item_id}/open-subtitle:
+    post:
+      tags: [local-files]
+      operationId: openJobItemSubtitle
+      summary: Open the downloaded subtitle of one playlist item
+      description: Same contract as `openJobSubtitle`, scoped to one item of a playlist
+        task — each item has its own subtitle file (or none at all).
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+        - $ref: "#/components/parameters/ItemId"
+        - name: mode
+          in: query
+          required: false
+          description: Which shell verb to use. `default` = the remembered association,
+            `chooser` = the system "Open with" dialog.
+          schema:
+            type: string
+            enum: [default, chooser]
+            default: default
+      responses:
+        "204":
+          description: The subtitle was handed to the operating system. No content.
+        "400":
+          description: The operating system opener failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: This item has no subtitle file on disk.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Unknown `mode`.
           content:
             application/json:
               schema:
@@ -2271,6 +2367,16 @@ components:
             Where the subtitle came from: `human` (uploaded by the channel), `auto` (ASR),
             or `none` (no usable subtitle was found, the download was skipped on purpose).
           example: human
+        subtitle_path:
+          type: [string, "null"]
+          description: >-
+            Absolute path of the subtitle file that is actually on disk; `null` means this
+            item has no usable subtitle (or the recorded file is gone). The task center
+            enables the "open subtitle" button from this field alone — the frontend never
+            builds the path itself. Resolution order: the recorded `subtitle_path`, then a
+            same-name `.srt`/`.vtt` next to the video (rows created before that column
+            existed).
+          example: D:\\Videos\\Title [abc123].en.vtt
         error:
           type: [string, "null"]
           description: Readable failure reason. Media-stream failures are prefixed

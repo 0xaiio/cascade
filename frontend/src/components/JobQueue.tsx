@@ -1,6 +1,6 @@
 ﻿import { useEffect, useState } from "react";
 import { Check, ChevronDown, Copy, ExternalLink, FileX2, FolderOpen, Gauge, Pause, Play, RotateCcw, Trash2 } from "lucide-react";
-import type { BiliJobUploads, BiliUpload, Job, JobBatchAction, ResolutionFallback } from "../types";
+import type { BiliJobUploads, BiliUpload, Job, JobBatchAction, ResolutionFallback, SubtitleOpenMode } from "../types";
 import {
   formatBytesPerSecond,
   formatClock,
@@ -13,6 +13,7 @@ import {
 import { resolutionFallbackRestartLabel } from "../quality";
 import { BiliJobStatus } from "./BiliJobStatus";
 import { BiliUploadButton } from "./BiliUploadButton";
+import { SubtitleOpenButton } from "./SubtitleOpenButton";
 
 type MaybePromise = void | Promise<void>;
 
@@ -33,6 +34,7 @@ export function JobQueue({
   onOpenFolder,
   onOpenItemFolder,
   onOpenSourcePage,
+  onOpenSubtitle,
   onOpenVideoPage,
   onPause,
   onPlay,
@@ -56,6 +58,11 @@ export function JobQueue({
   onOpenFolder: (jobId: string) => MaybePromise;
   onOpenItemFolder: (jobId: string, itemId: string) => MaybePromise;
   onOpenSourcePage: (sourceUrl: string) => void;
+  /**
+   * 打开字幕：`itemId` 为空 = 单视频任务（走任务级接口），否则是合集里的某一条。
+   * `mode` 只决定「用系统记住的关联」还是「让系统弹打开方式」，见 `SubtitleOpenButton`。
+   */
+  onOpenSubtitle: (jobId: string, itemId: string | null, mode: SubtitleOpenMode) => MaybePromise;
   onOpenVideoPage: (url: string) => void;
   onPause: (jobId: string) => void;
   onPlay: (jobId: string) => MaybePromise;
@@ -163,6 +170,9 @@ export function JobQueue({
           const primaryItem = job.items[0] ?? null;
           const canPlayJob = !isPlaylist && Boolean(primaryItem?.output_path);
           const canOpenSingleFolder = !isPlaylist && Boolean(primaryItem?.output_path || job.download_dir);
+          // 字幕按钮的可点性来自**后端算好的** `subtitle_path`（真的存在才给值）：
+          // 能点却点了 409 的按钮，比灰着的按钮更让人困惑。
+          const canOpenSubtitle = !isPlaylist && Boolean(primaryItem?.subtitle_path);
           const canOpenPlaylistFolder = isPlaylist && Boolean(job.download_dir);
           const jobCopyKey = `job:${job.id}`;
           const isJobCopied = copiedKey === jobCopyKey;
@@ -261,6 +271,13 @@ export function JobQueue({
                   >
                     <FolderOpen size={18} />
                   </button>
+                )}
+                {!isPlaylist && (
+                  <SubtitleOpenButton
+                    disabled={!canOpenSubtitle}
+                    subject={title}
+                    onOpen={(mode) => runLocalFileAction(jobLocalActionKey, () => onOpenSubtitle(job.id, null, mode))}
+                  />
                 )}
                 <button
                   className="icon-button"
@@ -385,6 +402,7 @@ export function JobQueue({
                   const itemLocalActionKey = `item:${item.id}`;
                   const isItemCopied = copiedKey === itemCopyKey;
                   const canOpenItemFolder = Boolean(item.output_path || job.download_dir);
+                  const canOpenItemSubtitle = Boolean(item.subtitle_path);
                   const itemBili = jobBili?.uploads.find((upload) => upload.item_id === item.id) ?? null;
                   const itemBiliBusy = itemBili?.badge === "uploading" || jobBili?.badge === "uploading";
                   return (
@@ -432,6 +450,14 @@ export function JobQueue({
                         >
                           <FolderOpen size={16} />
                         </button>
+                        <SubtitleOpenButton
+                          compact
+                          disabled={!canOpenItemSubtitle}
+                          subject={item.title}
+                          onOpen={(mode) =>
+                            runLocalFileAction(itemLocalActionKey, () => onOpenSubtitle(job.id, item.id, mode))
+                          }
+                        />
                         <button
                           className="icon-button item-action-button"
                           type="button"

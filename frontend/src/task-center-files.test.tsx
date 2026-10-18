@@ -186,4 +186,79 @@ describe("App · 任务中心：本地文件操作与链接", () => {
     await user.click(screen.getByRole("button", { name: "打开 YouTube 页面 Part one" }));
     expect(openSpy).toHaveBeenCalledWith("https://youtu.be/one", "_blank", "noopener,noreferrer");
   });
+
+  test("opens subtitles of a single video and of a playlist item", async () => {
+    mockState.jobs = [
+      {
+        ...jobPayload,
+        items: [{ ...jobPayload.items[0], output_path: "D:\\Videos\\running.mp4", subtitle_path: "D:\\Videos\\running.en.vtt" }]
+      },
+      {
+        ...playlistJobPayload,
+        items: [
+          { ...playlistJobPayload.items[0], output_path: "D:\\Videos\\Playlist\\one.mp4", subtitle_path: "D:\\Videos\\Playlist\\one.zh-Hans.srt" },
+          playlistJobPayload.items[1]
+        ]
+      }
+    ];
+    const user = userEvent.setup();
+    render(<App />);
+
+    expect(await screen.findByText("Running video")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "打开字幕文件 Running video" }));
+    await user.click(screen.getByRole("button", { name: "打开字幕文件 Part one" }));
+
+    // 默认模式只带 `mode=default`：具体用哪个程序由系统关联决定，前端不指定。
+    expect(fetch).toHaveBeenCalledWith("/api/jobs/job-running/open-subtitle?mode=default", expect.objectContaining({ method: "POST" }));
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/jobs/job-playlist/items/item-playlist-1/open-subtitle?mode=default",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
+  test("asks the system which program should open the subtitle", async () => {
+    mockState.jobs = [
+      {
+        ...jobPayload,
+        items: [{ ...jobPayload.items[0], output_path: "D:\\Videos\\running.mp4", subtitle_path: "D:\\Videos\\running.en.vtt" }]
+      }
+    ];
+    const user = userEvent.setup();
+    render(<App />);
+
+    expect(await screen.findByText("Running video")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "选择打开方式 Running video" }));
+
+    expect(fetch).toHaveBeenCalledWith("/api/jobs/job-running/open-subtitle?mode=chooser", expect.objectContaining({ method: "POST" }));
+  });
+
+  test("keeps the subtitle button disabled until a subtitle file exists", async () => {
+    render(<App />);
+
+    // 出厂夹具里的条目没有下到字幕（`subtitle_path: null`）。可点却点了报 409 的按钮，
+    // 比灰着的按钮更让人困惑 —— 所以这里必须两条都是禁用的。
+    expect(await screen.findByText("Running video")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "打开字幕文件 Running video" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "打开字幕文件 Part one" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "选择打开方式 Running video" })).toBeDisabled();
+  });
+
+  test("shows subtitle failures beside the affected task", async () => {
+    mockState.jobs = [
+      {
+        ...jobPayload,
+        items: [{ ...jobPayload.items[0], output_path: "D:\\Videos\\running.mp4", subtitle_path: "D:\\Videos\\running.en.vtt" }]
+      }
+    ];
+    mockState.localFileActionFailure = "字幕文件尚不可用。";
+    const user = userEvent.setup();
+    render(<App />);
+
+    expect(await screen.findByText("Running video")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "打开字幕文件 Running video" }));
+
+    const jobCard = screen.getByText("Running video").closest(".job-card");
+    expect(jobCard).toBeInTheDocument();
+    expect(within(jobCard as HTMLElement).getByRole("alert")).toHaveTextContent("字幕文件尚不可用。");
+  });
 });

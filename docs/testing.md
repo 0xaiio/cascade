@@ -12,33 +12,34 @@
 python -m compileall backend\app
 ```
 
-后端测试（当前基线：**913 passed**，31 个 `test_*.py`）：
+后端测试（当前基线：**1066 passed**，36 个 `test_*.py`）：
 
 ```powershell
 python -m pytest backend\tests -q
 ```
 
 > **在 WorkBuddy 沙箱里请分块跑。** 本仓库没有 `pytest.ini`，所以 pytest 会把临时目录建在系统 Temp、收尾时再清理；
-> 沙箱的批量删除守卫是**累积计数**的（一轮命令内累计到阈值就整条拒掉），于是 913 个用例放在一个进程里跑会在中途被拦下。
+> 沙箱的批量删除守卫是**累积计数**的（一轮命令内累计到阈值就整条拒掉），于是 1066 个用例放在一个进程里跑会在中途被拦下。
 > 现象很好认：**大量 `at setup of ...` 的 error，而 `FAILED` 一个都没有** —— 那是环境问题，不是代码问题。
 >
-> 按下面的分块跑，六块相加应恰好等于 913（各块 82～262 项；若某块仍被拦下，继续拆小即可）：
+> 按下面的分块跑，六块相加应恰好等于 1066（各块 85～224 项；若某块仍被拦下，继续拆小即可）：
 >
 > ```powershell
-> python -m pytest backend\tests\test_bili_policy.py backend\tests\test_bili_meta.py backend\tests\test_bili_auth.py backend\tests\test_bili_bin.py backend\tests\test_bili_read_model.py -q -p no:cacheprovider --basetemp=tmp_pytest\a   # 262
-> python -m pytest backend\tests\test_bili_api.py backend\tests\test_bili_upload.py backend\tests\test_api_bilibili.py -q -p no:cacheprovider --basetemp=tmp_pytest\b                                                            # 213
-> python -m pytest backend\tests\test_bili_manager.py -q -p no:cacheprovider --basetemp=tmp_pytest\c                                                                                                                   #  82
-> python -m pytest backend\tests\test_ytdlp_service.py -q -p no:cacheprovider --basetemp=tmp_pytest\d                                                                                                                  #  73
-> python -m pytest backend\tests\test_api.py backend\tests\test_resolution_decisions.py backend\tests\test_output_paths.py backend\tests\test_safe_delete.py -q -p no:cacheprovider --basetemp=tmp_pytest\e                # 146
-> python -m pytest backend\tests\test_dev_server.py backend\tests\test_proxy.py backend\tests\test_cookie_health.py backend\tests\test_stall_guard.py backend\tests\test_error_advice.py backend\tests\test_connectivity.py backend\tests\test_download_progress.py backend\tests\test_runtime_env.py backend\tests\test_job_manager_finally.py backend\tests\test_finally_guards.py backend\tests\test_system_open.py backend\tests\test_logging_setup.py backend\tests\test_db.py backend\tests\test_paths.py backend\tests\test_transfer_stats.py backend\tests\test_progress_persist.py backend\tests\test_log_safety.py -q -p no:cacheprovider --basetemp=tmp_pytest\f   # 137
+> python -m pytest backend\tests\test_bili_policy.py backend\tests\test_bili_meta.py backend\tests\test_bili_auth.py backend\tests\test_bili_bin.py -q -p no:cacheprovider --basetemp=tmp_pytest\a   # 202
+> python -m pytest backend\tests\test_bili_read_model.py backend\tests\test_bili_subtitle.py backend\tests\test_bili_api.py -q -p no:cacheprovider --basetemp=tmp_pytest\b                                            # 187
+> python -m pytest backend\tests\test_bili_upload.py backend\tests\test_bili_manager.py backend\tests\test_api_bilibili.py -q -p no:cacheprovider --basetemp=tmp_pytest\c                                                # 213
+> python -m pytest backend\tests\test_ytdlp_service.py backend\tests\test_subtitle_plan.py backend\tests\test_subtitle_recording.py backend\tests\test_api.py -q -p no:cacheprovider --basetemp=tmp_pytest\d                # 224
+> python -m pytest backend\tests\test_resolution_decisions.py backend\tests\test_output_paths.py backend\tests\test_safe_delete.py backend\tests\test_system_open.py backend\tests\test_dev_server.py backend\tests\test_proxy.py backend\tests\test_cookie_health.py backend\tests\test_stall_guard.py -q -p no:cacheprovider --basetemp=tmp_pytest\e   # 155
+> python -m pytest backend\tests\test_error_advice.py backend\tests\test_connectivity.py backend\tests\test_download_progress.py backend\tests\test_runtime_env.py backend\tests\test_job_manager_finally.py backend\tests\test_finally_guards.py backend\tests\test_orphan_recovery.py backend\tests\test_completion_notification.py backend\tests\test_db.py backend\tests\test_logging_setup.py backend\tests\test_paths.py backend\tests\test_transfer_stats.py backend\tests\test_progress_persist.py backend\tests\test_log_safety.py -q -p no:cacheprovider --basetemp=tmp_pytest\f   # 85
 > ```
 >
 > 上面的块内数字不用手数：`python -m pytest backend\tests --collect-only -q -p no:cacheprovider` 会逐条打印用例 id，
 > 按 `::` 前的文件名归并即可（`--collect-only` 不建临时目录，不受沙箱守卫影响）。
+> **分块清单要跟着新文件走**：漏掉某个 `test_*.py` 时六块之和会小于全集，而任何一个块自己都是绿的。
 >
 > `--basetemp` 指向的目录**必须不存在**，否则 pytest 会先 `rmtree` 它、同样会触发守卫（`tmp_pytest\` 已在 `.gitignore` 里）。
 
-前端测试和构建（当前基线：**172 passed**，15 个文件；`tsc --noEmit` 与 `vite build` 通过）：
+前端测试和构建（当前基线：**200 passed**，17 个文件；`tsc --noEmit` 与 `vite build` 通过）：
 
 ```powershell
 cd frontend
@@ -118,16 +119,16 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 
 ## 后端测试范围
 
-后端测试位于 [backend/tests](../backend/tests/)（35 个 `test_*.py` + [fakes.py](../backend/tests/fakes.py) / [bili_fakes.py](../backend/tests/bili_fakes.py)，当前 **1039 passed**）：
+后端测试位于 [backend/tests](../backend/tests/)（36 个 `test_*.py` + [fakes.py](../backend/tests/fakes.py) / [bili_fakes.py](../backend/tests/bili_fakes.py)，当前 **1066 passed**）：
 
 > **数字必须自己数一遍**，不要只信 `-q` 的汇总行。逐文件规模用
 > `pytest backend/tests/<文件> -q -p no:cacheprovider --co` 取，各文件之和应**恰等于**全集
-> （2026-10-18 实测：35 个文件逐项相加 = 1039 = 全集）。历史上有过把「收集不全的那一次」当成
+> （2026-10-18 实测：36 个文件逐项相加 = 1066 = 全集）。历史上有过把「收集不全的那一次」当成
 > 基线的教训（见过 267 / 286 / 289 三个数，真实基线一直是当时的 913）。
 
 | 文件 | 重点 |
 | --- | --- |
-| [test_api.py](../backend/tests/test_api.py) | API 行为、任务创建、重启、删除、cookies、设置、诊断、代理自检、cookies 体检、运行环境自检刷新，合集子视频按并发并行下载，happy-path 不再二次 extract_metadata，以及**探针抛异常时降级仍要真的执行并开始下载**。 |
+| [test_api.py](../backend/tests/test_api.py) | API 行为、任务创建、重启、删除、cookies、设置、诊断、代理自检、cookies 体检、运行环境自检刷新，合集子视频按并发并行下载，happy-path 不再二次 extract_metadata，以及**探针抛异常时降级仍要真的执行并开始下载**。打开字幕另加 8 条：单视频与条目级各自打开的是**自己**那份字幕、`mode=chooser` 与默认走**不同**的入口、没有字幕是 `409`（且什么都没打开）、`mode` 取别的值 `422`、读模型给出 `subtitle_path`、**旧记录（该列为空）能靠视频旁边的同名字幕找到**、文件没了要回 `null` 而不是回显旧路径。 |
 | [test_db.py](../backend/tests/test_db.py) | SQLite WAL、`busy_timeout`、`synchronous=NORMAL` 与 WAL checkpoint。 |
 | [test_ytdlp_service.py](../backend/tests/test_ytdlp_service.py) | yt-dlp 参数、profile、PO token、aria2c、格式选择和错误识别；**预检把「选不出格式」归一成 `is_selectable=False` 而不是抛出去，且无关异常仍要原样抛出**；JS 运行时探测（跳过坏候选、原样报错、探测本身不抛异常、诊断暴露失败原因）。字幕计划另加 7 条：显式语言优先于默认、**非中英语言被忽略**、混合列表只留中英、计划随 `DownloadPreparation` 回传（语言/轨码/来源/理由）、`subtitles_only` 也算出计划且元数据失败在那里不致命。 |
 | [test_download_progress.py](../backend/tests/test_download_progress.py) | 多子流进度聚合：字幕/chunk 不锁死在 99.9%，分离音视频不把已下载字节重置为 0。 |
@@ -142,11 +143,11 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 | [test_connectivity.py](../backend/tests/test_connectivity.py) | 代理探针：直连与走代理分别构造正确的 opener、HTTP 错误与网络异常都变成可展示证据、失败必带 `next_steps`、`direct` 失败文案说明「可能预期」。 |
 | [test_cookie_health.py](../backend/tests/test_cookie_health.py) | cookies 体检：格式、域名分布、鉴权项命中/缺失、过期、`LOGGED_IN` 三态（真/假/未知）、结论与下一步。 |
 | [test_resolution_decisions.py](../backend/tests/test_resolution_decisions.py) | 降级**判定**的纯单测（31 例，0.12 s）：四种降级原因各自的输入条件、"该不该找降级候选"的两个早退条件、两句失败文案不可互换、"元数据不可得"与"零个格式"必须区分、每个 reason 都能被 `fallback_policy` 翻成非空文案。 |
-| [test_output_paths.py](../backend/tests/test_output_paths.py) | 产物位置计算：候选链「记录值优先 + 去重」、成品定位与 sidecar 排除；含一条**与重构前实现逐项对照**的用例（见 [ai/refactor/004](../ai/refactor/004-artifact-paths.md)）。字幕定位另加 8 条：标题含 `[` `]` 时仍能找到（**必须用 `iterdir` 而不是 `glob`** —— 后者把方括号当字符类）、不误吃同前缀的 `作品 [abc123]2.en.srt`、按族偏好挑一条、非中英语种被过滤、语言取 stem 最后一段点号后（见 [ai/feature/subtitle-pipeline](../ai/feature/subtitle-pipeline/README.md)）。 |
+| [test_output_paths.py](../backend/tests/test_output_paths.py) | 产物位置计算：候选链「记录值优先 + 去重」、成品定位与 sidecar 排除；含一条**与重构前实现逐项对照**的用例（见 [ai/refactor/004](../ai/refactor/004-artifact-paths.md)）。字幕定位另加 12 条：标题含 `[` `]` 时仍能找到（**必须用 `iterdir` 而不是 `glob`** —— 后者把方括号当字符类）、不误吃同前缀的 `作品 [abc123]2.en.srt`、按族偏好挑一条、非中英语种被过滤、语言取 stem 最后一段点号后；以及 `existing_subtitle_file` 的四条（记录值优先、记录为空时退回视频旁边的同名字幕、记录指向已删文件时返回 `None`、视频没定位到时不扫目录）。（见 [ai/feature/subtitle-pipeline](../ai/feature/subtitle-pipeline/README.md)） |
 | [test_safe_delete.py](../backend/tests/test_safe_delete.py) | 删除白名单的路径安全判定：根目录与子孙放行，父目录、无关绝对路径、以及**共享字符串前缀的兄弟目录**一律拒绝，Windows 大小写差异视为同一根（见 [ai/refactor/005](../ai/refactor/005-safe-delete.md)）。 |
 | [test_proxy.py](../backend/tests/test_proxy.py) | 代理**解析**：`direct` 哨兵、显式 > 系统 > 环境变量的优先级、环境变量只报告不落盘、`no_proxy` 绕过与凭据脱敏。 |
 | [test_dev_server.py](../backend/tests/test_dev_server.py) | 端口预检与「谁占了这个端口」：`netstat` / `tasklist` 输出解析、可用端口向后查找、`YTDL_API_PORT` 默认值与 `.env` 锚定仓库根（[009](../ai/bug-fix/009-local-dev-port-is-occupied-and-unconfigurable.md)）。 |
-| [test_system_open.py](../backend/tests/test_system_open.py) | 本地打开：Windows 目录开新窗口、文件走默认关联、有可用播放器时优先、无可用播放器时如实报告缺失。 |
+| [test_system_open.py](../backend/tests/test_system_open.py) | 本地打开：Windows 目录开新窗口、文件走默认关联、有可用播放器时优先、无可用播放器时如实报告缺失。另加 4 条关于「打开方式」的：**没有关联（`WinError 1155`）时改弹系统选择器**、其它错误照原样抛（别把「拒绝访问」变成弹窗）、`mode=chooser` 真的走 `rundll32 ... OpenAs_RunDLL`、非 Windows 退化成默认打开。 |
 | [test_finally_guards.py](../backend/tests/test_finally_guards.py) | **守护测试**：扫源码禁止 `finally` 里出现 `return`；自带「违规能被抓到」「嵌套作用域里的 `return` 不算违规」两条自检。 |
 | [test_job_manager_finally.py](../backend/tests/test_job_manager_finally.py) | 行为层回归：条目被删除时收尾不再吞掉逃逸中的异常，崩溃的条目被判 `failed` 而不是永久停在 `running`（[008](../ai/bug-fix/008-return-in-finally-swallows-the-real-error.md)）。 |
 | [test_orphan_recovery.py](../backend/tests/test_orphan_recovery.py) | 启动时的孤儿条目收敛（[015](../ai/bug-fix/015-orphan-items-never-resume.md)）：残留 `queued`/`running` 被重新排队且进度清空、`paused` 任何策略下都不动、**正在被取消**的任务不被恢复、所属任务已消失的条目被取消、`fail` 策略只标失败不下载、恢复顺序按任务创建时间与条目序号；另有三条走 `TestClient` lifespan 的端到端 —— **不做任何操作**、只启动应用，孤儿任务自己跑到 `succeeded`，并留下 `jobs_recovered` 事件作为「恢复真的发生过」的正面证据。 |
@@ -169,7 +170,7 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 
 ## 前端测试范围
 
-前端组件测试是对 `App` 的**集成测试**，按功能面拆成 `frontend/src/*.test.tsx` 多个文件：解析链接与下载选项（`analyzer.test.tsx`，11）、cookies 导入与校验（7）、设置面板与代理检测（10）、任务中心（控制/删除/展开 11、本地文件操作与链接 9、进度与详情呈现 6）、清晰度降级（4）、自检信息（2）、帮助浮层（3）、**B站 上传（`bili-upload.test.tsx`，51 例）**、版面与文案不变式（3），以及只读样式源文的 `styles.test.ts`（3）。当前 **17 个文件 / 196 passed**（12 个 `.tsx` 组件测试 + 5 个 `.ts` 纯函数测试）。
+前端组件测试是对 `App` 的**集成测试**，按功能面拆成 `frontend/src/*.test.tsx` 多个文件：解析链接与下载选项（`analyzer.test.tsx`，11）、cookies 导入与校验（7）、设置面板与代理检测（10）、任务中心（控制/删除/展开 11、本地文件操作与链接 13、进度与详情呈现 6）、清晰度降级（4）、自检信息（2）、帮助浮层（3）、**B站 上传（`bili-upload.test.tsx`，51 例）**、版面与文案不变式（3），以及只读样式源文的 `styles.test.ts`（3）。当前 **17 个文件 / 200 passed**（12 个 `.tsx` 组件测试 + 5 个 `.ts` 纯函数测试）。
 
 另有三份**不挂载任何组件**的纯函数测试（`frontend/src/*.test.ts`，不经过 `App`）：B站 表单词汇表与本地预检 `biliForm.test.ts`（35 例）、B站 状态谓词 `biliStatus.test.ts`（14 例）、错误取值兜底 `errors.test.ts`（4 例）。它们把原先内联在 `BiliUploadDialog.tsx` / `App.tsx` 里的判断抽成纯函数后再测，所以能在不渲染界面的前提下覆盖边界（例如「列表还在读」与「还没选合集」不能同时报出来，见 [ai/bug-fix/012](../ai/bug-fix/012-preflight-contradicts-itself-and-the-server.md)）。
 
@@ -186,6 +187,7 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 - cookies 上传、浏览器导入、Edge 锁库提示。
 - 任务中心状态、进度、速度、视频大小、实际分辨率、实际格式和显式删除入口展示。
 - 任务中心播放已下载单视频和 playlist 子视频，打开视频所在文件夹和 playlist 文件夹，复制任务/子视频源链接，跳转 YouTube 页面；`output_path` 缺失但下载目录存在时，打开文件夹仍应可用；本地文件操作失败或找不到合适播放器时在对应任务行附近显示错误。
+- 任务中心「打开字幕」：单视频与 playlist 子视频各自打到**自己的**那条接口（`?mode=default`）、右段箭头打到 `?mode=chooser`、`subtitle_path` 为 `null` 时按钮**禁用**、失败文案落在对应的那一行。**它只证明「点了会去哪」，不证明「程序真的起来了」** —— 后者要人工点，见手工验收。
 - Playlist 子视频单个删除、多选删除和删除文件确认。
 - 旧的全局“删除任务时同时删除已下载视频”复选框应不存在。
 - 分辨率降级提示和重启按钮。
@@ -218,6 +220,7 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 10. 展开 playlist 任务，分别验证单个子视频删除和多选子视频删除；删除最后一个子视频时父任务应消失。
 11. 在任务中心多选任务，分别验证“批量删除任务”和“批量删除任务和已下载文件”的请求体。
 12. 下载完成后点击播放按钮，确认应用选择可解码播放器打开对应文件；点击视频/合集文件夹按钮，确认文件管理器打开对应目录。Windows 下播放器或文件夹窗口应尽量弹出到前台，而不是只在任务栏闪烁；若故意移动文件或卸载可用播放器，错误应显示在对应任务行或子视频行附近，并包含当前格式和建议播放器。对旧任务或运行中任务，可手动清空 `output_path` 后确认后端仍能按文件名中的 YouTube id 发现最终视频或打开任务目录。
+12a. 对一条**下到字幕**的视频点「打开字幕」主段：应有一个程序真的打开那份 `.srt`/`.vtt`；点右段小箭头：应弹出 Windows 的「打开方式」窗口，挑一个程序并勾上「始终使用此应用」后，再点主段应**直接用同一个程序**打开（这条是唯一能证明「记住上一次用的程序」真的成立的验收）。对一条**没下到字幕**的视频，该按钮应灰着、悬停提示「字幕文件尚不可用」。故意删掉字幕文件后刷新页面，按钮应变灰（读模型不回显已不存在的路径）。
 13. 点击复制按钮，确认剪贴板内容为对应单视频、playlist 或子视频链接。
 14. 点击外链按钮，确认单视频、playlist 和子视频会打开对应 YouTube 页面。
 15. 清除 cookies 后在受限视频上触发媒体流失败，确认错误文案以「当前 cookies 状态：未配置」开头，并给出重试建议。

@@ -85,6 +85,8 @@ export const jobPayload: Job = {
       // 还在下载，字幕结论还没出来 —— 与「跑过一次、结论是没有（`none`）」不是一回事。
       subtitle_language: null,
       subtitle_source: null,
+      // 后端算好的「字幕文件真的在哪」；`null` = 没下到字幕（或已经被删）。按钮的可点性只看它。
+      subtitle_path: null,
       error: null
     }
   ]

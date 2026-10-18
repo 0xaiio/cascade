@@ -22,7 +22,8 @@ import type {
   JobBatchAction,
   JobBatchActionResponse,
   ProxyTestResult,
-  Settings
+  Settings,
+  SubtitleOpenMode
 } from "./types";
 
 export class ApiError extends Error {
@@ -118,6 +119,25 @@ export function playJobItemVideo(jobId: string, itemId: string): Promise<void> {
 
 export function openJobItemFolder(jobId: string, itemId: string): Promise<void> {
   return request<void>(`/api/jobs/${jobId}/items/${itemId}/open-folder`, { method: "POST" });
+}
+
+/**
+ * 打开下载到的字幕文件。
+ *
+ * `mode` 是**交给系统的那两种 verb**，不是「用哪个程序」：默认走文件关联，
+ * `chooser` 让系统弹「打开方式」窗口自己挑。程序永远不由前端指定 —— 否则前端就得
+ * 知道用户机器上装了什么（后端也不必知道）。
+ */
+export function openJobSubtitle(jobId: string, mode: SubtitleOpenMode = "default"): Promise<void> {
+  return request<void>(`/api/jobs/${jobId}/open-subtitle?mode=${mode}`, { method: "POST" });
+}
+
+export function openJobItemSubtitle(
+  jobId: string,
+  itemId: string,
+  mode: SubtitleOpenMode = "default"
+): Promise<void> {
+  return request<void>(`/api/jobs/${jobId}/items/${itemId}/open-subtitle?mode=${mode}`, { method: "POST" });
 }
 
 export function deleteJob(jobId: string, deleteFiles = false): Promise<void> {

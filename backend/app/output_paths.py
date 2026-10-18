@@ -181,6 +181,33 @@ def find_subtitle_file(video_path: Path, family: str | None = None) -> tuple[Pat
     return supported[0]
 
 
+def existing_subtitle_file(
+    subtitle_path: str | Path | None,
+    video_path: Path | None = None,
+    base_dir: Path | None = None,
+) -> Path | None:
+    """条目**已下载到磁盘**的字幕文件；没有返回 `None`。
+
+    「字幕在哪」与成品同一条思路（也正是本模块存在的理由：只有一个计算处）：
+    库记录的 `subtitle_path` 优先（只验存在 —— 记录可能指向已被删掉的文件），
+    否则看**这段视频旁边**有没有同名字幕（命名规则归 `subtitle_candidates`）。
+
+    视频路径由调用方给（它已经算过一遍 `existing_output_file`）—— 这里**不再自己发现一遍**：
+    读模型每一次轮询都要为每个条目问这个问题，多扫一遍目录是白花的钱。
+
+    第二条兜底不是多余的：`subtitle_path` 是 2026-10-18 才加的列，此前下载的任务
+    那一列是空的，而字幕文件好端端躺在视频旁边。只认记录的话，那些条目的按钮会是灰的。
+    """
+    if subtitle_path:
+        for candidate in _path_variants(Path(subtitle_path), base_dir):
+            if candidate.is_file():
+                return candidate
+    if video_path is None:
+        return None
+    found = find_subtitle_file(video_path)
+    return found[0] if found else None
+
+
 def source_video_id(source_url: str) -> str | None:
     parsed = urlparse(source_url)
     host = parsed.netloc.lower()

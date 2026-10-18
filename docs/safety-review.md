@@ -24,10 +24,11 @@
 
 详情：
 
-- `subprocess.run([ffmpeg, ...])` 使用固定参数列表（[system_open.py](../backend/app/system_open.py#L67)、[ytdlp_service.py](../backend/app/ytdlp_service.py#L628)）
+- `subprocess.run([ffmpeg, ...])` 使用固定参数列表（[system_open.py](../backend/app/system_open.py#L100)、[ytdlp_service.py](../backend/app/ytdlp_service.py#L628)）
 - `subprocess.Popen([biliup, ...])` 用 list 形式启动投稿进程、不经 shell；`biliup` 的路径来自候选探测或配置，标题/简介/标签等内容作为**独立 argv 元素**传入（[bili_bin.py](../backend/app/bili_bin.py#L226)）
 - `subprocess.run([taskkill, ...])` 使用已知固定命令（[browser_cookies.py](../backend/app/browser_cookies.py#L141)）
 - `subprocess.Popen([edge, --remote-debugging-port=..., ...])` 参数由常量或系统路径构成，非用户可控（[browser_cookies.py](../backend/app/browser_cookies.py#L157)）
+- `subprocess.Popen(["rundll32.exe", "shell32.dll,OpenAs_RunDLL", str(path)])` 用于弹系统的「打开方式」：命令名与 DLL 导出项都是常量，`path` 是后端从数据库推导出的字幕路径（不是前端传的），且作为**独立 argv 元素**传入、不经 shell（[system_open.py](../backend/app/system_open.py#L46)）
 - `subprocess.run(["netstat", ...])` / `(["tasklist", "/FI", f"PID eq {pid}", ...])` 用于识别端口占用者：命令名与参数都是常量，`pid` 由 [parse_listening_pids](../backend/app/dev_server.py#L71) 用 `int()` 从 `netstat` 输出解析、解析失败即跳过，因此无法注入（[dev_server.py](../backend/app/dev_server.py#L119)）
 - yt-dlp 通过 Python SDK（`yt_dlp.YoutubeDL`）调用，非 shell 或 subprocess
 
@@ -40,7 +41,7 @@
 详情：
 
 - 文件删除在 [_delete_output_files](../backend/app/job_manager.py#L399) 中执行，所有候选路径通过 [_is_under_allowed_root](../backend/app/job_manager.py#L372) 验证，仅允许在下载根目录或任务下载子目录下操作
-- 本地播放/打开文件夹接口（[routers/job_files.py](../backend/app/routers/job_files.py#L16) 起）仅使用数据库记录的 `output_path` 和 `download_dir`，不接受前端传入任意路径
+- 本地播放/打开文件夹/打开字幕接口（[routers/job_files.py](../backend/app/routers/job_files.py#L17) 起）仅使用数据库记录的 `output_path`、`subtitle_path` 和 `download_dir`，不接受前端传入任意路径；`open-subtitle` 的 `mode` 是 `Literal["default", "chooser"]`，越界取值由 FastAPI 直接 `422`
 - [safe_path_name](../backend/app/paths.py#L7) 为 playlist 目录名移除 `<>:"/\|?*` 等不安全字符，并限制长度为 120 字符
 - [discover_output_file_candidates](../backend/app/output_paths.py#L52) 仅在给定的 `job_download_dir` 内按 YouTube video ID 匹配文件，不遍历上级目录
 
@@ -132,7 +133,7 @@
 
 - 文件删除通过 [_is_under_allowed_root](../backend/app/job_manager.py#L372) 验证目标路径位于下载根目录或任务子目录内
 - 删除 playlist 子文件夹前检查文件夹确实在下载根目录下（[job_manager.py](../backend/app/job_manager.py#L369)）
-- 本地文件打开（[system_open.py](../backend/app/system_open.py#L23)）不涉及路径操作安全风险——仅打开已存在的文件
+- 本地文件打开（[system_open.py](../backend/app/system_open.py#L28)）不涉及路径操作安全风险——仅打开已存在的文件
 - 输出路径解析（[output_paths.py](../backend/app/output_paths.py#L30)）仅在给定下载目录内进行，不访问外围文件系统
 
 ## 10. 依赖安全

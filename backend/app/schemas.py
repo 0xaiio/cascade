@@ -134,6 +134,10 @@ class JobItemRead(BaseModel):
     # 那是「跑过一次，结论是没有」）。
     subtitle_language: str | None = None
     subtitle_source: str | None = None
+    # 已下载到磁盘的**字幕文件**（没有就是 None）。任务中心据此决定「打开字幕」按钮是否可点：
+    # 不给这个字段，前端就只能在点下去之后吃一个 409。与 `output_path` 一样是**后端算的**，
+    # 前端不拼路径。
+    subtitle_path: str | None = None
     error: str | None = None
     created_at: datetime
     updated_at: datetime

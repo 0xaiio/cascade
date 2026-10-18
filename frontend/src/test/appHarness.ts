@@ -267,6 +267,13 @@ export function installAppHarness(): void {
         if (url.endsWith("/api/jobs/job-format-failed/restart")) {
           return Response.json({ ...singleFallbackJobPayload, status: "queued" });
         }
+        if (url.includes("/open-subtitle") && init?.method === "POST") {
+          // 打开字幕与播放/打开文件夹共用同一条失败通道（界面把它们都当「本机文件操作」）。
+          if (mockState.localFileActionFailure) {
+            return Response.json({ detail: mockState.localFileActionFailure }, { status: 409 });
+          }
+          return new Response(null, { status: 204 });
+        }
         if (
           (url.endsWith("/api/jobs/job-running/play") ||
             url.endsWith("/api/jobs/job-running/open-folder") ||

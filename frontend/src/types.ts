@@ -7,6 +7,14 @@ export type SubtitleFormat = "best" | "srt" | "vtt";
 export type JobBatchAction = "pause" | "restart" | "delete";
 
 /**
+ * 「打开字幕」用哪种方式：`default` = 交给系统的文件关联；`chooser` = 让系统弹「打开方式」窗口。
+ *
+ * 两者**都不表示具体程序** —— 用哪个查看器由系统决定（用户选过一次之后系统会记住），
+ * 前端与后端都不维护编辑器清单。
+ */
+export type SubtitleOpenMode = "default" | "chooser";
+
+/**
  * 任务跑到终态时怎么提醒。取值与服务端 `schemas.CompletionNotification` 一一对应。
  *
  * `off` = 不提醒；`sound` = 提示音；`toast` = 右下角浮层（会自动缩回）；`both` = 两者都要。
@@ -109,6 +117,13 @@ export interface JobItem {
    */
   subtitle_language: string | null;
   subtitle_source: SubtitleOrigin | null;
+  /**
+   * 已下载到磁盘的字幕文件；`null` = 这条没有可用字幕。
+   *
+   * 与 `output_path` 一样是**后端算出来的**（记录值优先，其次看视频旁边有没有同名字幕），
+   * 前端只拿它决定「打开字幕」按钮是否可点，不拼路径、不自己猜语言后缀。
+   */
+  subtitle_path: string | null;
   error: string | null;
   created_at: string;
   updated_at: string;

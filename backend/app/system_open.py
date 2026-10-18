@@ -13,6 +13,11 @@ class LocalOpenError(RuntimeError):
     pass
 
 
+# 「这个后缀还没有关联程序」。Windows 上点一个没人认领的 `.srt` 时，`os.startfile`
+# 抛的就是 `OSError(WinError 1155)` —— 它不是打开失败，只是「还没人认领」。
+ERROR_NO_ASSOCIATION = 1155
+
+
 @dataclass(frozen=True)
 class VideoPlayerCandidate:
     name: str
@@ -26,10 +31,38 @@ def open_path_with_default_app(path: Path) -> None:
         if path.is_dir():
             _open_windows_folder(path)
             return
-        os.startfile(target)  # type: ignore[attr-defined]
+        try:
+            os.startfile(target)  # type: ignore[attr-defined]
+        except OSError as exc:
+            if getattr(exc, "winerror", None) != ERROR_NO_ASSOCIATION:
+                raise
+            # 没关联程序时**不要**把 1155 抛给用户：资源管理器自己也是弹「打开方式」。
+            open_path_with_chooser(path)
         return
     command = ["open", target] if sys.platform == "darwin" else ["xdg-open", target]
     _open_process(command, title_hint=path.name)
+
+
+def open_path_with_chooser(path: Path) -> None:
+    """让**系统**弹出「打开方式」窗口，由用户在系统自己的列表里挑一个程序。
+
+    这是「挑程序」在 Windows 上的标准做法：`OpenAs_RunDLL` 就是资源管理器那个「打开方式」
+    的入口，列表里是**系统注册的全部处理器**。自己维护一份编辑器清单只会是它的子集
+    （用户装了什么我们无从得知），还要为每个平台各维护一份 —— 所以这里不造第二个列表。
+
+    用户在窗口里勾「始终使用此应用」，系统就把这个后缀的关联记下来了
+    （`HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\.srt\\UserChoice`），
+    **下次点主按钮打开的就是那个程序**。也就是说「记住上一次用的查看器」由系统负责，
+    应用侧不另存一份 —— 两处各记一份时，先信谁就会变成一个说不清的问题。
+
+    其它平台没有等价入口（macOS 的 `open -a` 要的是应用名，Linux 的 `xdg-open` 只有默认），
+    于是退化成「用默认程序打开」。见 `docs/technical.md#打开字幕文件`。
+    """
+    if os.name != "nt":
+        open_path_with_default_app(path)
+        return
+    # 命令行解析交给 rundll32/shell32 自己做；`Popen` 收到的是 list，含空格的路径会被正确加引号。
+    _open_process(["rundll32.exe", "shell32.dll,OpenAs_RunDLL", str(path)], title_hint=path.name)
 
 
 def open_video_with_best_player(path: Path, actual_format: str | None = None) -> None:
