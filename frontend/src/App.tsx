@@ -749,8 +749,8 @@ export default function App() {
               onOpenFolder={(jobId) => openJobFolder(jobId)}
               onOpenItemFolder={(jobId, itemId) => openJobItemFolder(jobId, itemId)}
               onOpenSourcePage={openExternalPage}
-              onOpenSubtitle={(jobId, itemId, mode) =>
-                itemId ? openJobItemSubtitle(jobId, itemId, mode) : openJobSubtitle(jobId, mode)
+              onOpenSubtitle={(jobId, itemId) =>
+                itemId ? openJobItemSubtitle(jobId, itemId) : openJobSubtitle(jobId)
               }
               onOpenVideoPage={openExternalPage}
               onPlay={(jobId) => playJobVideo(jobId)}

@@ -62,6 +62,10 @@ hash 只能在下一次触碰本目录时回填；查某条改动用
 | [002](002-side-column-overflow-breaks-the-page.md) | 右栏把整页撑出横向滚动条（≤1600px 时约 44px） | `a4d492c` | 右栏的轨道宽度写死 `390px`（内容区 352px），而自检回显的那条 Windows 路径**没有断行机会**（min-content 401.53px）→ 面板 min-content 465.53px 超过轨道，grid item 又不许被压窄 → 溢出被算进整页。修法是让这条轨道里的文本可断行（`overflow-wrap: anywhere`，**不能**是 `break-word`） |
 | [003](003-language-trigger-label-overflows-the-page.md) | 语言选择器的标签把整页撑出横向滚动条 | `3643e76` | `.select-trigger span` 的 `white-space: nowrap` 把标签锁成一行，span 的 min-content 就等于整段文字 → flex item 的 `min-width: auto` 不许按钮被压窄 → 右栏轨道被顶宽（12 种语言实测 84px，390px 窗口 141px）。**`text-overflow: ellipsis` 从未生效过**（标签全程没被裁过一次）。修法是撤掉 nowrap 让标签换行 |
 | [004](004-the-recheck-button-looks-dead.md) | 「重新体检」点下去没有任何可见效果 | 本次 | `refresh()` 只做一次静默 `setStatus`：结论不变时 DOM 一个节点都不变，也没有加载态、没有落款时间、没有超时 —— 「跑了」与「没实现」在界面上无法区分（实测点击前后 `outerHTML` 全等）。补「体检中…」+「上次体检 11:58:03」+ 12 秒超时退回离线结论 |
+| [006](006-the-subtitle-arrow-looks-dead.md) | 「打开字幕」右侧的下拉箭头点下去没有任何反应 | 本次 | 一个动作被拆成两颗按钮（36px + 20px），而右段弹的窗口**不归它 Popen 到的 pid**：`OpenAs_RunDLL` 拉起的是 `OpenWith.exe` 的「选取应用」，标题里也没有文件名 —— 旧的两条置前判据双双落空，窗口留在浏览器后面只在任务栏闪。修法：收回成一颗按钮（tooltip「打开字幕文件；可选择打开方式」，点它直接弹选择器，接口缺省改为 `chooser`）+ 置前多一条按进程名认领的判据（实测耗时 1.04s→0.60s、前台窗口由「没变」变为对话框） |
+
+> **编号说明**：`005` 已预留给下文的「贴右边缘的说明浮层」（候选池里已写明改法，等与浮层
+> 探针一起回归），所以本条取 `006`，不是漏号。
 
 ## 已知但**未处理**的界面问题（下一轮候选）
 

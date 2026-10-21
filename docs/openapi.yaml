@@ -866,11 +866,13 @@ paths:
         Hands the subtitle file (`JobItem.subtitle_path`) to the operating system —
         the backend never picks a program itself.
 
-        - `mode=default`: run the registered handler for the file type. If Windows has
-          no association for the extension yet, the system's "Open with" dialog is
-          shown instead of failing.
-        - `mode=chooser`: always show the system's "Open with" dialog, so the user can
-          pick another program and let Windows remember it ("always use this app").
+        - `mode=chooser` (**the default**): show the system's "Open with" dialog, so the
+          user picks the program on the spot (and can let Windows remember it). This is
+          the only mode the task center button uses — one click, one dialog.
+        - `mode=default`: run the registered handler for the file type. Kept for API
+          callers (scripts); the UI no longer offers it, because a click that silently
+          depends on a remembered association is exactly what looked like "nothing
+          happened".
 
         There is deliberately no editor list on this side: the OS already owns the
         handler registry and the per-extension association, and a second copy would
@@ -880,12 +882,12 @@ paths:
         - name: mode
           in: query
           required: false
-          description: Which shell verb to use. `default` = the remembered association,
-            `chooser` = the system "Open with" dialog.
+          description: Which shell verb to use. `chooser` = the system "Open with" dialog
+            (default), `default` = the remembered association.
           schema:
             type: string
             enum: [default, chooser]
-            default: default
+            default: chooser
       responses:
         "204":
           description: The subtitle was handed to the operating system. No content.
@@ -975,12 +977,12 @@ paths:
         - name: mode
           in: query
           required: false
-          description: Which shell verb to use. `default` = the remembered association,
-            `chooser` = the system "Open with" dialog.
+          description: Which shell verb to use. `chooser` = the system "Open with" dialog
+            (default), `default` = the remembered association.
           schema:
             type: string
             enum: [default, chooser]
-            default: default
+            default: chooser
       responses:
         "204":
           description: The subtitle was handed to the operating system. No content.

@@ -431,33 +431,45 @@ BCC 的 `body` 一段就是一条 cue。YouTube 的自动字幕是**滚动**的�
 
 ## 打开字幕文件
 
-任务中心的「打开字幕」只是把**文件**交给操作系统，程序的选择权也一起交给它。这条路上有三件事容易做歪：
+任务中心的「打开字幕」只是把**文件**交给操作系统，程序的选择权也一起交给它。这条路上有四件事容易做歪：
 
 **一、不要自建编辑器清单。** 系统已经有一份完整的处理器注册表（`.srt` / `.vtt` → 谁），自己再列一份
 notepad / VS Code / Sublime 只能是它的子集：用户装了别的我们不知道，各平台的清单还得各维护一份。
-所以这里只有两个动作，正好对应 shell 的两个 verb：
+所以接口只有两个动作，正好对应 shell 的两个 verb；界面只用前一个：
 
 | 动作 | Windows 实现 | 谁决定程序 |
 | --- | --- | --- |
-| 默认打开 | `os.startfile(path)` | 该后缀的关联程序（`HKCU\...\FileExts\<ext>\UserChoice`） |
-| 选择打开方式 | `rundll32.exe shell32.dll,OpenAs_RunDLL <path>` | 用户当场在系统窗口里挑 |
+| 弹「打开方式」（界面唯一动作，接口缺省 `mode=chooser`） | `rundll32.exe shell32.dll,OpenAs_RunDLL <path>` | 用户当场在系统窗口里挑 |
+| 默认打开（仅接口调用方 `?mode=default`，界面不再提供） | `os.startfile(path)` | 该后缀的关联程序（`HKCU\...\FileExts\<ext>\UserChoice`） |
 
-**二、「记住上次用的程序」由系统负责，应用侧不存第二份。** 用户在「打开方式」窗口里勾「始终使用此应用」，
-系统就改了这个后缀的关联，下次点主按钮直接就是那个程序。看起来像「没实现记忆」，实际上是**记忆只有一个
-所有者**：应用再存一份「上次用的查看器」，它迟早会和系统的关联结论打架，而用户根本无法判断该信谁。
-（代价：改回来要去系统的「打开方式」里改，我们提供入口，但不代管这份状态。）
+**二、置前要按「谁真的持有窗口」认领，不是按「谁被 Popen 起来」。** 这是「点了没反应」的真因：
+`OpenAs_RunDLL` 拉起的不是 rundll32 自己的窗口，而是 `OpenWith.exe` 的「选取应用」（英文系统是
+「Open With」）—— pid 对不上，标题里也没有文件名，于是旧的两条判据（pid / 标题）双双落空，
+`SetForegroundWindow` 一次都没被调用过，窗口留在浏览器后面、只在任务栏闪一下；调用方还白等 1 秒轮询
+才返回。现在 [_open_process](../backend/app/system_open.py#L109) 多一条 `process_name` 判据
+（由 [_process_image_name](../backend/app/system_open.py#L280) 取进程可执行文件名），chooser 传
+`OpenWith.exe`。实测同一台机器：**旧判据 1.04s 且前台窗口没变；新判据 0.60s 且前台就是那个对话框**
+（`tmp_acceptance/probe_chooser.py` 与 `probe_chooser_control.py`）。
 
-**三、没有关联不是错误。** 在干净的 Windows 上点一个 `.srt`，`os.startfile` 抛的是
+**三、「记住上次用的程序」由系统负责，应用侧不存第二份。** 用户在窗口里勾「始终使用此应用」，系统就改了
+这个后缀的关联，资源管理器双击、以及接口的 `?mode=default` 都会用那个程序。界面上的按钮每次都弹选择器
+（这是刻意的：一次点击就要看得见结果），但列表里默认选中的就是系统记住的那个。看起来像「没实现记忆」，
+实际上是**记忆只有一个所有者**：应用再存一份「上次用的查看器」，它迟早会和系统的关联结论打架，而用户
+根本无法判断该信谁。
+
+**四、没有关联不是错误。** 在干净的 Windows 上对一个 `.srt` 调 `os.startfile`，抛的是
 `OSError [WinError 1155] 没有应用程序与此操作的指定文件有关联`。这不是「打不开」，是「还没人认领这个
 后缀」—— 正确反应是像资源管理器那样**弹「打开方式」**（[open_path_with_default_app](../backend/app/system_open.py#L28)
 里只对这一种 `winerror` 降级，其它错误照原样抛：把「拒绝访问」也悄悄变成弹窗，就是把真问题藏起来）。
+这条路现在只有接口的 `?mode=default` 会走到。
 
 其它平台没有等价的「选择器」（macOS 的 `open -a` 要的是应用名，Linux 的 `xdg-open` 只有默认），
 `mode=chooser` 在那里退化成默认打开，见 [open_path_with_chooser](../backend/app/system_open.py#L46)。
 
-前端因此是一个**组合控件**（[SubtitleOpenButton](../frontend/src/components/SubtitleOpenButton.tsx#L17)）：
-主段 `title="打开字幕文件"`，右段是一个小箭头、`title="选择打开方式"`。做成一个按钮加修饰键（Shift 点击）
-是不行的 —— 界面上看不见的入口等于没做。
+前端因此是**一颗**按钮（[SubtitleOpenButton](../frontend/src/components/SubtitleOpenButton.tsx#L19)），
+`title="打开字幕文件；可选择打开方式"`，点下去就是选择器。它曾经是**组合控件**（主段 + 右侧 20px 箭头）：
+那个箭头正是「看起来什么都没发生」的那一处 —— 把一个动作拆成两颗按钮、其中一颗还看不见效果，
+比「入口藏起来」更糟。一个动作 = 一颗按钮；Shift 点击这类看不见的修饰键同样不行。
 
 ## 文件删除语义
 

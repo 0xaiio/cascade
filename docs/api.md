@@ -44,7 +44,7 @@
 
 - 后端应用由 [create_app](../backend/app/main.py#L40) 创建；API 默认绑定 `127.0.0.1:8000`（可用仓库根 `.env` 的 `YTDL_API_PORT` 或 `python -m app --port` 覆盖，见 [开发文档](development.md#端口被占用时)），单端口模式下同时托管 `frontend/dist`。
 - API 返回 JSON；`DELETE /api/jobs/{id}` 与四个本地打开接口成功时返回 `204`。
-- 前端统一请求封装在 [request](../frontend/src/api.ts#L40)，非 2xx 响应会抛出 `ApiError`，并保留结构化 `detail`。
+- 前端统一请求封装在 [request](../frontend/src/api.ts#L39)，非 2xx 响应会抛出 `ApiError`，并保留结构化 `detail`。
 - Cookies 导入锁库错误使用结构化 `detail`，字段见 [BrowserCookieImportError.to_detail](../backend/app/browser_cookies.py#L58)。
 - **所有时间字段是 UTC，且以 `Z` 结尾**（`started_at` / `finished_at` / `created_at` / `updated_at`）。
   SQLite 不存时区，读回来是 naive 的墙上时间，读模型补成 aware 之后才发出 —— 少了这个 `Z`，消费方 `Date.parse` 会把同一串数字按**本地**时间解析（ECMAScript 规定），于是每个时长都凭空多出一个时区偏移（本机 UTC+8 上实测 52 秒显示成 8 小时，见 [020](../ai/bug-fix/020-the-progress-clock-is-eight-hours-off.md)）。
@@ -70,11 +70,11 @@
 | `POST` | `/api/jobs/{job_id}/restart` | 重启任务，可覆盖清晰度。 | [`RestartJobRequest`](../backend/app/schemas.py#L106) |
 | `POST` | `/api/jobs/{job_id}/play` | 播放单视频任务已下载的视频文件。 | `204 No Content` |
 | `POST` | `/api/jobs/{job_id}/open-folder` | 打开单视频任务已下载视频所在文件夹，或打开 playlist 任务文件夹。 | `204 No Content` |
-| `POST` | `/api/jobs/{job_id}/open-subtitle` | 用本机程序打开单视频任务下载到的字幕文件；`?mode=chooser` 改为弹系统的「打开方式」。 | 查询参数 `mode`（`default` / `chooser`） |
+| `POST` | `/api/jobs/{job_id}/open-subtitle` | 用本机程序打开单视频任务下载到的字幕文件；缺省弹系统的「打开方式」，`?mode=default` 才走文件关联。 | 查询参数 `mode`（`chooser` 缺省 / `default`） |
 | `POST` | `/api/jobs/{job_id}/items/{item_id}/restart` | 重启 playlist 中单个子视频，可覆盖清晰度。 | `RestartJobRequest` |
 | `POST` | `/api/jobs/{job_id}/items/{item_id}/play` | 播放 playlist 子视频已下载的视频文件。 | `204 No Content` |
 | `POST` | `/api/jobs/{job_id}/items/{item_id}/open-folder` | 打开 playlist 子视频已下载视频所在文件夹。 | `204 No Content` |
-| `POST` | `/api/jobs/{job_id}/items/{item_id}/open-subtitle` | 用本机程序打开 playlist 子视频下载到的字幕文件；同样支持 `?mode=chooser`。 | 查询参数 `mode` |
+| `POST` | `/api/jobs/{job_id}/items/{item_id}/open-subtitle` | 用本机程序打开 playlist 子视频下载到的字幕文件；缺省弹系统的「打开方式」，`?mode=default` 才走文件关联。 | 查询参数 `mode` |
 | `POST` | `/api/jobs/{job_id}/items/delete` | 删除 playlist 中一个或多个子视频任务，可选删除输出和 sidecar 文件。 | `DeleteJobItemsRequest`、`DeleteJobItemsResponse` |
 | `DELETE` | `/api/jobs/{job_id}` | 删除任务，可选删除输出视频及字幕、metadata、缩略图、description 等相关文件。 | 查询参数 `delete_files` |
 | `GET` | `/api/events` | SSE 任务事件流。 | `text/event-stream` |
@@ -105,7 +105,7 @@
 
 ### AnalyzeRequest
 
-`url` 是待解析链接；`cookies_enabled` 控制解析时是否使用本地 cookies。前端默认传 `true`，见 [analyzeUrl](../frontend/src/api.ts#L74)。
+`url` 是待解析链接；`cookies_enabled` 控制解析时是否使用本地 cookies。前端默认传 `true`，见 [analyzeUrl](../frontend/src/api.ts#L73)。
 
 ### DownloadOptions
 
@@ -177,10 +177,10 @@
 
 | `mode` | 实际动作 | 谁决定程序 |
 | --- | --- | --- |
-| `default`（默认） | 走该后缀的**文件关联**；Windows 上若还没有关联程序，自动改弹系统「打开方式」（不是报错） | 系统记录的那个程序 |
-| `chooser` | 直接弹系统的「打开方式」窗口 | 用户当场挑，可勾「始终使用」让系统记住 |
+| `chooser`（**默认**，任务中心按钮唯一动作） | 直接弹系统的「打开方式」窗口 | 用户当场挑，可勾「始终使用」让系统记住 |
+| `default`（仅接口调用方，界面不再提供） | 走该后缀的**文件关联**；Windows 上若还没有关联程序，自动改弹系统「打开方式」（不是报错） | 系统记录的那个程序 |
 
-后端**不接收、也不解析「用哪个程序」**：没有编辑器清单，也不存「上次用的查看器」。理由见 [technical.md](technical.md#打开字幕文件)。没有字幕文件时 `409`；`mode` 取别的值一律 `422`（多一个取值就是一条没人实现过的分支）。
+界面调用这两个接口时**不带 `mode`**：缺省就是「弹选择器」，那个缺省只写在服务端一处，前端不跟它各写一遍（曾经前端写 `?mode=…`、两处各记一份，改一处就会与另一处不一致）。后端**不接收、也不解析「用哪个程序」**：没有编辑器清单，也不存「上次用的查看器」。理由见 [technical.md](technical.md#打开字幕文件)。没有字幕文件时 `409`；`mode` 取别的值一律 `422`（多一个取值就是一条没人实现过的分支）。
 
 ## 关键响应模型
 

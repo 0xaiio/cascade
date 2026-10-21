@@ -1,6 +1,6 @@
 ﻿import { useEffect, useState } from "react";
 import { Check, ChevronDown, Copy, ExternalLink, FileX2, FolderOpen, Gauge, Pause, Play, RotateCcw, Trash2 } from "lucide-react";
-import type { BiliJobUploads, BiliUpload, Job, JobBatchAction, ResolutionFallback, SubtitleOpenMode } from "../types";
+import type { BiliJobUploads, BiliUpload, Job, JobBatchAction, ResolutionFallback } from "../types";
 import { retryableUploadIds, uploadedTargetUrl } from "../biliStatus";
 import {
   formatBytesPerSecond,
@@ -67,9 +67,9 @@ export function JobQueue({
   onOpenSourcePage: (sourceUrl: string) => void;
   /**
    * 打开字幕：`itemId` 为空 = 单视频任务（走任务级接口），否则是合集里的某一条。
-   * `mode` 只决定「用系统记住的关联」还是「让系统弹打开方式」，见 `SubtitleOpenButton`。
+   * 动作只有一个 —— 弹系统的「打开方式」，见 `SubtitleOpenButton`。
    */
-  onOpenSubtitle: (jobId: string, itemId: string | null, mode: SubtitleOpenMode) => MaybePromise;
+  onOpenSubtitle: (jobId: string, itemId: string | null) => MaybePromise;
   onOpenVideoPage: (url: string) => void;
   onPause: (jobId: string) => void;
   onPlay: (jobId: string) => MaybePromise;
@@ -291,7 +291,7 @@ export function JobQueue({
                   <SubtitleOpenButton
                     disabled={!canOpenSubtitle}
                     subject={title}
-                    onOpen={(mode) => runLocalFileAction(jobLocalActionKey, () => onOpenSubtitle(job.id, null, mode))}
+                    onOpen={() => runLocalFileAction(jobLocalActionKey, () => onOpenSubtitle(job.id, null))}
                   />
                 )}
                 <button
@@ -474,8 +474,8 @@ export function JobQueue({
                           compact
                           disabled={!canOpenItemSubtitle}
                           subject={item.title}
-                          onOpen={(mode) =>
-                            runLocalFileAction(itemLocalActionKey, () => onOpenSubtitle(job.id, item.id, mode))
+                          onOpen={() =>
+                            runLocalFileAction(itemLocalActionKey, () => onOpenSubtitle(job.id, item.id))
                           }
                         />
                         <button

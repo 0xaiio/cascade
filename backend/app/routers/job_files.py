@@ -17,9 +17,9 @@ from ..job_artifacts import job_folder, open_local_path, open_video_path, output
 router = APIRouter()
 
 # 打开字幕的两种方式，**都不是我们自己起进程**：
-#   default = 交给系统关联（用户在系统里选过一次，之后一直用它）；
-#   chooser = 弹系统的「打开方式」窗口，让用户当场挑（并可以让系统记住）。
-# 两个取值就是系统那边的两种 verb，`mode` 只是把选择权暴露给界面。
+#   chooser = 弹系统的「打开方式」窗口，让用户当场挑（并可以让系统记住）—— 界面只有这条路；
+#   default = 交给系统关联（用户在系统里选过一次，之后一直用它），留给脚本/接口调用方。
+# 两个取值就是系统那边的两种 verb，`mode` 只是把选择权暴露给接口。
 SubtitleOpenMode = Literal["default", "chooser"]
 
 
@@ -48,12 +48,13 @@ async def open_job_subtitle(
     job_id: str,
     session: SessionDep,
     ctx: ContextDep,
-    mode: SubtitleOpenMode = "default",
+    mode: SubtitleOpenMode = "chooser",
 ) -> Response:
     """用本机的程序打开单视频任务下载到的字幕文件。
 
-    `mode=chooser` 走系统的「打开方式」窗口；两种模式都**不在后端解析「用什么程序」**，
-    见 `system_open.open_path_with_chooser`。
+    缺省就是 `chooser`：任务中心那颗按钮只有「当场挑一个程序」一个动作，接口缺省必须
+    和它一致，否则「不带参数的调用」与「界面上的点击」会是两件不同的事。
+    两种模式都**不在后端解析「用什么程序」**，见 `system_open.open_path_with_chooser`。
     """
     job = api_support.require_job(session, job_id)
     item = api_support.single_job_item(session, job)
@@ -83,7 +84,7 @@ async def open_job_item_subtitle(
     item_id: str,
     session: SessionDep,
     ctx: ContextDep,
-    mode: SubtitleOpenMode = "default",
+    mode: SubtitleOpenMode = "chooser",
 ) -> Response:
     job = api_support.require_job(session, job_id)
     item = api_support.require_job_item(session, job_id, item_id)

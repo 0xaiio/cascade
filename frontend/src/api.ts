@@ -22,8 +22,7 @@ import type {
   JobBatchAction,
   JobBatchActionResponse,
   ProxyTestResult,
-  Settings,
-  SubtitleOpenMode
+  Settings
 } from "./types";
 
 export class ApiError extends Error {
@@ -124,20 +123,16 @@ export function openJobItemFolder(jobId: string, itemId: string): Promise<void> 
 /**
  * 打开下载到的字幕文件。
  *
- * `mode` 是**交给系统的那两种 verb**，不是「用哪个程序」：默认走文件关联，
- * `chooser` 让系统弹「打开方式」窗口自己挑。程序永远不由前端指定 —— 否则前端就得
- * 知道用户机器上装了什么（后端也不必知道）。
+ * 不带 `mode`：服务端的缺省就是「弹系统的『打开方式』窗口」—— 界面只有这一个动作，
+ * 于是这个决定只写在服务端一处，前端不跟它各写一遍。
+ * **程序永远不由前端指定** —— 否则前端就得知道用户机器上装了什么（后端也不必知道）。
  */
-export function openJobSubtitle(jobId: string, mode: SubtitleOpenMode = "default"): Promise<void> {
-  return request<void>(`/api/jobs/${jobId}/open-subtitle?mode=${mode}`, { method: "POST" });
+export function openJobSubtitle(jobId: string): Promise<void> {
+  return request<void>(`/api/jobs/${jobId}/open-subtitle`, { method: "POST" });
 }
 
-export function openJobItemSubtitle(
-  jobId: string,
-  itemId: string,
-  mode: SubtitleOpenMode = "default"
-): Promise<void> {
-  return request<void>(`/api/jobs/${jobId}/items/${itemId}/open-subtitle?mode=${mode}`, { method: "POST" });
+export function openJobItemSubtitle(jobId: string, itemId: string): Promise<void> {
+  return request<void>(`/api/jobs/${jobId}/items/${itemId}/open-subtitle`, { method: "POST" });
 }
 
 export function deleteJob(jobId: string, deleteFiles = false): Promise<void> {

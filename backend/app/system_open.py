@@ -62,7 +62,16 @@ def open_path_with_chooser(path: Path) -> None:
         open_path_with_default_app(path)
         return
     # 命令行解析交给 rundll32/shell32 自己做；`Popen` 收到的是 list，含空格的路径会被正确加引号。
-    _open_process(["rundll32.exe", "shell32.dll,OpenAs_RunDLL", str(path)], title_hint=path.name)
+    #
+    # 窗口**不归 rundll32**：Win10/11 上它拉起的是 `OpenWith.exe` 的「选取应用」（英文系统是
+    # 「Open With」）对话框，标题里既没有文件名，pid 也不是我们 Popen 到的那个。按 pid 或按
+    # 文件名找必然落空 —— 窗口于是留在浏览器后面，只在任务栏闪一下，看起来就是「点了没反应」。
+    # 所以这里必须按**进程名**认领它。见 `docs/technical.md#打开字幕文件`。
+    _open_process(
+        ["rundll32.exe", "shell32.dll,OpenAs_RunDLL", str(path)],
+        title_hint=path.name,
+        process_name="OpenWith.exe",
+    )
 
 
 def open_video_with_best_player(path: Path, actual_format: str | None = None) -> None:
@@ -97,9 +106,19 @@ def _open_windows_folder(path: Path) -> None:
     _bring_windows_window_to_front(process.pid, path.name)
 
 
-def _open_process(command: list[str], title_hint: str | None = None) -> None:
+def _open_process(
+    command: list[str],
+    title_hint: str | None = None,
+    process_name: str | None = None,
+) -> None:
+    """起一个进程，并尽量把它的窗口置前。
+
+    `title_hint` / `process_name` 是**两条独立的认领判据**：同一个动作的窗口可能既不由
+    我们 Popen 到的 pid 持有、也不带我们知道的标题（`OpenAs_RunDLL` 就是这样），
+    只留一条判据时置前会静默失效 —— 失败的样子是「窗口在任务栏闪」，不是报错。
+    """
     process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    _bring_windows_window_to_front(process.pid, title_hint)
+    _bring_windows_window_to_front(process.pid, title_hint, process_name)
 
 
 def _video_player_candidates() -> list[VideoPlayerCandidate]:
@@ -186,7 +205,11 @@ def _needs_robust_video_player(path: Path, actual_format: str | None = None) -> 
     return any(hint in label for hint in robust_hints)
 
 
-def _bring_windows_window_to_front(process_id: int | None, title_hint: str | None = None) -> None:
+def _bring_windows_window_to_front(
+    process_id: int | None,
+    title_hint: str | None = None,
+    process_name: str | None = None,
+) -> None:
     if os.name != "nt":
         return
     try:
@@ -195,8 +218,12 @@ def _bring_windows_window_to_front(process_id: int | None, title_hint: str | Non
         return
 
     title_hint_lower = title_hint.lower() if title_hint else None
+    process_name_lower = process_name.lower() if process_name else None
+    # 进程名按 pid 缓存：每轮枚举都去 OpenProcess 一次太贵，而一轮里窗
+    # 口数远多于进程数。
+    image_names: dict[int, str] = {}
     for _ in range(20):
-        hwnd = _find_window_handle(user32, process_id, title_hint_lower)
+        hwnd = _find_window_handle(user32, process_id, title_hint_lower, process_name_lower, image_names)
         if hwnd:
             try:
                 user32.ShowWindow(hwnd, 9)
@@ -207,7 +234,13 @@ def _bring_windows_window_to_front(process_id: int | None, title_hint: str | Non
         time.sleep(0.05)
 
 
-def _find_window_handle(user32: object, process_id: int | None, title_hint_lower: str | None) -> int | None:
+def _find_window_handle(
+    user32: object,
+    process_id: int | None,
+    title_hint_lower: str | None,
+    process_name_lower: str | None,
+    image_names: dict[int, str],
+) -> int | None:
     handles: list[int] = []
 
     def enum_handler(hwnd: int, _lparam: int) -> bool:
@@ -219,9 +252,13 @@ def _find_window_handle(user32: object, process_id: int | None, title_hint_lower
             title = ctypes.create_unicode_buffer(512)
             user32.GetWindowTextW(hwnd, title, 512)
             title_value = title.value.lower()
-            pid_matches = process_id is not None and window_pid.value == process_id
+            pid_value = window_pid.value
+            pid_matches = process_id is not None and pid_value == process_id
+            name_matches = bool(process_name_lower) and (
+                _process_image_name(pid_value, image_names) == process_name_lower
+            )
             title_matches = bool(title_hint_lower and title_hint_lower in title_value)
-            if pid_matches or title_matches:
+            if pid_matches or name_matches or title_matches:
                 handles.append(hwnd)
                 return False
         except Exception:
@@ -234,3 +271,34 @@ def _find_window_handle(user32: object, process_id: int | None, title_hint_lower
     except Exception:
         return None
     return handles[0] if handles else None
+
+
+# PROCESS_QUERY_LIMITED_INFORMATION：只读进程信息所需的最小权限。
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+
+
+def _process_image_name(process_id: int, cache: dict[int, str]) -> str:
+    """进程可执行文件名（小写、去目录）。取不到就缓存空串 —— 已退出的 pid 不必每轮重试。"""
+    cached = cache.get(process_id)
+    if cached is not None:
+        return cached
+    name = ""
+    handle = None
+    try:
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, process_id)
+        if handle:
+            buffer = ctypes.create_unicode_buffer(512)
+            size = wintypes.DWORD(len(buffer))
+            if kernel32.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(size)):
+                name = os.path.basename(buffer.value).lower()
+    except Exception:
+        name = ""
+    finally:
+        if handle:
+            try:
+                ctypes.windll.kernel32.CloseHandle(handle)  # type: ignore[attr-defined]
+            except Exception:
+                pass
+    cache[process_id] = name
+    return name

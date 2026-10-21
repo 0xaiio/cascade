@@ -208,15 +208,16 @@ describe("App · 任务中心：本地文件操作与链接", () => {
     await user.click(screen.getByRole("button", { name: "打开字幕文件 Running video" }));
     await user.click(screen.getByRole("button", { name: "打开字幕文件 Part one" }));
 
-    // 默认模式只带 `mode=default`：具体用哪个程序由系统关联决定，前端不指定。
-    expect(fetch).toHaveBeenCalledWith("/api/jobs/job-running/open-subtitle?mode=default", expect.objectContaining({ method: "POST" }));
+    // 不带 `mode`：缺省就是「弹系统的打开方式」，那个缺省写在服务端（`job_files.py`），
+    // 前端不跟它各写一遍 —— 两处各写一次，先信谁就会变成一个说不清的问题。
+    expect(fetch).toHaveBeenCalledWith("/api/jobs/job-running/open-subtitle", expect.objectContaining({ method: "POST" }));
     expect(fetch).toHaveBeenCalledWith(
-      "/api/jobs/job-playlist/items/item-playlist-1/open-subtitle?mode=default",
+      "/api/jobs/job-playlist/items/item-playlist-1/open-subtitle",
       expect.objectContaining({ method: "POST" })
     );
   });
 
-  test("asks the system which program should open the subtitle", async () => {
+  test("the subtitle button is the only control and asks the system to choose the program", async () => {
     mockState.jobs = [
       {
         ...jobPayload,
@@ -227,20 +228,30 @@ describe("App · 任务中心：本地文件操作与链接", () => {
     render(<App />);
 
     expect(await screen.findByText("Running video")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "选择打开方式 Running video" }));
+    const button = screen.getByRole("button", { name: "打开字幕文件 Running video" });
+    // 曾经它右边还有一个「选择打开方式」的小箭头：点下去看起来毫无反应（窗口弹在浏览器后面），
+    // 用户得先找到那个窗口再点一次。现在只剩一颗按钮，点击本身就是「挑程序」。
+    expect(screen.queryByRole("button", { name: "选择打开方式 Running video" })).toBeNull();
+    expect(button).toHaveAttribute("title", "打开字幕文件；可选择打开方式");
 
-    expect(fetch).toHaveBeenCalledWith("/api/jobs/job-running/open-subtitle?mode=chooser", expect.objectContaining({ method: "POST" }));
+    await user.click(button);
+
+    const subtitleCalls = vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes("/open-subtitle"));
+    expect(subtitleCalls).toHaveLength(1);
+    // 整条 URL 相等：带任何查询串（`?mode=default` / `?mode=chooser`）都算没走缺省。
+    expect(subtitleCalls[0][0]).toBe("/api/jobs/job-running/open-subtitle");
   });
 
   test("keeps the subtitle button disabled until a subtitle file exists", async () => {
     render(<App />);
 
     // 出厂夹具里的条目没有下到字幕（`subtitle_path: null`）。可点却点了报 409 的按钮，
-    // 比灰着的按钮更让人困惑 —— 所以这里必须两条都是禁用的。
+    // 比灰着的按钮更让人困惑 —— 所以这里必须两条都是禁用的，并说明原因。
     expect(await screen.findByText("Running video")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "打开字幕文件 Running video" })).toBeDisabled();
+    const jobSubtitle = screen.getByRole("button", { name: "打开字幕文件 Running video" });
+    expect(jobSubtitle).toBeDisabled();
+    expect(jobSubtitle).toHaveAttribute("title", "字幕文件尚不可用");
     expect(screen.getByRole("button", { name: "打开字幕文件 Part one" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "选择打开方式 Running video" })).toBeDisabled();
   });
 
   test("shows subtitle failures beside the affected task", async () => {

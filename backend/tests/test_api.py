@@ -2046,8 +2046,9 @@ def test_open_playlist_item_folder_opens_output_parent(tmp_path: Path) -> None:
     assert opened == [playlist_dir]
 
 
-def test_open_single_video_subtitle_hands_the_file_to_the_os(tmp_path: Path) -> None:
+def test_open_subtitle_lets_the_system_ask_which_program_by_default(tmp_path: Path) -> None:
     opened: list[Path] = []
+    chosen: list[Path] = []
     downloads = tmp_path / "downloads"
     video = downloads / "Running [job-subtitle].mp4"
     subtitle = downloads / "Running [job-subtitle].en.vtt"
@@ -2055,43 +2056,44 @@ def test_open_single_video_subtitle_hands_the_file_to_the_os(tmp_path: Path) -> 
     for path in (video, subtitle):
         path.write_text("x", encoding="utf-8")
     seed_job(tmp_path, "job-subtitle", status="succeeded", output_path=video, subtitle_path=subtitle)
-    client = make_client(tmp_path, system_opener=opened.append)
+    client = make_client(tmp_path, system_opener=opened.append, chooser_opener=chosen.append)
 
     response = client.post("/api/jobs/job-subtitle/open-subtitle")
 
     assert response.status_code == 204
-    # 后端只负责「把这个文件交给系统」，用哪个程序由系统关联决定。
-    assert opened == [subtitle]
+    # 缺省必须就是界面上那个动作（弹系统的「打开方式」）：任务中心那颗按钮不带参数。
+    assert chosen == [subtitle]
+    assert opened == []
 
 
-def test_open_subtitle_can_let_the_system_ask_which_program(tmp_path: Path) -> None:
+def test_open_subtitle_can_still_use_the_file_association_for_api_callers(tmp_path: Path) -> None:
     opened: list[Path] = []
     chosen: list[Path] = []
     downloads = tmp_path / "downloads"
-    video = downloads / "Running [job-subtitle-choose].mp4"
-    subtitle = downloads / "Running [job-subtitle-choose].zh-Hans.srt"
+    video = downloads / "Running [job-subtitle-default].mp4"
+    subtitle = downloads / "Running [job-subtitle-default].en.vtt"
     downloads.mkdir(parents=True)
     for path in (video, subtitle):
         path.write_text("x", encoding="utf-8")
     seed_job(
         tmp_path,
-        "job-subtitle-choose",
+        "job-subtitle-default",
         status="succeeded",
         output_path=video,
         subtitle_path=subtitle,
     )
     client = make_client(tmp_path, system_opener=opened.append, chooser_opener=chosen.append)
 
-    response = client.post("/api/jobs/job-subtitle-choose/open-subtitle?mode=chooser")
+    response = client.post("/api/jobs/job-subtitle-default/open-subtitle?mode=default")
 
     assert response.status_code == 204
-    # 两条路必须真的不同：都走默认打开的话，「选程序」这个动作就是假的。
-    assert chosen == [subtitle]
-    assert opened == []
+    # 界面不再提供这条路，但接口仍保留：两条路必须真的不同，否则「mode」就是假的。
+    assert opened == [subtitle]
+    assert chosen == []
 
 
 def test_open_playlist_item_subtitle_uses_the_item_not_the_job(tmp_path: Path) -> None:
-    opened: list[Path] = []
+    chosen: list[Path] = []
     playlist_dir = tmp_path / "downloads" / "Course"
     subtitle = playlist_dir / "two.zh-Hans.vtt"
     playlist_dir.mkdir(parents=True)
@@ -2122,28 +2124,28 @@ def test_open_playlist_item_subtitle_uses_the_item_not_the_job(tmp_path: Path) -
             )
         )
         session.commit()
-    client = make_client(tmp_path, system_opener=opened.append)
+    client = make_client(tmp_path, chooser_opener=chosen.append)
 
     response = client.post("/api/jobs/job-playlist-item-subtitle/items/item-two/open-subtitle")
 
     assert response.status_code == 204
-    assert opened == [subtitle]
+    assert chosen == [subtitle]
 
 
 def test_open_subtitle_without_any_subtitle_is_409(tmp_path: Path) -> None:
-    opened: list[Path] = []
+    chosen: list[Path] = []
     downloads = tmp_path / "downloads"
     video = downloads / "Running [job-no-subtitle].mp4"
     downloads.mkdir(parents=True)
     video.write_text("x", encoding="utf-8")
     seed_job(tmp_path, "job-no-subtitle", status="succeeded", output_path=video)
-    client = make_client(tmp_path, system_opener=opened.append)
+    client = make_client(tmp_path, chooser_opener=chosen.append)
 
     response = client.post("/api/jobs/job-no-subtitle/open-subtitle")
 
     assert response.status_code == 409
     assert "字幕" in response.json()["detail"]
-    assert opened == []
+    assert chosen == []
 
 
 def test_open_subtitle_rejects_an_unknown_mode(tmp_path: Path) -> None:
@@ -2183,15 +2185,15 @@ def test_job_item_finds_a_legacy_subtitle_next_to_the_video(tmp_path: Path) -> N
     for path in (video, subtitle):
         path.write_text("x", encoding="utf-8")
     seed_job(tmp_path, "job-legacy-subtitle", status="succeeded", output_path=video)
-    opened: list[Path] = []
-    client = make_client(tmp_path, system_opener=opened.append)
+    chosen: list[Path] = []
+    client = make_client(tmp_path, chooser_opener=chosen.append)
 
     payload = client.get("/api/jobs/job-legacy-subtitle").json()
     response = client.post("/api/jobs/job-legacy-subtitle/open-subtitle")
 
     assert payload["items"][0]["subtitle_path"] == str(subtitle)
     assert response.status_code == 204
-    assert opened == [subtitle]
+    assert chosen == [subtitle]
 
 
 def test_job_item_subtitle_path_is_null_when_the_file_is_gone(tmp_path: Path) -> None:

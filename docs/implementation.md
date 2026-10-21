@@ -231,25 +231,27 @@ B站 上传的界面由四个组件加一个图标组成：[BiliIcon](../fronten
 
 任务中心删除入口分为任务级和 playlist 子视频级：任务级调用 `DELETE /api/jobs/{job_id}`，子视频级调用 `POST /api/jobs/{job_id}/items/delete`。删除文件入口统一在发请求前用确认弹窗保护。删除时如果 `JobItem.output_path` 为空，后端会在任务下载目录中按 YouTube id 发现输出视频、字幕、metadata 和 `.part` 文件。
 
-任务中心播放和打开文件夹入口调用后端受控本机打开 API：单视频任务调用 `POST /api/jobs/{job_id}/play` 与 `POST /api/jobs/{job_id}/open-folder`，playlist 子视频调用对应的 item endpoint，playlist 任务行用同一个 open-folder endpoint 打开 `Job.download_dir`。打开字幕另有 `POST .../open-subtitle`（任务级与条目级各一条），带一个 `mode`（`default` / `chooser`）。后端只根据数据库中的 `output_path`、`subtitle_path`、`download_dir` 或按 YouTube id 在下载目录中发现的本地文件打开目标，不接受前端传入任意路径。
+任务中心播放和打开文件夹入口调用后端受控本机打开 API：单视频任务调用 `POST /api/jobs/{job_id}/play` 与 `POST /api/jobs/{job_id}/open-folder`，playlist 子视频调用对应的 item endpoint，playlist 任务行用同一个 open-folder endpoint 打开 `Job.download_dir`。打开字幕另有 `POST .../open-subtitle`（任务级与条目级各一条）：界面调用**不带参数**，缺省 `mode=chooser`（弹系统的「打开方式」）；`mode=default` 保留给接口调用方。后端只根据数据库中的 `output_path`、`subtitle_path`、`download_dir` 或按 YouTube id 在下载目录中发现的本地文件打开目标，不接受前端传入任意路径。
 
 `output_path` 可能来自 yt-dlp 分离音视频流的中间文件名，例如 `title [id].f137.mp4` 或 `title [id].f140.m4a`。下载完成时和本地打开前，后端会通过 [output_paths.py](../backend/app/output_paths.py) 解析到合并后的最终文件，例如 `title [id].mp4`，避免中间文件被合并删除后误报“视频文件不存在”。读模型同样会在 `output_path` 为空时尝试发现 `... [id].mp4/.webm/.mkv`，让历史任务恢复播放和文件夹入口。
 
 本机打开器位于 [system_open.py](../backend/app/system_open.py)。打开目录时显式调用 `explorer.exe /n, <folder>` 并尽量把窗口置前，减少已有窗口只在任务栏闪烁但没有前置的情况。播放视频不再盲目使用默认文件关联，而是优先选择 VLC、mpv、PotPlayer、MPC、IINA 等可确认解码能力更强的播放器；常见 MP4 可回退到 Windows Media Player。找不到合适播放器时返回 `409`，错误内容包含当前格式和建议安装的播放器。
 
 **打开字幕不挑程序**：`POST /api/jobs/{job_id}/open-subtitle` 与条目级同名接口把
-`JobItem.subtitle_path` 交给系统 —— 默认走文件关联，`?mode=chooser` 则用
-`rundll32.exe shell32.dll,OpenAs_RunDLL` 弹系统自己的「打开方式」窗口（见 [open_path_with_chooser](../backend/app/system_open.py#L46)）。
-Windows 上该后缀还没有关联程序时，默认模式**自动改弹选择器**而不是把 `WinError 1155` 抛给用户。
+`JobItem.subtitle_path` 交给系统 —— 缺省（界面走的就是这条）用
+`rundll32.exe shell32.dll,OpenAs_RunDLL` 弹系统自己的「打开方式」窗口（见 [open_path_with_chooser](../backend/app/system_open.py#L46)）；
+`?mode=default` 才走文件关联，Windows 上该后缀还没有关联程序时**自动改弹选择器**而不是把 `WinError 1155` 抛给用户。
+弹出来的窗口**不归 rundll32**（是 `OpenWith.exe` 的「选取应用」），所以置前必须按进程名认领，
+只按 pid 或标题找会让窗口留在浏览器后面 —— 见 [technical.md](technical.md#打开字幕文件) 第二节的实测数字。
 字幕位置由 [existing_subtitle_file](../backend/app/output_paths.py#L184) 算：库里的 `subtitle_path` 优先（只验存在），
 否则看视频旁边的同名 `.srt`/`.vtt`（补这一列之前下载的历史任务就是这么找到的）。没有字幕时返回 `409`；
 `mode` 取其它值一律 `422`。为什么没有编辑器清单、也没有应用侧「上次用的查看器」，见
 [technical.md](technical.md#打开字幕文件)。
 
 播放、打开文件夹、打开字幕这类本地文件操作失败时，前端在 [JobQueue](../frontend/src/components/JobQueue.tsx) 的对应任务行或子视频行附近显示错误，而不是只放在页面顶部的全局提示区。
-「打开字幕」按钮本身是组合控件 [SubtitleOpenButton](../frontend/src/components/SubtitleOpenButton.tsx#L17)：主段 `title="打开字幕文件"`，
-右段小箭头 `title="选择打开方式"`；能不能点**只看**读模型给的 `subtitle_path`（`null` 就灰着），
-所以界面上不存在「点得下去但必然 409」的按钮。
+「打开字幕」按钮本身是**一颗**图标按钮 [SubtitleOpenButton](../frontend/src/components/SubtitleOpenButton.tsx#L19)：
+`title="打开字幕文件；可选择打开方式"`，点它就是「弹选择器」那一条请求（不带 `mode`）；能不能点**只看**读模型给的
+`subtitle_path`（`null` 就灰着，悬停说「字幕文件尚不可用」），所以界面上不存在「点得下去但必然 409」的按钮。
 
 任务中心复制链接入口是纯前端行为，使用 `navigator.clipboard.writeText()` 复制 `Job.url` 或 `JobItem.source_url`，成功后按钮短暂显示“已复制”。
 

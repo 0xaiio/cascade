@@ -85,7 +85,7 @@
 | [ProxySection.tsx](../frontend/src/components/ProxySection.tsx#L140) | 代理检测结果展示与「真的发一次请求」的入口；[常用端口](../frontend/src/components/ProxySection.tsx#L75)与[排查顺序](../frontend/src/components/ProxySection.tsx#L112)两个说明浮层。 | 不解析代理来源（后端回传 `proxy_source`），不保存设置（保存由 `SettingsPanel` 触发）。 |
 | [HelpPopover.tsx](../frontend/src/components/HelpPopover.tsx#L42) | **通用非模态说明浮层**：定位、钉住、关闭、记忆，以及窄屏抽屉形态。所有辅助说明共用它。 | 不含任何业务文案（文案由调用方以 children 传入）。 |
 | [JobQueue.tsx](../frontend/src/components/JobQueue.tsx#L23) | 任务中心展示与本地文件操作入口（播放 / 打开文件夹 / 打开字幕 / 删除）。 | 不直接访问本机文件系统（一律走后端受控打开/删除接口）。 |
-| [SubtitleOpenButton.tsx](../frontend/src/components/SubtitleOpenButton.tsx#L17) | 「打开字幕」的**组合控件**：主段用系统关联打开、右段弹系统的「打开方式」。两段都不指定程序。 | 不维护编辑器清单、不记住「上次用的程序」（那是系统的职责，见 [technical.md](technical.md#打开字幕文件)），不发请求（`onOpen` 归 `App`）。 |
+| [SubtitleOpenButton.tsx](../frontend/src/components/SubtitleOpenButton.tsx#L19) | 「打开字幕」的**一颗**按钮：点它弹系统的「打开方式」，由用户当场挑程序。 | 不维护编辑器清单、不记住「上次用的程序」（那是系统的职责，见 [technical.md](technical.md#打开字幕文件)），不发请求（`onOpen` 归 `App`）。 |
 | [BiliIcon.tsx](../frontend/src/components/BiliIcon.tsx#L12) | B站 图标：圆角机身 + 两根天线 + 两只眼睛的**手绘** SVG，描边走 `currentColor` 由调用方决定颜色。 | 不含任何布局与文案；品牌色只落在这个图标上，不扩散成按钮配色。 |
 | [BiliUploadButton.tsx](../frontend/src/components/BiliUploadButton.tsx#L42) | 任务行/条目行上的上传入口：**图标 + 一句人话**。`idle` 档显示动作词（「上传到 B站」），其余档原样显示后端徽标文案 —— 前端不自己造一套状态文案，两处必然会漂移。**改的是「点下去做什么」，不是「长什么样」**：`uploaded` → 打开稿件页；`unverified` / `partial` → 只补没成功的那几条；`uploading` → 灰着不动；只有 `failed` 打开上传表单。 | 不请求、不判断能不能传（`disabledReason` 由 `App` 给），不决定上传什么，也不判「哪条该重投、哪条只该核对」（那是服务端按每条终态决定的）；「打开哪一个页面」由 [`uploadedTargetUrl`](../frontend/src/biliStatus.ts#L129) 算，要补哪几条由 [`retryableUploadIds`](../frontend/src/biliStatus.ts#L147) 算。 |
 | [BiliUploadProgress.tsx](../frontend/src/components/BiliUploadProgress.tsx#L15) | 任务卡片里的**上传进度**：四段轨迹（排队/传输/提交/核对）+ 当前段动效 + 每秒推进的「已用/已提交」。只在需要等的时候渲染（在跑或审核中）。 | 不判「算不算成功」（那是后端徽标）、不画百分比（`biliup` 没有字节进度，见下）；不请求。 |
@@ -203,9 +203,9 @@ yt-dlp 自己按「人工先占、自动只补缺」的顺序挑 → 下载成�
   所以它有一份候选清单与一条降级规则；
 - 打开目录要新开一个 Explorer 窗口并尽量置前（只在任务栏闪烁等于没打开）；
 - 打开字幕**不挑程序**：文本文件谁都能开，挑程序只会是「系统那份处理器列表的子集」。
-  `mode=default` 走文件关联，`mode=chooser` 弹系统的「打开方式」窗口 —— 两个取值就是系统那边的两个 verb，
-  应用侧不存「上次用的是谁」。若 Windows 还没有该后缀的关联，默认模式**自动改弹选择器**而不是报错
-  （资源管理器也是这个行为）。
+  界面上那颗按钮走 `mode=chooser`（接口缺省），弹系统的「打开方式」窗口；`mode=default` 走文件关联，
+  只留给接口调用方。两个取值就是系统那边的两个 verb，应用侧不存「上次用的是谁」。若 Windows 还没有
+  该后缀的关联，`default` 模式**自动改弹选择器**而不是报错（资源管理器也是这个行为）。
 
 三条路都把失败翻译成「用户能据以行动」的状态码：文件/产物没有 → 409，任务或条目不存在 → 404，
 系统打开器本身失败 → 400，前端在对应那一行就地显示。

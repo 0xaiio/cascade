@@ -8,7 +8,7 @@ from app import system_open
 
 def test_windows_directory_opens_new_explorer_window(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     opened: list[list[str]] = []
-    raised: list[tuple[int | None, str | None]] = []
+    raised: list[tuple[int | None, str | None, str | None]] = []
     folder = tmp_path / "downloads"
     folder.mkdir()
 
@@ -24,12 +24,16 @@ def test_windows_directory_opens_new_explorer_window(monkeypatch: pytest.MonkeyP
         lambda _target: pytest.fail("directories should use explorer.exe, not os.startfile"),
         raising=False,
     )
-    monkeypatch.setattr(system_open, "_bring_windows_window_to_front", lambda pid, title: raised.append((pid, title)))
+    monkeypatch.setattr(
+        system_open,
+        "_bring_windows_window_to_front",
+        lambda pid, title, process_name=None: raised.append((pid, title, process_name)),
+    )
 
     system_open.open_path_with_default_app(folder)
 
     assert opened == [["explorer.exe", "/n,", str(folder)]]
-    assert raised == [(123, "downloads")]
+    assert raised == [(123, "downloads", None)]
 
 
 def test_windows_file_uses_default_file_association(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -70,7 +74,7 @@ def test_windows_file_without_association_falls_back_to_the_system_open_with_dia
         "Popen",
         lambda command, **_kwargs: opened.append(command) or SimpleNamespace(pid=789),
     )
-    monkeypatch.setattr(system_open, "_bring_windows_window_to_front", lambda pid, title: None)
+    monkeypatch.setattr(system_open, "_bring_windows_window_to_front", lambda pid, title, process_name=None: None)
 
     system_open.open_path_with_default_app(subtitle)
 
@@ -106,7 +110,7 @@ def test_windows_file_errors_that_are_not_about_associations_are_raised(
 
 def test_chooser_opens_the_system_dialog_on_windows(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     opened: list[list[str]] = []
-    raised: list[tuple[int | None, str | None]] = []
+    raised: list[tuple[int | None, str | None, str | None]] = []
     subtitle = tmp_path / "video.en.vtt"
     subtitle.write_text("subs", encoding="utf-8")
 
@@ -116,7 +120,11 @@ def test_chooser_opens_the_system_dialog_on_windows(monkeypatch: pytest.MonkeyPa
         "Popen",
         lambda command, **_kwargs: opened.append(command) or SimpleNamespace(pid=321),
     )
-    monkeypatch.setattr(system_open, "_bring_windows_window_to_front", lambda pid, title: raised.append((pid, title)))
+    monkeypatch.setattr(
+        system_open,
+        "_bring_windows_window_to_front",
+        lambda pid, title, process_name=None: raised.append((pid, title, process_name)),
+    )
     monkeypatch.setattr(
         system_open.os,
         "startfile",
@@ -127,7 +135,9 @@ def test_chooser_opens_the_system_dialog_on_windows(monkeypatch: pytest.MonkeyPa
     system_open.open_path_with_chooser(subtitle)
 
     assert opened == [["rundll32.exe", "shell32.dll,OpenAs_RunDLL", str(subtitle)]]
-    assert raised == [(321, "video.en.vtt")]
+    # `OpenWith.exe` 是必须传的：真正持有「选取应用」窗口的是它，不是 rundll32 ——
+    # 少了这条判据，窗口会留在浏览器后面（现场表现是「点了一点反应都没有」）。
+    assert raised == [(321, "video.en.vtt", "OpenWith.exe")]
 
 
 def test_chooser_falls_back_to_the_default_app_off_windows(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -142,7 +152,7 @@ def test_chooser_falls_back_to_the_default_app_off_windows(monkeypatch: pytest.M
         "Popen",
         lambda command, **_kwargs: opened.append(command) or SimpleNamespace(pid=654),
     )
-    monkeypatch.setattr(system_open, "_bring_windows_window_to_front", lambda pid, title: None)
+    monkeypatch.setattr(system_open, "_bring_windows_window_to_front", lambda pid, title, process_name=None: None)
 
     system_open.open_path_with_chooser(subtitle)
 
@@ -153,7 +163,7 @@ def test_chooser_falls_back_to_the_default_app_off_windows(monkeypatch: pytest.M
 
 def test_open_video_uses_robust_player_when_available(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     opened: list[list[str]] = []
-    raised: list[tuple[int | None, str | None]] = []
+    raised: list[tuple[int | None, str | None, str | None]] = []
     video = tmp_path / "video.webm"
     video.write_text("video", encoding="utf-8")
 
@@ -167,12 +177,16 @@ def test_open_video_uses_robust_player_when_available(monkeypatch: pytest.Monkey
         "Popen",
         lambda command, **_kwargs: opened.append(command) or SimpleNamespace(pid=456),
     )
-    monkeypatch.setattr(system_open, "_bring_windows_window_to_front", lambda pid, title: raised.append((pid, title)))
+    monkeypatch.setattr(
+        system_open,
+        "_bring_windows_window_to_front",
+        lambda pid, title, process_name=None: raised.append((pid, title, process_name)),
+    )
 
     system_open.open_video_with_best_player(video, "webm 路 vp9 + opus")
 
     assert opened == [["vlc", str(video)]]
-    assert raised == [(456, "video.webm")]
+    assert raised == [(456, "video.webm", None)]
 
 
 def test_open_video_reports_missing_capable_player(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
