@@ -12,7 +12,7 @@
 python -m compileall backend\app
 ```
 
-后端测试（当前基线：**1092 passed**，36 个 `test_*.py`）：
+后端测试（当前基线：**1093 passed**，36 个 `test_*.py`）：
 
 ```powershell
 python -m pytest backend\tests -q
@@ -39,7 +39,7 @@ python -m pytest backend\tests -q
 >
 > `--basetemp` 指向的目录**必须不存在**，否则 pytest 会先 `rmtree` 它、同样会触发守卫（`tmp_pytest\` 已在 `.gitignore` 里）。
 
-前端测试和构建（当前基线：**268 passed**，20 个文件；`tsc --noEmit` 与 `vite build` 通过）：
+前端测试和构建（当前基线：**279 passed**，20 个文件；`tsc --noEmit` 与 `vite build` 通过）：
 
 ```powershell
 cd frontend
@@ -119,7 +119,7 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 
 ## 后端测试范围
 
-后端测试位于 [backend/tests](../backend/tests/)（36 个 `test_*.py` + [fakes.py](../backend/tests/fakes.py) / [bili_fakes.py](../backend/tests/bili_fakes.py)，当前 **1092 passed**）：
+后端测试位于 [backend/tests](../backend/tests/)（36 个 `test_*.py` + [fakes.py](../backend/tests/fakes.py) / [bili_fakes.py](../backend/tests/bili_fakes.py)，当前 **1093 passed**）：
 
 > **数字必须自己数一遍**，不要只信 `-q` 的汇总行。逐文件规模用
 > `pytest backend/tests/<文件> -q -p no:cacheprovider --co` 取，各文件之和应**恰等于**全集
@@ -178,11 +178,16 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 
 ## 前端测试范围
 
-前端组件测试是对 `App` 的**集成测试**，按功能面拆成 `frontend/src/*.test.tsx` 多个文件：解析链接与下载选项（`analyzer.test.tsx`，11）、cookies 导入与校验（7）、设置面板与代理检测（10）、任务中心（控制/删除/展开 11、本地文件操作与链接 13、进度与详情呈现 6）、清晰度降级（4）、自检信息（2）、帮助浮层（3）、**B站 上传（`bili-upload.test.tsx`，72 例）**、**CC 字幕结论的呈现（`bili-subtitle-line.test.tsx`，5 例）**、完成通知（19）、版面与文案不变式（3），以及只读样式源文的 `styles.test.ts`（4）。当前 **20 个文件 / 268 passed**（13 个 `.tsx` 组件测试 + 7 个 `.ts` 纯函数测试）；`biliStatus.test.ts` 另含字幕两档判据与「已上传点进去打开哪一页」「待核对/部分失败该补哪几条」的判据（24 例）。
+前端组件测试是对 `App` 的**集成测试**，按功能面拆成 `frontend/src/*.test.tsx` 多个文件：解析链接与下载选项（`analyzer.test.tsx`，11）、cookies 导入与校验（7）、设置面板与代理检测（10）、任务中心（控制/删除/展开 11、本地文件操作与链接 13、进度与详情呈现 6）、清晰度降级（4）、自检信息（2）、帮助浮层（3）、**B站 上传（`bili-upload.test.tsx`，73 例）**、**CC 字幕结论的呈现（`bili-subtitle-line.test.tsx`，5 例）**、完成通知（19）、版面与文案不变式（3），以及只读样式源文的 `styles.test.ts`（4）。当前 **20 个文件 / 279 passed**（13 个 `.tsx` 组件测试 + 7 个 `.ts` 纯函数测试）；`biliStatus.test.ts` 另含字幕两档判据与「已上传点进去打开哪一页」「待核对/部分失败该补哪几条」的判据（24 例）。
 
 另有五份**不挂载任何组件**的纯函数测试（`frontend/src/*.test.ts`，不经过 `App`）：B站 表单词汇表与本地预检 `biliForm.test.ts`（46 例）、B站 状态谓词 `biliStatus.test.ts`（24 例）、**上传进度的分段与聚合 `biliProgress.test.ts`（15 例）**、错误取值兜底 `errors.test.ts`（4 例）、**体检策略 `biliHealth.test.ts`（5 例）**。它们把原先内联在 `BiliUploadDialog.tsx` / `App.tsx` 里的判断抽成纯函数后再测，所以能在不渲染界面的前提下覆盖边界（例如「列表还在读」与「还没选合集」不能同时报出来，见 [ai/bug-fix/012](../ai/bug-fix/012-preflight-contradicts-itself-and-the-server.md)；`uploadedTargetUrl` 在两种空值下必须返回 `null`；合集的标题判据量的是**渲染后的每一条**而非模板，见 [ai/bug-fix/019](../ai/bug-fix/019-the-title-length-check-never-fires-for-collections.md)）。
 
 逐文件用例数可用 `npx vitest run --reporter=json --outputFile=<临时路径>` 复算（JSON 报告的 `testResults[].assertionResults` 长度即该文件用例数）。
+
+纯函数测试里 `biliProgress.test.ts` 额外钉住**时区**（服务端发的是不带偏移量的 UTC 墙上时间，
+按本地解析会让 52 秒显示成 8 小时，见 [ai/bug-fix/020](../ai/bug-fix/020-the-progress-clock-is-eight-hours-off.md)）；
+`formatting.test.ts` 里 `parseServerTime` / `formatDateTime` 各自独立算一份本地时刻，
+不抄一串固定字符串 —— 后者在非 UTC 时区断言的正是缺陷本身。
 
 跨文件共享的东西只有三处，都在 [frontend/src/test](../frontend/src/test/)：测试台 [appHarness.ts](../frontend/src/test/appHarness.ts)（后端 `fetch` 替身与前后置钩子）、夹具 [appFixtures.ts](../frontend/src/test/appFixtures.ts)、样式源文解析 [cssRules.ts](../frontend/src/test/cssRules.ts)。
 
@@ -208,6 +213,8 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 - B站 投稿失败的**分类**：`21104 标题过长` 必须单独认出来，成功日志里的「通过cookie登录」不得把结论带回「登录已失效」；文件名 stem > 80 时上传走 `cascade-*.mp4` 硬链接（原文件不动、不复制、用完删除）。
 - 「重新体检」：点击后按钮禁用且写「体检中…」，结束后出现 `上次体检 HH:MM:SS`；账号探测超时退回离线结论（`biliHealth.test.ts` 用 20ms 时限覆盖三条分支）。
 - B站 上传进度：上传中时任务卡片里出现**四段轨迹**（排队/传输/提交/核对），当前段带 `is-active`、前序段 `is-done`；「已用」按秒推进且起点取服务端 `started_at`；合集显示「第 2/2 条」与「已有 1/2 条确认在平台上」；审核中四段全 `is-done` 且不再有 active；已发布/失败/待核对**不渲染**进度块。后端另有两条用例：`_store_progress` 只在值真的变大时发 `bili_upload_progress`（同值重放与倒退都不发），以及结论落账后迟到的回调既不写库也不发事件。
+- **跨接口的时间一律带时区**：`GET /api/bilibili/uploads` 与 `/api/jobs` 返回的 `started_at` / `finished_at` / `created_at` 末尾都有 `Z`。少了它，前端 `Date.parse` 会把 UTC 当成本地时间解析，本机（UTC+8）上每一个时长都会**凭空多出 8 小时**（实测 Ep 125：真实 52 秒显示成 「已提交 8:00:52」）。同时上传进度在**审核期**必须继续按秒走 —— 停住的时钟会被读成「卡住了」。
+  见 [ai/bug-fix/020](../ai/bug-fix/020-the-progress-clock-is-eight-hours-off.md)。
 - B站 上传入口：视频没下载好时按钮**禁用并给出原因**（单视频与合集两种措辞）、点开后用该任务的 `job_id`/`item_id` 去预填（合集传 `item_id=null`）、徽标文案与配色完全照搬服务端给的值（前端不自己判「算不算已上传」）。**点下去做什么按档位分流**：`已上传` → 打开稿件页（tooltip 恰好「B 站已上传；点击进入 B 站」、只调一次 `window.open`、不弹表单、本地文件被删也不影响可点）；`待核对` → **只调重新核对**（不预填、不提交）；`部分失败` → **只碰没成功的那几条**（已发布的记录一次都不能被提交）；`上传中` → **禁用且提示里没有「点击」二字**；`失败` → 仍然打开投稿表单。条目行只打开/只重试这一条自己的记录。
 - B站 上传表单：字段、**硬限数字**与**回显时的截断长度**都来自 `prefill.limits`（前端不写死常量，否则会出现「界面说没超、提交回来 400」，或「短到能完整显示」那个分支永远走不到 —— 见 [ai/bug-fix/012](../ai/bug-fix/012-preflight-contradicts-itself-and-the-server.md)）；超限**只报错不截断**（输入框里仍是用户输入的完整内容）；提交的请求体就是用户在表单里填的；被拒（409）时表单**不关闭**、错误留在表单里；合集显示逐条预览且改模板即时重算、未就绪的条目按序号点名并挡住提交。
 - 标题长度**在标题框旁边就能看出超没超**：超限时追加「超出 N 个字」并加 `is-over` / `aria-invalid`；合集的判据量的是**渲染后的每一条**（`{title}` 这种 7 个字的模板永远「合规」，只量模板等于什么都没查），改模板后即时出现「渲染后最长 N/80（第 X 条，超出 M 个字）」并点名超出最多的那条，按钮随之禁用；模板自己超长但渲染后合规时**不拦**（服务端不校验模板）。真实浏览器另用探针 `tmp_acceptance/ui_bili_title_len.py` 量到红色 `rgb(180,35,24)` 与字重 700 真的生效（jsdom 不加载样式表，光有类名断言会漏掉「CSS 里没有这一档」）。见 [ai/bug-fix/019](../ai/bug-fix/019-the-title-length-check-never-fires-for-collections.md)。

@@ -1,4 +1,4 @@
-import { formatClock } from "./formatting";
+import { formatClock, parseServerTime } from "./formatting";
 import { isAcceptedUpload, isInFlightUpload } from "./biliStatus";
 import type { BiliUpload, BiliUploadStatus } from "./types";
 
@@ -126,9 +126,10 @@ export function jobUploadProgress(uploads: readonly BiliUpload[]): JobUploadProg
 
 /** 「已用 1:23」/「已提交 12:04」。`now` 由调用方按秒推进（见 `BiliUploadProgress`）。 */
 export function uploadElapsedLabel(view: JobUploadProgressView, now: number): string | null {
-  if (!view.since) return null;
-  const since = Date.parse(view.since);
-  if (Number.isNaN(since)) return null;
+  // 走 `parseServerTime` 而不是 `Date.parse`：服务端存的是 UTC，而 `Date.parse` 会把
+  // 不带偏移量的串按**本地**时间解析（本机 UTC+8 ⇒ 时长凭空多出 8 小时）。见 ai/bug-fix/020。
+  const since = parseServerTime(view.since);
+  if (since === null) return null;
   const seconds = Math.max(0, Math.round((now - since) / 1000));
   const clock = formatClock(seconds);
   return view.running ? `已用 ${clock}` : `已提交 ${clock}`;

@@ -33,9 +33,40 @@ export function formatClock(seconds: number | null | undefined): string {
   return hours ? `${hours}:${minutes}:${secs}` : `${minutes}:${secs}`;
 }
 
+/**
+ * 解析服务端给的时间戳，**一律按 UTC 解释**。
+ *
+ * 为什么不能直接 `Date.parse`：ECMAScript 规定**不带偏移量的 date-time 串按本地时间解析**，
+ * 而服务端存的是 UTC 墙上时间（SQLite 不存时区，见 `schemas.UtcDateTime`）。在本机 UTC+8，
+ * 一个 `2026-10-21T10:29:38` 会被当成 10:29:38 的**本地**时间，比真实时刻早了 8 小时 ——
+ * 于是「已用 52 秒」被算成「8:00:52」。这类偏差不报错，只是数字变大，所以它藏了很久
+ * （用例里全是带 `Z` 的假数据）。
+ *
+ * 带了偏移量（`Z` / `+00:00` / `+08:00`）就按偏移量算：这里判据是「**哪一端都可能给**」。
+ * 服务端已经补上 `Z` 了，这段兜底是为了让「某一处又忘了」不会退回一个静默的 8 小时谎报。
+ */
+export function parseServerTime(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const hasOffset = /(?:Z|[+-]\d{2}:?\d{2})$/.test(value.trim());
+  const parsed = Date.parse(hasOffset ? value : `${value.trim()}Z`);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+/**
+ * 一个时刻显示成 `YYYY-MM-DD HH:MM:SS`，**按本地时区**。
+ *
+ * 原先是把字符串切片直接显示，于是 UTC 的墙上时间被当成本地时间摆给用户
+ * （本机 18:29 开始的一条任务显示成「开始 10:29:38」）。显示值必须和用户手上的钟一致。
+ */
 export function formatDateTime(value: string | null | undefined): string {
-  if (!value) return "--";
-  return value.replace("T", " ").replace(/\.\d+Z?$/, "").replace(/Z$/, "").slice(0, 19);
+  const parsed = parseServerTime(value);
+  if (parsed === null) return "--";
+  const date = new Date(parsed);
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
+    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+  );
 }
 
 export function formatFileSize(bytes: number | null | undefined): string {

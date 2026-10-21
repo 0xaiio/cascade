@@ -16,12 +16,13 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlencode
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.bili_auth import TvToken, write_cookie_file
 from app.bili_bin import is_pe
@@ -398,6 +399,38 @@ def test_job_uploads_returns_an_empty_view_for_a_job_without_records(client):
 
 def test_job_uploads_404s_for_an_unknown_job(client):
     assert client.client.get("/api/bilibili/uploads", params={"job_id": "nope"}).status_code == 404
+
+
+def test_upload_timestamps_carry_a_timezone(client):
+    """跨接口的时间必须自带偏移量（ai/bug-fix/020）。
+
+    SQLite 不存时区，读回来的是**naive 的 UTC 墙上时间**；原样发出去的话，
+    前端 `Date.parse` 会按本地时间解释它 —— 本机 UTC+8，于是 Ep 125 那条
+    真实 52 秒的上传在界面上显示成「已提交 8:00:52」。
+
+    判据是**串的形状**（末尾有 `Z`），不是「值对不对」：本机就在 UTC+8，
+    一个测试进程里「算出来的时刻」与「解析出来的时刻」永远一致，验不出偏差；
+    只有把「这个串有没有偏移量」钉住，才拦得住下一次有人忘了补。
+    """
+    client.seed_job("job1", "任务", 1)
+    items = client.seed_job("job2", "任务", 1)
+    client.client.post("/api/bilibili/uploads", json=single_payload(client))
+    # 把状态推到等审核，`started_at` / `finished_at` 才都有值。
+    with Session(client.engine) as session:
+        row = session.exec(select(BiliUpload).where(BiliUpload.job_id == "job1")).one()
+        row.status = "reviewing"
+        row.started_at = datetime(2026, 10, 21, 10, 29, 38, 727960)  # 刻意不带 tzinfo
+        row.finished_at = datetime(2026, 10, 21, 10, 30, 31, 280768)
+        session.add(row)
+        session.commit()
+
+    body = client.client.get("/api/bilibili/uploads", params={"job_id": "job1"}).json()
+    upload = body["uploads"][0]
+    assert upload["started_at"] == "2026-10-21T10:29:38.727960Z"
+    assert upload["finished_at"] == "2026-10-21T10:30:31.280768Z"
+    # 时长仍由服务端算（两端同一个约定，差值与时区无关）—— 本条真实样本是 52 秒。
+    assert upload["elapsed_seconds"] == 52
+    assert items  # 另一个任务也被建了出来（保持本用例只关心时间形状）
 
 
 # ================================================================ 单视频上传

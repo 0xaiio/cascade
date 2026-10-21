@@ -6,6 +6,21 @@ import { installAppHarness, mockState } from "./test/appHarness";
 
 installAppHarness();
 
+/** 把一个时刻渲染成本地时区的 `YYYY-MM-DD HH:MM:SS`（不复用被测实现）。 */
+function localStamp(iso: string): string {
+  const date = new Date(iso);
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
+    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+  );
+}
+
+/** 同样的字符串做成正则：那一格是「开始 2026-05-15 18:00:00」，要的是**子串**匹配。 */
+function stampOf(iso: string): RegExp {
+  return new RegExp(localStamp(iso).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+}
+
 describe("App · 任务中心：进度与详情呈现", () => {
   test("shows live progress percentage elapsed time and eta in task center", async () => {
     render(<App />);
@@ -20,8 +35,11 @@ describe("App · 任务中心：进度与详情呈现", () => {
     render(<App />);
 
     expect(await screen.findByText("Running video")).toBeInTheDocument();
-    expect(screen.getAllByText(/2026-05-15 10:00:00/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/2026-05-15 10:05:00/)).toBeInTheDocument();
+    // 时间戳**按本地时区显示**（服务端给的是 UTC，见 ai/bug-fix/020）。这里在测试里
+    // 独立算一份期望值，而不是抄一串「2026-05-15 10:00:00」—— 后者在 UTC 时区之外
+    // 断言的正是「把 UTC 墙上时间当本地时间」那个缺陷。
+    expect(screen.getAllByText(stampOf("2026-05-15T10:00:00Z")).length).toBeGreaterThan(0);
+    expect(screen.getByText(stampOf("2026-05-15T10:05:00Z"))).toBeInTheDocument();
     expect(screen.getAllByText(/1920x1080/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/1280x720/).length).toBeGreaterThan(0);
     expect(screen.getByText(/混合分辨率/)).toBeInTheDocument();

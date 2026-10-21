@@ -1,14 +1,33 @@
-from datetime import datetime
-from typing import Literal, get_args
+from datetime import UTC, datetime
+from typing import Annotated, Literal, get_args
 
 from pydantic import BaseModel, Field, HttpUrl
-
+from pydantic.functional_validators import BeforeValidator
 
 DownloadMode = Literal["video_subtitles", "video_only", "subtitles_only"]
 SubtitleSource = Literal["human", "auto", "both"]
 SubtitleFormat = Literal["best", "srt", "vtt"]
 JobBatchAction = Literal["pause", "restart", "delete"]
 CookieSource = Literal["none", "file", "browser"]
+
+
+def _as_aware_utc(value: object) -> object:
+    """SQLite 不存时区，读回来的 `datetime` 一律是 **naive 的 UTC 墙上时间**。
+
+    不补上时区就发出去，前端 `Date.parse` 会按**本地时间**解释它 —— 本机 UTC+8，
+    于是每一个「已用 / 已提交」都凭空多出 8 小时（实测 Ep 125：真实 52 秒显示成 8:00:52）。
+    这类偏差**不报错、只是数字变大**，所以用例里全是带 `Z` 的假时间戳时它一直藏着。
+
+    判据：**跨接口的时间必须自带偏移量**，让「什么时候」不依赖读它的人猜。
+    """
+    if isinstance(value, datetime) and value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value
+
+
+# 所有对外的时间字段都用它。补成 aware 之后 pydantic 会序列化成 `...Z`，
+# 而 `Z` 是 `Date.parse` 唯一能可靠识别为 UTC 的形式。
+UtcDateTime = Annotated[datetime, BeforeValidator(_as_aware_utc)]
 
 # 任务跑到终态时怎么提醒。`off` 不提醒；`sound` 提示音；`toast` 右下角浮层；`both` 两者都要。
 # 提醒本身在**前端**发生（浏览器里播声音、浮层也是 DOM），后端只负责把这个偏好存下来并读回去
@@ -139,10 +158,10 @@ class JobItemRead(BaseModel):
     # 前端不拼路径。
     subtitle_path: str | None = None
     error: str | None = None
-    created_at: datetime
-    updated_at: datetime
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
+    created_at: UtcDateTime
+    updated_at: UtcDateTime
+    started_at: UtcDateTime | None = None
+    finished_at: UtcDateTime | None = None
     elapsed_seconds: int = 0
 
 
@@ -163,10 +182,10 @@ class JobRead(BaseModel):
     actual_resolution: str | None = None
     actual_format: str | None = None
     resolution_fallback: ResolutionFallback | None = None
-    created_at: datetime
-    updated_at: datetime
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
+    created_at: UtcDateTime
+    updated_at: UtcDateTime
+    started_at: UtcDateTime | None = None
+    finished_at: UtcDateTime | None = None
     elapsed_seconds: int = 0
     # 创建这个任务时勾没勾「完成后通知」。它只存在于 `options_json` 里，读模型不把它抬出来的话，
     # 前端刷新页面后就再也拿不到了（SSE 每次事件只是重拉 `/api/jobs`）—— 于是「这次会话里
@@ -539,10 +558,10 @@ class BiliUploadRead(BaseModel):
     error: str | None = None
     advice: str | None = None
     attempt: int = 1
-    created_at: datetime
-    updated_at: datetime
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
+    created_at: UtcDateTime
+    updated_at: UtcDateTime
+    started_at: UtcDateTime | None = None
+    finished_at: UtcDateTime | None = None
     elapsed_seconds: int = 0
 
 

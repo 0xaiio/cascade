@@ -11,19 +11,26 @@ import type { BiliUpload } from "../types";
  * 「已用 1:23」由组件自己按秒推进：`biliup` 在传输那一段可能 8 分钟不发一条输出，
  * 只靠 SSE 刷新的话用户看到的是一个静止的界面，分不清「在跑」还是「卡死」。
  * 计时起点来自服务端的 `started_at`，不是本地点击时刻 —— 两个时钟不一致时以服务端为准。
+ *
+ * **推进的条件是「在等」，不是「在跑」**：进度块在审核期也还挂着（`waiting`），
+ * 那时 `running` 已经翻成 false、起点也换成了 `finished_at`。只按 `running` 推进的话，
+ * 切到审核的那一刻 `now` 就冻结在最后一个 tick 上，「已提交」永远停着 ——
+ * 而审核往往要等几分钟到几小时，停住的时钟看起来就是「卡住了」。见 ai/bug-fix/020。
  */
 export function BiliUploadProgress({ uploads }: { uploads: readonly BiliUpload[] }) {
   const view = jobUploadProgress(uploads);
-  const running = view?.running ?? false;
+  // 组件渲染与否本身就由它决定（下面 `return null`），这里用它驱动时钟。
+  const waiting = view?.waiting ?? false;
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    if (!running) return;
-    // 立刻对齐一次：`running` 刚变成 true 时不要把「已用 0:00」挂在屏幕上等一秒。
+    if (!waiting) return;
+    // 立刻对齐一次：`waiting` 刚变成 true 时不要把「00:00」挂在屏幕上等一秒。
+    // 这一句同时覆盖「刚开始跑」与「刚切到等审核」——后者起点变了，必须重取当前时刻。
     setNow(Date.now());
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
-  }, [running]);
+  }, [waiting]);
 
   if (!view || !view.waiting) return null;
   const elapsed = uploadElapsedLabel(view, now);

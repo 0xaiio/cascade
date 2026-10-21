@@ -172,4 +172,54 @@ describe("已用 / 已提交", () => {
     ])!;
     expect(uploadElapsedLabel(view, Date.parse("2026-10-21T03:00:00Z"))).toBe("已用 00:00");
   });
+
+  /**
+   * 上面四条用例**全部**用带 `Z` 的时间戳，而服务端从来不发带 `Z` 的 ——
+   * 这就是 Ep 125 那个「52 秒显示成 8:00:52」能一直藏着的原因（ai/bug-fix/020）。
+   * 下面这组用**服务端真正发出来的那种**（naive 的 UTC 墙上时间）。
+   */
+  test("起点是「不带偏移量的 UTC」时，按 UTC 解释（否则本机 UTC+8 会多出 8 小时）", () => {
+    const view = jobUploadProgress([
+      upload({ status: "uploading", progress: 0.2, started_at: "2026-10-21T03:00:00" })
+    ])!;
+    // `now` 也用同一种写法 —— 这里的对照是「两端按同一套规则解析」，与本地时区无关。
+    expect(uploadElapsedLabel(view, Date.parse("2026-10-21T03:01:05Z"))).toBe("已用 01:05");
+  });
+
+  test("等审核时也一样：naive 时间戳按 UTC 算，不是本地", () => {
+    const view = jobUploadProgress([
+      upload({
+        status: "reviewing",
+        finished_at: "2026-10-21T03:08:00",
+        started_at: "2026-10-21T03:00:00"
+      })
+    ])!;
+    expect(uploadElapsedLabel(view, Date.parse("2026-10-21T03:20:00Z"))).toBe("已提交 12:00");
+  });
+
+  test("真实样本：Ep 125 那条（52 秒）不能再显示成 8 小时", () => {
+    // 取自本机库里那条真实记录：started/finished 相隔 52 秒。
+    // 判据是**时长的量级** —— 真正的回归是「显示值与服务器算出的 elapsed_seconds 同量级」，
+    // 写成精确值反而会在时钟差一秒时变红。
+    const view = jobUploadProgress([
+      upload({
+        status: "reviewing",
+        progress: 0.95,
+        started_at: "2026-10-21T10:29:38.727960",
+        finished_at: "2026-10-21T10:30:31.280768"
+      })
+    ])!;
+    const label = uploadElapsedLabel(view, Date.parse("2026-10-21T10:32:11.280768Z"))!;
+    // 10:30:31 → 10:32:11 = 100 秒 = 01:40（改动前这一格会显示「已提交 8:01:40」）。
+    expect(label).toBe("已提交 01:40");
+    expect(label).not.toMatch(/^\D*(\d+):\d\d:\d\d$/);
+  });
+
+  test("带偏移量的时间戳照旧按偏移量算（服务端的 `Z` 与别的时区都要支持）", () => {
+    const view = jobUploadProgress([
+      upload({ status: "uploading", progress: 0.2, started_at: "2026-10-21T11:00:00+08:00" })
+    ])!;
+    // `11:00+08:00` 就是 `03:00Z`。
+    expect(uploadElapsedLabel(view, Date.parse("2026-10-21T03:01:05Z"))).toBe("已用 01:05");
+  });
 });

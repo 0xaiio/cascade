@@ -471,6 +471,34 @@ describe("App · B站 上传进度", () => {
     expect(document.querySelector(".bili-step.is-active")).toBeNull();
   });
 
+  test("审核中：时钟继续走（停在最后一个 tick 上看起来就是「卡住了」）", async () => {
+    mockState.jobs = [downloadedJob()];
+    mockState.biliUploads = [
+      jobUploads(
+        [
+          {
+            ...biliUploadPayload,
+            status: "reviewing",
+            status_text: "审核中",
+            progress: 0.95,
+            // 起点就是**此刻** ⇒ 首帧必然是 `已提交 00:00`。
+            // 起点放两秒前的话首帧已经是 00:02，断言「它变了」会在冻结的情况下也通过 ——
+            // 那是这条用例第一版的样子，承重测试当场把它拆穿了。
+            started_at: secondsAgo(0),
+            finished_at: secondsAgo(0)
+          }
+        ],
+        { badge: "uploading", badge_text: "上传中", badge_tone: "busy" }
+      )
+    ];
+    render(<App />);
+
+    expect(await screen.findByText("已提交 00:00")).toBeInTheDocument();
+    // 审核往往要等几分钟到几小时，**停住的时钟会被读成「卡住了」**。
+    // 原来推进条件写的是 `running`，而 `reviewing` 时它已经是 false ⇒ 时钟冻结。
+    await waitFor(() => expect(screen.queryByText("已提交 00:00")).toBeNull(), { timeout: 5000 });
+  });
+
   test("已发布 / 失败 / 待核对都不显示进度块（已经有结论了）", async () => {
     const cases = [
       ["uploaded", "已上传", "ok", [biliUploadPayload], /B 站已上传；点击进入 B 站 Running video/],
