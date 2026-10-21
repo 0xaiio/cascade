@@ -181,9 +181,10 @@ B站 上传是一条与下载完全解耦的链路，模块划分（详见 [设�
 
 几个必须知道的实现细节：
 
-- **`run_command` 的读取放在后台线程**。早先是「主线程 `for line in process.stdout` 读完再 `wait(timeout)`」—— 阻塞在管道上时那段 `wait` 根本执行不到，于是一个**不打印任何输出就挂住**的投稿会让超时形同虚设（记录永远停在「上传中」），而「挂死」恰恰是这个超时唯一要防的东西。现在读取是 daemon 线程 + 有界 `join`，超时会 kill 并写入 `local-upload-deadline-reached` 标记，该标记会被 [classify_failure](../backend/app/bili_policy.py#L275) 翻成「这次上传等得太久」。
+- **`run_command` 的读取放在后台线程**。早先是「主线程 `for line in process.stdout` 读完再 `wait(timeout)`」—— 阻塞在管道上时那段 `wait` 根本执行不到，于是一个**不打印任何输出就挂住**的投稿会让超时形同虚设（记录永远停在「上传中」），而「挂死」恰恰是这个超时唯一要防的东西。现在读取是 daemon 线程 + 有界 `join`，超时会 kill 并写入 `local-upload-deadline-reached` 标记，该标记会被 [classify_failure](../backend/app/bili_policy.py#L351) 翻成「这次上传等得太久」。
 - **`--submit` 照传，但它在 0.2.4 里不起作用**：上游 `uploader.rs` 的 `match submit` 两个分支都调 `submit_by_app`，实际提交永远走 `/x/vu/app/add`。真正会拦住投稿的是**登录文件里缺 `token_info.access_token`** —— `login_by_cookies` 会先拿它去 `oauth2/info` 校验，空串换来 `-400 请求错误` 之后 biliup 直接退出。[exchange_tv_token](../backend/app/bili_auth.py#L142) 补上 TV 端三步交换，并把 `platform` 写成 `BiliTV`（biliup 靠它挑续期用的 appkey），见 [011](../ai/bug-fix/011-biliup-refuses-a-token-less-cookie-file.md)。
 - **失败时 biliup 的原始输出会逐行进日志**（前缀 `biliup 输出 | `，`WARNING` 级）。此前 `UploadContext.on_log` 没有任何调用方，用户照着失败建议去 `app.log` 搜只会扑空；现在这条通道由 [bili_manager._log_biliup_line](../backend/app/bili_manager.py#L181) 提供，落盘前过 `sanitize_log_message`。
+- **传输层断线也是一类结论**。`biliup` 被对端断开时输出里**没有业务码**（`error sending request` → `connection error` → `peer closed connection … close_notify`），旧分类表一条也命中不了，界面只剩「没能识别出具体原因」。现在 `TRANSPORT_FAILURE_NEEDLES` 收这一类，并按「失败那一行的 URL 是不是上传 CDN」决定敢不敢承诺「重试不会投重」——承诺的成立只依赖「字节没传完 ⇒ 提交接口没被调用过」（见 [021](../ai/bug-fix/021-a-dropped-upload-link-looks-like-nothing-at-all.md)）。
 - **对账按标题前缀匹配，且两侧都做 `strip()`**。平台会对标题做首尾空白处理；只归一不比较的写法会让用户多打一个尾随空格就永远查不到，于是一次成功投稿被标成「待核对」。
 - **请求参数风格在两个端点上不一致**：`season/add` 的 `csrf` 走 form 且返回 `data` 为 `season_id`；`season/section/episodes/add` 的 `csrf` 走 **query**，body 用 **camelCase**（`sectionId` / `episodes`）。两处都由 `bili_api` 封装，调用方不用记。
 - **评论幂等**：`/x/v2/reply/send` 已下线，用 `POST /x/v2/reply/add`，置顶用 `POST /x/v2/reply/top`。先查自己的评论（`mid` 匹配 + marker），有就只补置顶；重复评论码 `12051` 时换 `mode=2`（时间序）重找再决定。

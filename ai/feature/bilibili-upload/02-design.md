@@ -372,6 +372,7 @@ pending ──► grouping ──┬─► grouped   已提交归集（含平台
 | --- | --- | --- |
 | 未登录 / 登录态过期 | `biliup` 输出含登录关键词，或 cookie 缺 `SESSDATA`/`bili_jct`；对账返回 `code != 0` | 「B站 登录已失效」+「去设置里重新扫码登录」 |
 | 账号频控 601 | 输出含 `601` | 「B站 说这次上传太快了。这是账号侧的临时限流，等几分钟原样重投即可，**不要改参数硬刷**。」（F8） |
+| 传输层断线 | 输出里有**传输失败语句**（`error sending request` / `connection error` / `peer closed connection` / `broken pipe`…），且**没有**任何业务码。**必须排在「找不到文件」之前**（CDN 侧 `404 Not Found` 里就有 `not found`） | 能证明「死在把字节传给 CDN」时（失败那一行里同时有 `bilivideo.com`）：「视频传到一半，连接被对端断开了」+「还没到提交，点重试不会多出一条重复稿件；反复这样多半是网络/代理不稳」；否则退回「这次上传在传输阶段就断了」+「重试前先去创作中心看一眼」（见 [021](../../bug-fix/021-a-dropped-upload-link-looks-like-nothing-at-all.md)） |
 | `biliup` 缺失 | 探测不到可用二进制 | 「没找到投稿工具」+ 具体的 `winget install --id ForgQi.biliup-rs --exact` 命令 |
 | 视频文件不存在 | `video_path` 不存在 / 无 `output_path` | 「视频还没下载好」+「先让下载任务跑完」 |
 | 对账查不到 | `biliup` 返回 0 但 member 列表里没有 | 「已提交，但还没在 B站 看到它」+「去创作中心核对，或稍后重试」 |

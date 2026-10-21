@@ -30,7 +30,12 @@ from app.bili_meta import (
     default_collection_template,
     default_single,
 )
-from app.bili_policy import SEASON_CREATE_FAILED, SEASON_EPISODES_FAILED, SEASON_SECTION_UNRESOLVED
+from app.bili_policy import (
+    SEASON_CREATE_FAILED,
+    SEASON_EPISODES_FAILED,
+    SEASON_SECTION_UNRESOLVED,
+    UPLOAD_CDN_DROPPED,
+)
 from app.bili_upload import (
     COMMENT_MARKER,
     DEFAULT_COLLECTION_GAP_SECONDS,
@@ -379,6 +384,35 @@ def test_run_single_marks_failed_and_skips_verification_when_the_command_fails(t
     result = run_single(make_context(transport, runner=runner, tmp_path=tmp_path), UploadTarget(1, TITLE, video), single_meta())
     assert result.status == BiliUploadStatus.failed.value
     assert "太快" in (result.error or "")
+    assert transport.called("/x/web/archives") == 0
+
+
+def test_run_single_reports_a_transport_drop_as_a_drop_not_as_an_unknown(tmp_path):
+    """真实失败（Ep 130）的输出必须原样走到界面上：结论是「传输断了」，不是「没能识别出原因」。
+
+    这条钉的是**接线**：`classify_failure` 拿到的是 `command.output`（原始输出，含 URL 与错误链），
+    而不是落库时脱敏过的 `log_tail`。脱敏只抹掉查询串（`?<redacted>`），主机名还在 ——
+    判据在两种形态下都成立，所以同一份夹具在 `test_bili_policy` 与这里都能用。
+
+    另外：命令失败时**不许**去对账 —— 一次注定为空的查询只会拖慢界面。
+    """
+    transport = FakeBiliTransport(archives=[])
+    video = write_video(tmp_path / "a.mp4")
+    raw = (
+        ' INFO biliup::uploader::line: pre_upload: {"profile":"ugcupos/bup","r":"upos"}\n'
+        "Error: error sending request for url (https://upos-cs-upcdnbda2.bilivideo.com/ugcever/x.mp4)\n"
+        "Caused by:\n"
+        "    0: client error (SendRequest)\n"
+        "    1: connection error\n"
+        "    2: peer closed connection without sending TLS close_notify\n"
+    )
+    runner = command_runner(returncode=1, stdout=raw, lines=("start pre_upload", raw))
+    result = run_single(
+        make_context(transport, runner=runner, tmp_path=tmp_path), UploadTarget(1, TITLE, video), single_meta()
+    )
+    assert result.status == BiliUploadStatus.failed.value
+    assert result.error == UPLOAD_CDN_DROPPED[0]
+    assert "不会多出一条重复稿件" in (result.advice or "")
     assert transport.called("/x/web/archives") == 0
 
 

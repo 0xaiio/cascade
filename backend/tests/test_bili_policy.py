@@ -39,7 +39,10 @@ from app.bili_policy import (
     SEASON_SUBMITTED_NOTE,
     STATUS_TEXT,
     TIMEOUT_MARKER,
+    TRANSPORT_FAILURE_NEEDLES,
     UNKNOWN_FAILURE_ADVICE,
+    UPLOAD_CDN_DROPPED,
+    UPLOAD_LINK_DROPPED,
     UPLOAD_UNVERIFIED,
     UNVERIFIED_NOTE,
     badge_text,
@@ -68,6 +71,11 @@ def _advice_pairs_grouped() -> list[tuple[str, str]]:
         MISSING_FFMPEG,
         MISSING_VIDEO,
         NOT_LOGGED_IN,
+        # 传输层失败的两条结论都不在 `FAILURE_PATTERNS` 里成对出现（表里只有通用的那条，
+        # CDN 那条是 `classify_failure` 细分出来的），所以必须在这里显式登记，
+        # 否则「文案必须有下一步」与「文案不许出现裸词」两条硬约束都覆盖不到它。
+        UPLOAD_LINK_DROPPED,
+        UPLOAD_CDN_DROPPED,
         UPLOAD_UNVERIFIED,
         SEASON_CREATE_FAILED,
         SEASON_PENDING_NO_EPISODES,
@@ -309,3 +317,131 @@ def test_a_benign_login_line_alone_is_not_a_failure():
 def test_real_auth_failures_are_still_recognized(output):
     """收紧 needle 之后，真的登录失效必须还能认出来（否则修一个 bug 换来一个静默）。"""
     assert classify_failure(output)[0] == NOT_LOGGED_IN[0]
+
+
+# ---------------------------------------------------------------- 传输层断线（Ep 130）
+# 2026-10-21 那条真实投稿（`C++ Weekly - Ep 130`）的 `log_tail` 逐字抄本。
+# 它的特征是**一个业务码都没有**：前几行是成功日志，最后是一条 reqwest + rustls 的错误链。
+# 当时它落在兜底文案上，而输出里其实写着一条完全可读的结论：字节传到一半，对端关了连接。
+REAL_EP130_DROP = """\
+2026-10-21 21:15:07  INFO biliup::uploader::credential: 验证cookie
+2026-10-21 21:15:07  INFO biliup::uploader::credential: 无需更新cookie
+2026-10-21 21:15:07  INFO biliup::uploader::credential: 通过cookie登录
+2026-10-21 21:15:07  INFO biliup::uploader: user: ant-hengxin
+2026-10-21 21:15:30  INFO biliup::uploader::line: pre_upload: {"build":2110000,"name":"Ep 130 [gqhHbhBoDtw].mp4","profile":"ugcupos/bup","r":"upos","size":13290460,"ssl":0,"version":"2.11.0"}
+Error: error sending request for url (https://upos-cs-upcdnbda2.bilivideo.com/ugcever/n261021a21ryenp2yw6mtq65huvlc872.mp4?<redacted>)
+Caused by:
+    0: client error (SendRequest)
+    1: connection error
+    2: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+"""
+
+
+def test_the_transport_drop_that_started_this_is_no_longer_unrecognized():
+    """**本轮的核心回归**：真实失败输出不能再落到「没能识别出具体原因」。
+
+    判据是「结论必须落在传输这一类里」（两条常量之一），而不是「不等于兜底文案」——
+    后者在文案换个说法时依然可能绿着过去。
+    """
+    message, advice = classify_failure(REAL_EP130_DROP)
+    assert message in {UPLOAD_LINK_DROPPED[0], UPLOAD_CDN_DROPPED[0]}
+    assert "没能识别出具体原因" not in message
+    assert "重试" in advice
+    # 也不能被折成「登录」或「本地文件没了」——那两条都会让用户去修一个根本不存在的问题。
+    assert "登录" not in message
+    assert "找不到" not in message
+
+
+def test_a_drop_inside_the_cdn_transfer_promises_retry_is_safe():
+    """死在「把字节传给 CDN」这一步时，才敢说「重试不会多出一条重复稿件」。
+
+    依据：`biliup` 的顺序是 `pre_upload` → 把字节 PUT 到 CDN → 最后才调提交接口；
+    字节都没传完，提交接口根本没被调用过（同一段输出里也找不到 `APP接口投稿成功`）。
+    """
+    message, advice = classify_failure(REAL_EP130_DROP)
+    assert message == UPLOAD_CDN_DROPPED[0]
+    assert "不会多出一条重复稿件" in advice
+
+
+def test_a_drop_outside_the_cdn_transfer_does_not_promise_retry_is_safe():
+    """失败那一行的 URL 不是上传 CDN（这里是提交接口），就**不能**承诺「不会投重」：
+
+    提交请求的应答丢了的时候，平台上可能已经有这条稿件了。那时唯一安全的话是
+    「先去创作中心看一眼，再决定要不要重试」。
+    """
+    raw = (
+        "Error: error sending request for url (https://api.bilibili.com/x/vu/app/add?csrf=…)\n"
+        "Caused by:\n"
+        "    0: client error (SendRequest)\n"
+        "    1: connection error\n"
+    )
+    message, advice = classify_failure(raw)
+    assert message == UPLOAD_LINK_DROPPED[0]
+    assert "不会多出一条重复稿件" not in advice
+    assert "创作中心" in advice
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "connection reset by peer",
+        "Error: broken pipe (os error 32)",
+        "    0: client error (SendRequest)",
+        "connection refused (os error 111)",
+        "Connection aborted: 远程主机强迫关闭了一个现有的连接",
+        "remote end closed connection without response",
+        "    2: peer closed connection without sending TLS close_notify",
+    ],
+)
+def test_transport_failure_wording_variants_are_all_recognized(raw):
+    """同一条失败链在不同库/不同平台上有很多种说法，**认不出来的那种会退回兜底**。
+
+    这里钉的是「语料覆盖面」：换一个说法（重置/管道/拒绝/对端关闭/MITM 代理插话）都不许沉默。
+    """
+    message, _advice = classify_failure(raw)
+    assert "没能识别出具体原因" not in message, raw
+
+
+def test_every_transport_needle_is_a_failure_statement():
+    """needle 清单本身的一条硬约束：不许出现裸词（`cookie` / `登录` / `reset` 之外的宽词）。
+
+    具体判据落在测试里是刻意的：这张表是**唯一**能把一次失败变成结论的入口，
+    往里加一个过于宽泛的词，就会把其它失败也吞掉（018 的教训）。
+    """
+    assert TRANSPORT_FAILURE_NEEDLES
+    for needle in TRANSPORT_FAILURE_NEEDLES:
+        assert needle == needle.lower(), needle
+        assert needle.strip() == needle and needle, needle
+        # 一个字/两个字的裸词太宽（`601` 这类纯数字 needle 已经在别处埋过雷）。
+        assert len(needle) >= 6, needle
+
+
+def test_a_cdn_side_http_error_is_not_read_as_a_missing_local_file():
+    """`HTTP status client error (404 Not Found)` 里含 `not found`，而「找不到」那条是给
+    **本地**文件缺失用的。传输那条必须排在它前面，否则用户会去查一个明明还在的文件。
+    """
+    raw = (
+        "Error: HTTP status client error (404 Not Found) for url "
+        "(https://upos-cs-upcdnbda2.bilivideo.com/ugcever/x.mp4)"
+    )
+    message, _advice = classify_failure(raw)
+    assert message != "上传时找不到视频文件了"
+    assert message == UPLOAD_CDN_DROPPED[0]
+
+
+def test_a_successful_upload_output_is_not_classified_as_a_drop():
+    """成功日志里没有传输失败语句 —— 这条用例防的是「needle 收得太宽」。
+
+    `classify_failure` 只在返回码非 0 时被调用，但 needle 一旦宽松，任何一次别的失败
+    （甚至以后被误调用于成功输出）都会被读成断线。
+    """
+    ok = "\n".join(
+        [
+            "INFO biliup::uploader::credential: 验证cookie",
+            "INFO biliup::uploader::credential: 通过cookie登录",
+            "INFO biliup::uploader: Upload completed: a.mp4 => cost 12.26s, 1.16 MB/s.",
+            "INFO biliup::uploader::bilibili: APP接口投稿成功 {\"bvid\":\"BV1xx411c7mD\"}",
+            '{"code": 0}',
+        ]
+    )
+    assert classify_failure(ok)[0] == "投稿没有成功，而且没能识别出具体原因"

@@ -176,6 +176,59 @@ NOT_LOGGED_IN = (
 # 放在这一层而不是 `bili_bin` 里，是因为它同时是**分类依据**与**文案依据**。
 TIMEOUT_MARKER = "local-upload-deadline-reached"
 
+# ---------------------------------------------------------------- 网络中断（传输层）
+# `biliup` 走 reqwest + rustls，连接被对端断开时它打印的是一条**纯传输层**的错误链，里面
+# 一个业务码都没有：
+#
+#   Error: error sending request for url (https://upos-cs-upcdnbda2.bilivideo.com/ugcever/….mp4?…)
+#   Caused by:
+#       0: client error (SendRequest)
+#       1: connection error
+#       2: peer closed connection without sending TLS close_notify: …#unexpected-eof
+#
+# 2026-10-21 的真实投稿（Ep 130）正是这个形状，而当时哪一条 needle 都命中不了 ⇒
+# 界面上只剩「没能识别出具体原因」。判据：**这些 needle 必须全部是失败语句本身**——
+# 既不是平台错误码，也不会出现在 biliup 的成功日志里（成功时只有「验证cookie」这类行）。
+TRANSPORT_FAILURE_NEEDLES: tuple[str, ...] = (
+    "error sending request",  # reqwest：请求没能发出去
+    "client error (sendrequest)",  # 同上的 Display 形态（原样大小写混排，匹配前统一小写）
+    "client error (connect)",
+    "connection error",
+    "connection reset",  # 仅作 needle；界面文案里不许出现这个词（仓库既有约束）
+    "connection aborted",
+    "connection refused",
+    "broken pipe",
+    "peer closed connection",  # rustls：对端没发 close_notify 就关了连接
+    "close_notify",
+    "unexpected-eof",
+    "remote end closed connection",  # urllib3 的说法
+    "network is unreachable",
+    "temporary failure in name resolution",
+    "http status client error",  # reqwest：对端回了 4xx（**不是**本地缺少文件）
+    "http status server error",  # reqwest：对端回了 5xx
+)
+
+UPLOAD_LINK_DROPPED = (
+    "这次上传在传输阶段就断了，B站 没有给出正常的应答",
+    "点「重试」再试一次；重试前若想确认没有投重，先去创作中心看一眼。"
+    "反复这样多半是本机到 B站 的网络或代理不稳，换个节点或临时直连再试",
+)
+
+# 同一类失败的**更精确**结论：失败那一行的 URL 落在上传 CDN 上 ⇒ 死在「把字节传上去」这一步。
+# 为什么这条结论敢说「不会多出一条重复稿件」：`biliup` 的顺序是 `pre_upload` → 把视频字节
+# PUT 到 CDN → 最后才调 App 的提交接口；字节都没传完，提交接口根本没被调用过。
+#
+# 判据要的是**同一行**里既有传输失败语句、又有 CDN 主机名。只看主机名不行：`pre_upload`
+# 那行输出里就带着 `"profile":"ugcupos/bup"`，任何一次失败都会带上它 —— 那会把「提交时断线」
+# 也说成「传输时断线」，进而承诺一个不成立的「不会投重」。
+UPLOAD_CDN_DROPPED = (
+    "视频传到一半，和 B站 上传服务器的连接被对端断开了",
+    "这次失败发生在文件传输阶段（还没到提交），点「重试」重新上传即可，不会多出一条重复稿件。"
+    "若反复断在同一处，多半是本机到 B站 CDN 的网络或代理不稳（上传域名 upos-*.bilivideo.com）"
+    "—— 换个代理节点或临时直连再试",
+)
+CDN_UPLOAD_HOSTS: tuple[str, ...] = ("bilivideo.com",)
+
 # ---------------------------------------------------------------- 失败分类
 # 每一条都是 (错误结论, 下一步)。顺序即优先级：先命中的先返回。
 FAILURE_PATTERNS: tuple[tuple[tuple[str, ...], tuple[str, str]], ...] = (
@@ -247,6 +300,15 @@ FAILURE_PATTERNS: tuple[tuple[tuple[str, ...], tuple[str, str]], ...] = (
         ("not logged in", "账号未登录", "未登录", "登录信息已过期", '"code":-101', '"code": -101'),
         NOT_LOGGED_IN,
     ),
+    # 传输层失败：**没有业务码**，但输出里有一句明确的失败语句（见上面的错误链样例）。
+    #
+    # 位置有讲究：必须排在 `not found` 那一条**之前**。reqwest 把「对端回了个 404」打印成
+    # `HTTP status client error (404 Not Found) for url (…)`，那句里就含 `not found` ——
+    # 排在后面会被读成「上传时找不到视频文件了」，把一个 CDN 侧问题指给用户去查本地文件。
+    (
+        TRANSPORT_FAILURE_NEEDLES,
+        UPLOAD_LINK_DROPPED,
+    ),
     (
         ("no space left", "磁盘空间", "enospc"),
         (
@@ -272,12 +334,31 @@ UNKNOWN_FAILURE_ADVICE = (
 )
 
 
+def _dropped_while_sending_video(haystack: str) -> bool:
+    """失败的那一行是不是「把视频字节传给 CDN」时断的（而不是提交接口 / B站 API）。
+
+    `haystack` 必须是**已转小写**的整段输出。要求传输失败语句与 CDN 主机名落在**同一行**，
+    理由见 `UPLOAD_CDN_DROPPED` 的注释：`pre_upload` 行里也有 `ugcupos` 字样，跨行合并判断会误判。
+    """
+    for line in haystack.splitlines():
+        if not any(host in line for host in CDN_UPLOAD_HOSTS):
+            continue
+        if any(needle in line for needle in TRANSPORT_FAILURE_NEEDLES):
+            return True
+    return False
+
+
 def classify_failure(output: str) -> tuple[str, str]:
     """把 `biliup` 的输出归类成（结论, 下一步）。**命中不了就如实说不知道，不猜原因。**"""
     haystack = (output or "").lower()
     for needles, message in FAILURE_PATTERNS:
-        if any(needle.lower() in haystack for needle in needles):
-            return message
+        if not any(needle.lower() in haystack for needle in needles):
+            continue
+        # 传输层失败再细分一次：只有能证明「死在把字节传给 CDN 这一步」时，才敢说重试不会投重。
+        # 判据要整行上下文（URL 主机名与失败语句同行），表达不了成 needle，所以放在这里。
+        if message == UPLOAD_LINK_DROPPED and _dropped_while_sending_video(haystack):
+            return UPLOAD_CDN_DROPPED
+        return message
     return ("投稿没有成功，而且没能识别出具体原因", UNKNOWN_FAILURE_ADVICE)
 
 

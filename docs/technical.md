@@ -228,7 +228,25 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 
 ### 频控是账号级的
 
-`code 601 您上传视频过快` 是**账号侧**的临时频控，不是本机参数不对。正确处理是等几分钟、原样重投，不要靠改标题/加标签去硬刷 —— 那只会让频控更久。[classify_failure](../backend/app/bili_policy.py#L275) 把它归成一条明确的建议，合集批量投稿之间也留了间隔（`DEFAULT_COLLECTION_GAP_SECONDS`）。这条**无法在本机消解**，只能等。
+`code 601 您上传视频过快` 是**账号侧**的临时频控，不是本机参数不对。正确处理是等几分钟、原样重投，不要靠改标题/加标签去硬刷 —— 那只会让频控更久。[classify_failure](../backend/app/bili_policy.py#L351) 把它归成一条明确的建议，合集批量投稿之间也留了间隔（`DEFAULT_COLLECTION_GAP_SECONDS`）。这条**无法在本机消解**，只能等。
+
+### 上传断了 ≠ 投稿被拒
+
+`biliup` 走 reqwest + rustls。网络层被断开时，它打印的是一条**没有任何业务码**的错误链：
+`error sending request for url (https://upos-….bilivideo.com/…)` → `connection error` →
+`peer closed connection without sending TLS close_notify`。2026-10-21 的 Ep 130 正是这个形状，
+而当时的分类表只认「平台错误码」与「中文失败语」，一条都命中不了 ⇒ 界面上只剩「没能识别出具体原因」。
+
+现在这类失败有 16 条 needle（`TRANSPORT_FAILURE_NEEDLES`，全部是失败语句本身，不会命中
+「验证cookie / Upload completed」这些成功行），并且按**失败发生在哪一步**再细分一次：
+
+- 错误那一行的 URL 落在上传 CDN（`bilivideo.com`）上 ⇒ 字节还没传完，提交接口根本没被调用过，
+  这才可以说「重试不会多出一条重复稿件」；
+- 落在 `api.bilibili.com` 上 ⇒ 提交的应答丢了、稿件**可能已经建好**，只能说「先去创作中心看一眼」。
+
+判据要求「失败语句与 CDN 主机名在**同一行**」：`pre_upload` 那行输出里也带着 `ugcupos` 字样，
+按整段输出判会把提交阶段的断线误判成传输阶段，给出一个不成立的承诺。详见 bug-fix 记录
+[021](../ai/bug-fix/021-a-dropped-upload-link-looks-like-nothing-at-all.md)。
 
 ### 版权与来源：`--copyright` 的默认值是错的
 
@@ -247,7 +265,7 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 - **创建**：`POST /x2/creative/web/season/add` —— **form-urlencoded** 传 `title/desc/cover/season_price=0/csrf`，返回 `data` 即 `season_id`。
 - **加稿**：`POST /x2/creative/web/season/section/episodes/add` —— **JSON body**，字段是 camelCase 的 `sectionId` + `episodes[{aid, cid, title, charging_pay}]`，而 **`csrf` 走 query 串**。
 
-两者参数风格正好相反，照抄前者的写法会静默失败。`cid` 只能靠 `GET /x/web-interface/view?bvid=` 拿到，所以归集前对每个已发布稿件都多一次详情请求。「创建」有人工审核，通过前平台上可能看不到，[SEASON_SUBMITTED_NOTE](../backend/app/bili_policy.py#L308) 会把这点说给用户。**重试不重复建合集**：归集失败时保留已拿到的 `season_id`，重试只补加缺口 —— 重复建合集在平台侧不可撤销，比「多等一次」贵得多。
+两者参数风格正好相反，照抄前者的写法会静默失败。`cid` 只能靠 `GET /x/web-interface/view?bvid=` 拿到，所以归集前对每个已发布稿件都多一次详情请求。「创建」有人工审核，通过前平台上可能看不到，[SEASON_SUBMITTED_NOTE](../backend/app/bili_policy.py#L389) 会把这点说给用户。**重试不重复建合集**：归集失败时保留已拿到的 `season_id`，重试只补加缺口 —— 重复建合集在平台侧不可撤销，比「多等一次」贵得多。
 
 **`sectionId` 装的是分区 id，不是合集 id。** 这是本节最容易踩的一处：「创建」返回的是**合集**编号，而
 「加稿」要的是该合集下某个**分区（section）**的编号，两者在平台上是两套独立编号

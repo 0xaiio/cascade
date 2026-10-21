@@ -821,3 +821,51 @@ Ep 125 上传时进度条显示「已提交 7:59:59」，跑的过程中出现�
 - **没有在真实浏览器里量过那行字**：接口返回的串与纯函数输出都验了，但真实渲染没跑 CDP 探针。
 - **下载侧（`JobItemRead` / `JobRead`）的时间字段同样改成了带 `Z`**，界面「开始/结束」的显示值随之改变；
   这一条只被任务中心那条用例间接覆盖，没有专门的时区用例。
+
+## 17. 传输层断线：用真实失败输出当夹具（021）
+
+### 17.1 夹具就是库里的 `log_tail`
+
+`test_bili_policy.py` 的 `REAL_EP130_DROP` 是 Ep 130 那条失败记录 `log_tail` 的逐字抄本
+（含「验证cookie / 无需更新cookie / 通过cookie登录」这些**成功**行）。
+它与 018 的 `REAL_21104_TAIL` 是一对，正好覆盖两个方向：
+
+- 018：needle **太宽**，成功日志把真实原因盖掉；
+- 021：表里**缺一类**，真实原因一条都命中不了。
+
+### 17.2 用例（后端 +8）
+
+| 层 | 用例 | 钉住什么 |
+| --- | --- | --- |
+| 分类（+7） | `test_the_transport_drop_that_started_this_is_no_longer_unrecognized` | 真实输出必须落在传输那两条常量之一，不许是兜底；且不许说「登录」「找不到」 |
+| 分类 | `test_a_drop_inside_the_cdn_transfer_promises_retry_is_safe` | 断在 CDN 段 ⇒ 结论 `UPLOAD_CDN_DROPPED`，文案里有「不会多出一条重复稿件」 |
+| 分类 | `test_a_drop_outside_the_cdn_transfer_does_not_promise_retry_is_safe` | 断在提交接口 ⇒ 换成通用结论，**不许**承诺不投重，且指向创作中心 |
+| 分类 | `test_transport_failure_wording_variants_are_all_recognized`（7 例） | 7 种说法（重置 / 管道 / 拒绝 / 对端关闭 / 中文 errno / MITM 插话）都不许沉默 |
+| 分类 | `test_every_transport_needle_is_a_failure_statement` | needle 全小写、无首尾空白、长度 ≥ 6 —— 挡「裸词」回归 |
+| 分类 | `test_a_cdn_side_http_error_is_not_read_as_a_missing_local_file` | CDN 侧 `404 Not Found` 不许被读成「本地找不到文件」（次序缺陷） |
+| 分类 | `test_a_successful_upload_output_is_not_classified_as_a_drop` | 成功日志里没有传输失败语句 |
+| 上传（+1） | `test_run_single_reports_a_transport_drop_as_a_drop_not_as_an_unknown` | **接线**：原始输出 → 结论/下一步落到 `UploadResult`；命令失败时不去对账 |
+
+文案硬约束也一并覆盖：`UPLOAD_LINK_DROPPED` / `UPLOAD_CDN_DROPPED` 已登记进 `_advice_pairs_grouped()`，
+于是「每条结论都要给下一步」与「不许出现 `timed out` / `reset` / `403` 裸词」两条既有用例
+会自动管到这两条新文案。**这一步是必须的**：它们不在 `FAILURE_PATTERNS` 里成对出现
+（CDN 那条是细分出来的），不登记就等于两条约束都漏掉。
+
+### 17.3 承重：把 needle 换成 `()` 之后
+
+把 `FAILURE_PATTERNS` 里那条传输项的 needle 临时改成 `()`（等价于回到修复前）：
+
+```
+12 failed, 116 passed
+```
+
+12 条里包括核心回归、两条承诺措辞用例、7 条语料参数化、CDN 404 次序、以及 `run_single` 那条。
+还原后 `test_bili_policy.py + test_bili_upload.py` **128 passed**；后端全量 **1107 passed**（176.7s）。
+
+### 17.4 未覆盖 / 如实说明
+
+- **没有真实重投**（会产出公开稿件，且这次失败多半与网络路径有关）。真实判据仍是
+  「同一条记录点重试 → `uploading 0.2 → … → reviewing`」。
+- **没有测到 biliup 到 CDN 的可达性**：`curl` 探测走的是本机代理（`remote_ip=127.0.0.1`），
+  与 biliup 直连不是同一条路径，不作证据。
+- CDN 侧 HTTP 4xx/5xx 两支没有真实样本，只有单测。
