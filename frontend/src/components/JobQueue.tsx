@@ -50,7 +50,12 @@ export function JobQueue({
   jobs: Job[];
   selectedJobIds: Set<string>;
   onBatchAction: (action: JobBatchAction, deleteFiles?: boolean) => void;
-  onBiliRetrySeason: (seasonRecordId: string) => void;
+  /**
+   * 归集重试。**必须把 Promise 传出去**：卡片上的「归集中…」与「上次重试 HH:MM:SS」
+   * 都靠它知道这一下什么时候跑完。这里写成 `void` 的话，`await` 会立刻返回 undefined ——
+   * 加载态一闪都不闪、落款永远不写，而请求其实发了（ai/ui/007）。
+   */
+  onBiliRetrySeason: (seasonRecordId: string) => Promise<boolean>;
   onBiliRetryUpload: (uploadId: string) => void;
   /**
    * 一次补多条：`unverified`（只核对）与 `partial`（有的上去了有的没上去）两档的按钮走这里。

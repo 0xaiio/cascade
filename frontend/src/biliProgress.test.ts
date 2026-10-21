@@ -73,7 +73,9 @@ describe("任务级聚合", () => {
     expect(view!.done).toBe(0);
     expect(view!.running).toBe(true);
     expect(view!.waiting).toBe(true);
-    expect(view!.since).toBe("2026-10-21T03:00:00Z");
+    expect(view!.startedAt).toBe("2026-10-21T03:00:00Z");
+    // 还在跑就没有终点：`finished_at` 是「上一次跑完」的时刻，拿它算时长会得出负数或 0。
+    expect(view!.finishedAt).toBeNull();
     expect(view!.stage.detail).toBe("正在传输视频文件");
   });
 
@@ -123,7 +125,7 @@ describe("任务级聚合", () => {
     }
   });
 
-  test("审核中是「等平台」，要显示进度块，但计时换成提交那一刻", () => {
+  test("审核中是「等平台」：进度块留着，但两个端点都要给（时长是定值，不是从此刻起算）", () => {
     const view = jobUploadProgress([
       upload({
         status: "reviewing",
@@ -134,11 +136,14 @@ describe("任务级聚合", () => {
     ]);
     expect(view!.waiting).toBe(true);
     expect(view!.running).toBe(false);
-    expect(view!.since).toBe("2026-10-21T03:08:00Z");
+    expect(view!.startedAt).toBe("2026-10-21T03:00:00Z");
+    expect(view!.finishedAt).toBe("2026-10-21T03:08:00Z");
+    // 审核期**不推进**秒表：`running` 是那个唯一判据。
+    expect(view!.running).toBe(false);
   });
 });
 
-describe("已用 / 已提交", () => {
+describe("已用 / 上传用时", () => {
   test("在跑时说「已用」，并按服务端给的起点算", () => {
     const view = jobUploadProgress([
       upload({ status: "uploading", progress: 0.2, started_at: "2026-10-21T03:00:00Z" })
@@ -147,7 +152,7 @@ describe("已用 / 已提交", () => {
     expect(uploadElapsedLabel(view, now)).toBe("已用 01:05");
   });
 
-  test("等审核时说「已提交」", () => {
+  test("等审核时给的是**定值**：上传用时 = 终点 − 起点，与此刻几点无关", () => {
     const view = jobUploadProgress([
       upload({
         status: "reviewing",
@@ -155,8 +160,10 @@ describe("已用 / 已提交", () => {
         started_at: "2026-10-21T03:00:00Z"
       })
     ])!;
-    const now = Date.parse("2026-10-21T03:20:00Z");
-    expect(uploadElapsedLabel(view, now)).toBe("已提交 12:00");
+    // 同一份数据，两个「现在」—— 值必须一模一样。旧实现量的是「等审核等了多久」，
+    // 于是这个数字会一路涨到几小时（实测 Ep 125 的 6:41:18），见 ai/ui/008。
+    expect(uploadElapsedLabel(view, Date.parse("2026-10-21T03:20:00Z"))).toBe("上传用时 08:00");
+    expect(uploadElapsedLabel(view, Date.parse("2026-10-21T09:20:00Z"))).toBe("上传用时 08:00");
   });
 
   test("没有起点或起点是坏值 → 不显示时间，而不是显示 0:00", () => {
@@ -164,6 +171,13 @@ describe("已用 / 已提交", () => {
     expect(uploadElapsedLabel(none, Date.now())).toBeNull();
     const broken = jobUploadProgress([upload({ status: "uploading", started_at: "not-a-date" })])!;
     expect(uploadElapsedLabel(broken, Date.now())).toBeNull();
+  });
+
+  test("跑完却没有终点 → 不显示，也不拿此刻顶上", () => {
+    const view = jobUploadProgress([
+      upload({ status: "reviewing", started_at: "2026-10-21T03:00:00Z", finished_at: null })
+    ])!;
+    expect(uploadElapsedLabel(view, Date.parse("2026-10-21T03:20:00Z"))).toBeNull();
   });
 
   test("时钟偏到起点之前也不显示负数", () => {
@@ -174,7 +188,7 @@ describe("已用 / 已提交", () => {
   });
 
   /**
-   * 上面四条用例**全部**用带 `Z` 的时间戳，而服务端从来不发带 `Z` 的 ——
+   * 上面几条**全部**用带 `Z` 的时间戳，而服务端从来不发带 `Z` 的 ——
    * 这就是 Ep 125 那个「52 秒显示成 8:00:52」能一直藏着的原因（ai/bug-fix/020）。
    * 下面这组用**服务端真正发出来的那种**（naive 的 UTC 墙上时间）。
    */
@@ -194,13 +208,13 @@ describe("已用 / 已提交", () => {
         started_at: "2026-10-21T03:00:00"
       })
     ])!;
-    expect(uploadElapsedLabel(view, Date.parse("2026-10-21T03:20:00Z"))).toBe("已提交 12:00");
+    expect(uploadElapsedLabel(view, Date.parse("2026-10-21T03:20:00Z"))).toBe("上传用时 08:00");
   });
 
-  test("真实样本：Ep 125 那条（52 秒）不能再显示成 8 小时", () => {
-    // 取自本机库里那条真实记录：started/finished 相隔 52 秒。
-    // 判据是**时长的量级** —— 真正的回归是「显示值与服务器算出的 elapsed_seconds 同量级」，
-    // 写成精确值反而会在时钟差一秒时变红。
+  test("真实样本：Ep 125 那条（52 秒）显示成上传用时，而不是 6 个多小时的「已提交」", () => {
+    // 取自本机库里那条真实记录：started/finished 相隔 52.55 秒（服务端 elapsed_seconds=52，
+    // 界面按四舍五入给 00:53）。判据是**量级**与**措辞**：这是「上传用掉了多久」，
+    // 不是「从提交到现在多久」。
     const view = jobUploadProgress([
       upload({
         status: "reviewing",
@@ -209,10 +223,10 @@ describe("已用 / 已提交", () => {
         finished_at: "2026-10-21T10:30:31.280768"
       })
     ])!;
-    const label = uploadElapsedLabel(view, Date.parse("2026-10-21T10:32:11.280768Z"))!;
-    // 10:30:31 → 10:32:11 = 100 秒 = 01:40（改动前这一格会显示「已提交 8:01:40」）。
-    expect(label).toBe("已提交 01:40");
-    expect(label).not.toMatch(/^\D*(\d+):\d\d:\d\d$/);
+    const label = uploadElapsedLabel(view, Date.parse("2026-10-22T01:04:00Z"))!;
+    expect(label).toMatch(/^上传用时 00:5[23]$/);
+    // 三段式的「小时:分:秒」正是旧版那个 6 小时数字的形状 —— 它再出现就说明又去替审核计时了。
+    expect(label).not.toMatch(/^\D*\d+:\d\d:\d\d$/);
   });
 
   test("带偏移量的时间戳照旧按偏移量算（服务端的 `Z` 与别的时区都要支持）", () => {

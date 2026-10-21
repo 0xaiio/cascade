@@ -462,8 +462,8 @@ describe("App · B站 上传进度", () => {
     render(<App />);
 
     expect(await screen.findByText("已提交，B 站 审核中")).toBeInTheDocument();
-    // 计时换成「已提交」：审核等的是平台，不是我们的传输。
-    expect(screen.getByText(/已提交 12:0\d/)).toBeInTheDocument();
+    // 计时给的是**上传用时**（900 秒 → 720 秒 = 3 分钟）：审核等的是平台，不该记进我们的传输。
+    expect(screen.getByText("上传用时 03:00")).toBeInTheDocument();
     // 审核不是第五步：四个节点全都算走完，不能留一个在闪。
     for (const label of ["排队", "传输", "提交", "核对"]) {
       expect(stepState(label)).toContain("is-done");
@@ -471,7 +471,7 @@ describe("App · B站 上传进度", () => {
     expect(document.querySelector(".bili-step.is-active")).toBeNull();
   });
 
-  test("审核中：时钟继续走（停在最后一个 tick 上看起来就是「卡住了」）", async () => {
+  test("审核中：秒表停在「上传用时」上，不再替平台审核计时", async () => {
     mockState.jobs = [downloadedJob()];
     mockState.biliUploads = [
       jobUploads(
@@ -481,9 +481,7 @@ describe("App · B站 上传进度", () => {
             status: "reviewing",
             status_text: "审核中",
             progress: 0.95,
-            // 起点就是**此刻** ⇒ 首帧必然是 `已提交 00:00`。
-            // 起点放两秒前的话首帧已经是 00:02，断言「它变了」会在冻结的情况下也通过 ——
-            // 那是这条用例第一版的样子，承重测试当场把它拆穿了。
+            // 起点 = 终点 ⇒ `上传用时 00:00`。若时钟还在推进，两秒后这里必然变成别的数字。
             started_at: secondsAgo(0),
             finished_at: secondsAgo(0)
           }
@@ -493,10 +491,12 @@ describe("App · B站 上传进度", () => {
     ];
     render(<App />);
 
-    expect(await screen.findByText("已提交 00:00")).toBeInTheDocument();
-    // 审核往往要等几分钟到几小时，**停住的时钟会被读成「卡住了」**。
-    // 原来推进条件写的是 `running`，而 `reviewing` 时它已经是 false ⇒ 时钟冻结。
-    await waitFor(() => expect(screen.queryByText("已提交 00:00")).toBeNull(), { timeout: 5000 });
+    expect(await screen.findByText("上传用时 00:00")).toBeInTheDocument();
+    // 实测反例（ai/ui/008）：Ep 125 那次上传只用了 52 秒，界面一路涨到「已提交 6:41:18」，
+    // 因为它量的是**等审核**的时间，而这块东西标题叫「上传进度」。
+    await new Promise((resolve) => window.setTimeout(resolve, 2200));
+    expect(screen.getByText("上传用时 00:00")).toBeInTheDocument();
+    expect(screen.queryByText(/已提交 \d/)).toBeNull();
   });
 
   test("已发布 / 失败 / 待核对都不显示进度块（已经有结论了）", async () => {
@@ -1376,6 +1376,64 @@ describe("App · B站 稿件明细与重试", () => {
     await user.click(screen.getByRole("button", { name: "重试归集" }));
     await waitFor(() => expect(mockState.biliRetrySeasonIds).toEqual(["season-1"]));
     await waitFor(() => expect(notice()).toHaveTextContent("已重新归集。"));
+  });
+
+  test("「重试归集」在前提不满足时也要在原地留下痕迹：加载态 + 落款 + 说实话的回执", async () => {
+    // 这一条钉的是**用户报的那句话**：「点了没有任何反应」。
+    // 视频还在审核时，那一下其实连归集请求都不会发（服务端 `action=waiting`），
+    // 行里的文案因此一个像素都不变；而唯一的回执在页顶，卡片在视口里的时候它在一千多像素外。
+    const user = userEvent.setup();
+    mockState.jobs = [downloadedJob()];
+    mockState.biliSeasonRetryAction = "waiting";
+    mockState.biliSeasonRetryDelayMs = 400;
+    mockState.biliUploads = [
+      jobUploads(
+        [
+          {
+            ...biliUploadPayload,
+            status: "reviewing",
+            status_text: "审核中",
+            progress: 0.95,
+            started_at: new Date(Date.now() - 600_000).toISOString(),
+            finished_at: new Date(Date.now() - 540_000).toISOString()
+          }
+        ],
+        {
+          job_id: "job-running",
+          season: {
+            id: "season-1",
+            job_id: "job-running",
+            title: "合集",
+            desc: "",
+            season_id: 9001,
+            status: "pending",
+            status_text: "等待归集",
+            upload_ids: [biliUploadPayload.id],
+            error: "视频还在 B站 排队审核，暂时没法加进合集",
+            advice: "等 B站 审核通过后点「重试归集」—— 它会先去平台核对分P编号，再归集"
+          }
+        }
+      )
+    ];
+    render(<App />);
+
+    const button = await screen.findByRole("button", { name: "重试归集" });
+    expect(button).toBeEnabled();
+    // 点之前没有落款：它是「上一次真的跑过」的凭据，不能一进来就有。
+    expect(document.querySelector(".bili-retry-stamp")).toBeNull();
+
+    await user.click(button);
+    // 过程中：文案换成「归集中…」并禁用（真实后端要回读平台，这一下要等）
+    await waitFor(() => expect(screen.getByRole("button", { name: "归集中…" })).toBeDisabled());
+    // 结束后：落款出现、按钮恢复可点
+    await waitFor(
+      () => expect(document.querySelector(".bili-retry-stamp")).toHaveTextContent(/^上次重试 \d\d:\d\d:\d\d$/),
+      { timeout: 4000 }
+    );
+    expect(screen.getByRole("button", { name: "重试归集" })).toBeEnabled();
+    // 回执说的是实话，而且**不是绿色对勾**：「什么都没发」不能长得像「做成了」。
+    await waitFor(() => expect(document.querySelector(".notice.is-info")).toHaveTextContent("这次没有发起归集"));
+    expect(mockState.biliRetrySeasonIds).toEqual(["season-1"]);
   });
 
   test("announces only a real transition into a settled badge", async () => {

@@ -34,7 +34,7 @@ function renderStatus(upload: BiliUpload) {
     <BiliJobStatus
       uploads={job(upload)}
       onRetryUpload={onRetryUpload}
-      onRetrySeason={() => {}}
+      onRetrySeason={async () => true}
       onOpenVideoPage={() => {}}
     />
   );
@@ -74,7 +74,7 @@ describe("B站 上传明细 · CC 字幕那一行", () => {
       <BiliJobStatus
         uploads={job({ ...biliUploadPayload, subtitle_state: "skipped", subtitle_message: "没有已下载的字幕，跳过字幕上传" })}
         onRetryUpload={() => {}}
-        onRetrySeason={() => {}}
+        onRetrySeason={async () => true}
         onOpenVideoPage={() => {}}
       />
     );

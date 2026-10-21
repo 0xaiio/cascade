@@ -1,4 +1,4 @@
-﻿import { CheckCircle2, XCircle } from "lucide-react";
+﻿import { CheckCircle2, Info, XCircle } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   ApiError,
@@ -166,7 +166,15 @@ export default function App() {
   const [seasonList, setSeasonList] = useState<BiliSeasonList | null>(null);
   /** 本轮弹窗是否已经发起过读列表的请求。弹窗每收到一条 SSE 事件就重渲染，没有这道锁会打出一串请求。 */
   const seasonsRequested = useRef(false);
-  const [biliNotice, setBiliNotice] = useState<string | null>(null);
+  /**
+   * B站 区的回执。**带色调**：`ok` 是「做成了」，`info` 是「这次没做成 / 还没到时候」。
+   * 一个绿对勾配「这次没有发起归集：视频还在审核」是自相矛盾的（见 ai/ui/007）。
+   */
+  const [biliNotice, setBiliNotice] = useState<{ text: string; tone: "ok" | "info" } | null>(null);
+
+  function showBiliNotice(text: string | null, tone: "ok" | "info" = "ok") {
+    setBiliNotice(text ? { text, tone } : null);
+  }
   /** 上一次观察到的徽标。用来区分「刚刚跑完」与「本来就是这状态」。 */
   const previousBiliBadges = useRef<Record<string, string>>({});
   /** 上一次观察到的任务状态。同一件事，用来区分「刚刚跑完」与「一进来就已经跑完了」。 */
@@ -205,7 +213,7 @@ export default function App() {
     previousBiliBadges.current = Object.fromEntries(
       Object.values(biliUploads).map((summary) => [summary.job_id, summary.badge])
     );
-    if (settled.length) setBiliNotice(settled.join("；"));
+    if (settled.length) showBiliNotice(settled.join("；"));
   }, [biliUploads, jobs]);
 
   useEffect(() => {
@@ -472,7 +480,7 @@ export default function App() {
    */
   async function handleBiliUpload(jobId: string, itemId: string | null) {
     setError(null);
-    setBiliNotice(null);
+    showBiliNotice(null);
     // 合集列表**不在这里读**（见 loadBiliSeasons）：开窗只做一件必须的事，读预填。
     resetSeasonList();
     try {
@@ -539,20 +547,28 @@ export default function App() {
       metadataTitle: values.metadata.title,
       itemCount: prefill.items.length
     });
-    setBiliNotice(groupNotice({ groupMode: values.groupMode, isCollection, target }));
+    showBiliNotice(groupNotice({ groupMode: values.groupMode, isCollection, target }));
   }
 
   /**
-   * 重试的两条路（重投一条稿件 / 重跑一次归集）**形状完全一样**：拿到回执里那句话当提示，
+   * 重试的两条路（重投一条稿件 / 重跑一次归集）**形状类似**：拿到回执里那句话当提示，
    * 再重拉一次徽标。`request` 与 `fallback` 是唯一的差异 —— 抄两份时，
    * 第二份漏掉 `refreshBiliUploads()` 这种错不会有任何报错。
+   *
+   * 返回「这一下是否真的跑完了」：卡片上那枚「上次重试 HH:MM:SS」落款（`BiliJobStatus`）
+   * 靠它决定要不要写。请求本身挂了就不写 —— 落款的意思是「跑完了」，不是「我点了」。
    */
-  async function runBiliRetry(request: () => Promise<{ message: string }>, fallback: string) {
+  async function runBiliRetry(
+    request: () => Promise<{ message: string }>,
+    fallback: string
+  ): Promise<boolean> {
     try {
-      setBiliNotice((await request()).message);
+      showBiliNotice((await request()).message);
       await refreshBiliUploads();
+      return true;
     } catch (err) {
       setError(biliMessage(err, fallback));
+      return false;
     }
   }
 
@@ -575,15 +591,26 @@ export default function App() {
       for (const uploadId of uploadIds) {
         results.push(await retryBiliUpload(uploadId));
       }
-      setBiliNotice(biliRetrySummary(results));
+      showBiliNotice(biliRetrySummary(results));
       await refreshBiliUploads();
     } catch (err) {
       setError(biliMessage(err, "重试失败"));
     }
   }
 
-  async function handleBiliRetrySeason(seasonRecordId: string) {
-    await runBiliRetry(() => retryBiliSeason(seasonRecordId), "重试归集失败");
+  async function handleBiliRetrySeason(seasonRecordId: string): Promise<boolean> {
+    try {
+      const result = await retryBiliSeason(seasonRecordId);
+      // **回执的色调按「这一次做了什么」选**：`grouped` 才是绿色的「做成了」；
+      // 「这次没有发起归集」（视频还在审核）与「归集还是没成功」都用信息档 ——
+      // 一个绿对勾配一句「什么都没发」正是旧版最自相矛盾的地方。
+      showBiliNotice(result.message, result.action === "grouped" ? "ok" : "info");
+      await refreshBiliUploads();
+      return true;
+    } catch (err) {
+      setError(biliMessage(err, "重试归集失败"));
+      return false;
+    }
   }
 
   function updateJobInList(job: Job) {
@@ -698,9 +725,9 @@ export default function App() {
         )}
 
         {biliNotice && (
-          <div className="notice" role="status">
-            <CheckCircle2 size={18} />
-            {biliNotice}
+          <div className={`notice ${biliNotice.tone === "info" ? "is-info" : ""}`} role="status">
+            {biliNotice.tone === "info" ? <Info size={18} /> : <CheckCircle2 size={18} />}
+            {biliNotice.text}
           </div>
         )}
 
@@ -736,7 +763,7 @@ export default function App() {
               jobs={jobs}
               selectedJobIds={selectedJobIds}
               onBatchAction={(action, deleteFiles) => void handleBatchAction(action, deleteFiles).catch((err) => setError(err.message))}
-              onBiliRetrySeason={(seasonRecordId) => void handleBiliRetrySeason(seasonRecordId)}
+              onBiliRetrySeason={handleBiliRetrySeason}
               onBiliRetryUpload={(uploadId) => void handleBiliRetryUpload(uploadId)}
               onBiliRetryMany={(uploadIds) => void handleBiliRetryMany(uploadIds)}
               onBiliUpload={(jobId, itemId) => void handleBiliUpload(jobId, itemId)}

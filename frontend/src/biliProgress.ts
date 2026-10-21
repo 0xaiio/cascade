@@ -14,7 +14,9 @@ import type { BiliUpload, BiliUploadStatus } from "./types";
  * 同样地，**B站 的审核没有进度可读**：它不是一个带百分比的队列。界面上如实说「审核中」，
  * 不编一个看起来精确的数字（那正是本仓库反复避免的那类谎报）。
  *
- * 所以这里给出的是「到哪一步了 + 这一步在等什么 + 已经等了多久」，三段信息各自都是真的。
+ * 所以这里给出的是「到哪一步了 + 这一步在等什么 + 这一步用掉了多久」，三段信息各自都是真的。
+ * 第三段**只在我们自己的那四段里计时**：审核期给的是定值（上传用时 = 终点 − 起点），
+ * 不替平台计时 —— 一个在「上传进度」标题下不断往上跳的数字会被读成「还在传」（见 ai/ui/008）。
  */
 
 export type UploadStageKey = "queued" | "transfer" | "submit" | "verify";
@@ -84,10 +86,12 @@ export interface JobUploadProgressView {
   done: number;
   /** 这一条现在的阶段。 */
   stage: UploadStageView;
-  /** 还在跑 → 界面上「已用」要每秒刷新。 */
+  /** 还在跑 → 秒表按秒推进。**跑完（含等审核）之后它必须是 false**。 */
   running: boolean;
-  /** 计时的起点（ISO）。在跑时是 `started_at`，跑完后是 `finished_at`。 */
-  since: string | null;
+  /** 这一次上传的起点（ISO）。秒表的起算点。 */
+  startedAt: string | null;
+  /** 这一次上传的终点（ISO）。跑完时才有 —— 定值时长由它与起点算。 */
+  finishedAt: string | null;
   /** 还有没有需要用户等待的东西（在跑 / 审核中）。false 时整个进度块不渲染。 */
   waiting: boolean;
 }
@@ -119,18 +123,36 @@ export function jobUploadProgress(uploads: readonly BiliUpload[]): JobUploadProg
     done,
     stage,
     running: Boolean(running),
-    since: running ? running.started_at : current.finished_at ?? current.started_at,
+    // **两个端点分开给**，不给一个「起点（在跑时）/ 终点（跑完时）」的双义值：
+    // 同一个字段在不同档位代表不同时刻，读的人迟早会算错（见 ai/ui/008）。
+    startedAt: current.started_at,
+    // 还在跑时终点**必须为空**：库里那一列可能留着上一轮的时间，拿它算时长会得出 0 或负数，
+    // 而这个值是「上传用时」，一个假的用时比不显示更糟。
+    finishedAt: running ? null : current.finished_at,
     waiting
   };
 }
 
-/** 「已用 1:23」/「已提交 12:04」。`now` 由调用方按秒推进（见 `BiliUploadProgress`）。 */
+/**
+ * 「已用 1:23」/「上传用时 0:52」。`now` 由调用方按秒推进（见 `BiliUploadProgress`）。
+ *
+ * **只在上传这一段用 `now`。** 已经跑完的（含等审核）算出来的是一个**定值**：
+ * 上传用时 = 终点 − 起点，与此刻几点无关。
+ *
+ * 为什么不能继续走：`reviewing` 时起点换成 `finished_at` 之后，那串数字量的是
+ * **等平台审核的时间**，而这块东西标题叫「上传进度」。实测 Ep 125 那次上传只用了 52 秒，
+ * 界面上却一路显示到「已提交 6:41:18」—— 用户据此判断「它还在传」。
+ * 见 ai/ui/008。
+ */
 export function uploadElapsedLabel(view: JobUploadProgressView, now: number): string | null {
   // 走 `parseServerTime` 而不是 `Date.parse`：服务端存的是 UTC，而 `Date.parse` 会把
   // 不带偏移量的串按**本地**时间解析（本机 UTC+8 ⇒ 时长凭空多出 8 小时）。见 ai/bug-fix/020。
-  const since = parseServerTime(view.since);
-  if (since === null) return null;
-  const seconds = Math.max(0, Math.round((now - since) / 1000));
-  const clock = formatClock(seconds);
-  return view.running ? `已用 ${clock}` : `已提交 ${clock}`;
+  const started = parseServerTime(view.startedAt);
+  if (started === null) return null;
+  if (view.running) {
+    return `已用 ${formatClock(Math.max(0, Math.round((now - started) / 1000)))}`;
+  }
+  const finished = parseServerTime(view.finishedAt);
+  if (finished === null) return null;
+  return `上传用时 ${formatClock(Math.max(0, Math.round((finished - started) / 1000)))}`;
 }

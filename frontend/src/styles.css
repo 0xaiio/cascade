@@ -1442,6 +1442,15 @@ th {
   font-weight: 700;
 }
 
+/* 「这一次没做成 / 还没到时候」（例如「这次没有发起归集：视频还在审核」）。
+   它既不是错误也不是成功，所以既不能用 `.alert` 的红，也不能用上面那个绿对勾：
+   一条绿底带对勾的「什么都没发」是自相矛盾的（ai/ui/007）。 */
+.notice.is-info {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1e4e8c;
+}
+
 /* ------------------------------------------------------------ 上传弹窗 */
 
 .modal-backdrop {
@@ -1695,6 +1704,15 @@ th {
   min-height: 30px;
   padding: 5px 10px;
   font-size: 12.5px;
+}
+
+/* 「上次重试 12:34:56」—— 前提不满足时，行里的文案不会变，这一格是**唯一**能证明
+   「这一下真的跑了」的东西（ai/ui/007）。等宽数字：秒数跳动时右边缘不会抖。 */
+.bili-retry-stamp {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .bili-warn-icon {

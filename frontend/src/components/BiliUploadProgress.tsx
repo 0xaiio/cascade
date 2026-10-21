@@ -3,7 +3,7 @@ import { UPLOAD_STAGES, jobUploadProgress, uploadElapsedLabel } from "../biliPro
 import type { BiliUpload } from "../types";
 
 /**
- * 任务卡片里的「上传进度」：**一条四段轨迹 + 一句在等什么 + 已经等了多久**。
+ * 任务卡片里的「上传进度」：**一条四段轨迹 + 一句在等什么 + 这一步用掉了多久**。
  *
  * 只在**需要用户等**的时候渲染（在跑，或已提交等审核）。已发布 / 失败 / 待核对不渲染 ——
  * 那些已经有结论了，再画一条走完的轨迹只是往任务卡片上添装饰。
@@ -12,25 +12,27 @@ import type { BiliUpload } from "../types";
  * 只靠 SSE 刷新的话用户看到的是一个静止的界面，分不清「在跑」还是「卡死」。
  * 计时起点来自服务端的 `started_at`，不是本地点击时刻 —— 两个时钟不一致时以服务端为准。
  *
- * **推进的条件是「在等」，不是「在跑」**：进度块在审核期也还挂着（`waiting`），
- * 那时 `running` 已经翻成 false、起点也换成了 `finished_at`。只按 `running` 推进的话，
- * 切到审核的那一刻 `now` 就冻结在最后一个 tick 上，「已提交」永远停着 ——
- * 而审核往往要等几分钟到几小时，停住的时钟看起来就是「卡住了」。见 ai/bug-fix/020。
+ * **推进的条件是「在跑」，不是「在等」**：审核期这块东西仍然挂着（`waiting`），
+ * 但那一段已经结束了，秒表必须停在**上传用时**这个定值上。
+ * 早先在这里按 `waiting` 推进（`ai/bug-fix/020` 的修法），结果是「上传进度」下面
+ * 一个数字替平台审核计时，一路涨到 `已提交 6:41:18`（实测 Ep 125，那次上传只用了 52 秒）。
+ * 「停住会被读成卡住」这个担心由**措辞**解决：定值那一档写的是「上传用时 0:52」，
+ * 是个已经发生完的时长，而不是一个还在走的钟。见 ai/ui/008。
  */
 export function BiliUploadProgress({ uploads }: { uploads: readonly BiliUpload[] }) {
   const view = jobUploadProgress(uploads);
-  // 组件渲染与否本身就由它决定（下面 `return null`），这里用它驱动时钟。
+  // 渲染与否由 `waiting` 决定（下面 `return null`），秒表只认 `running`。
   const waiting = view?.waiting ?? false;
+  const ticking = view?.running ?? false;
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    if (!waiting) return;
-    // 立刻对齐一次：`waiting` 刚变成 true 时不要把「00:00」挂在屏幕上等一秒。
-    // 这一句同时覆盖「刚开始跑」与「刚切到等审核」——后者起点变了，必须重取当前时刻。
+    if (!ticking) return;
+    // 立刻对齐一次：切到「在跑」的那一刻不要把上一轮的旧 `now` 留在屏幕上。
     setNow(Date.now());
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
-  }, [waiting]);
+  }, [ticking]);
 
   if (!view || !view.waiting) return null;
   const elapsed = uploadElapsedLabel(view, now);

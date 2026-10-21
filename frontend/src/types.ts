@@ -530,6 +530,8 @@ export interface BiliRetry {
 }
 
 export interface BiliSeasonRetry {
+  /** 这一次**实际做了什么**。`waiting` = 连归集请求都没发（前提还不满足，例如视频还在审核）。 */
+  action: "grouped" | "failed" | "waiting";
   message: string;
   season: BiliSeason;
 }

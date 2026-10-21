@@ -120,6 +120,13 @@ export const mockState = {
   biliSubmitFailure: null as string | null,
   /** 起过的 `EventSource`。测试用它发一条消息，验证「SSE 重拉后比对徽标」这条路。 */
   eventSources: [] as Array<{ onmessage: ((event: MessageEvent) => void) | null; close: unknown }>,
+  /**
+   * `POST .../group` 这一次的**实际结果**。判据是「做了什么」，不是「合集最后长什么样」：
+   * 视频还在审核时那一下**连归集请求都不会发**（`waiting`），回执与配色都要跟着它走。
+   */
+  biliSeasonRetryAction: "grouped" as "grouped" | "failed" | "waiting",
+  /** 归集重试的往返时间。非 0 时「归集中…」那一下才抓得到（真实后端要回读平台）。 */
+  biliSeasonRetryDelayMs: 0 as number,
   /** `POST .../group` 返回的合集记录。 */
   biliSeason: {
     id: "season-1",
@@ -169,6 +176,8 @@ function resetMockState(): void {
   mockState.biliLoginPollState = "waiting";
   mockState.biliLoginPollMessage = "等待扫码";
   mockState.biliRetryAction = "reupload";
+  mockState.biliSeasonRetryAction = "grouped";
+  mockState.biliSeasonRetryDelayMs = 0;
   mockState.biliSubmitFailure = null;
   mockState.eventSources = [];
   mockState.biliSeason = {
@@ -410,7 +419,20 @@ export function installAppHarness(): void {
         }
         if (url.includes("/api/bilibili/collections/") && url.endsWith("/group")) {
           mockState.biliRetrySeasonIds.push(url.split("/api/bilibili/collections/")[1].replace("/group", ""));
-          return Response.json({ message: "已重新归集。", season: mockState.biliSeason });
+          if (mockState.biliSeasonRetryDelayMs > 0) {
+            await new Promise((resolve) => window.setTimeout(resolve, mockState.biliSeasonRetryDelayMs));
+          }
+          const action = mockState.biliSeasonRetryAction;
+          return Response.json({
+            action,
+            message:
+              action === "grouped"
+                ? "已重新归集。"
+                : action === "failed"
+                  ? "归集还是没有成功"
+                  : "这次没有发起归集：视频还在 B站 排队审核，暂时没法加进合集",
+            season: mockState.biliSeason
+          });
         }
         if (url.endsWith("/api/bilibili/seasons") && init?.method !== "POST") {
           mockState.biliSeasonReads += 1;

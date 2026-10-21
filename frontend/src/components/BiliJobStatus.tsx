@@ -1,4 +1,4 @@
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 import { AlertTriangle, ExternalLink, RotateCcw } from "lucide-react";
 import { jobUploadProgress } from "../biliProgress";
 import {
@@ -30,6 +30,13 @@ import { BiliUploadProgress } from "./BiliUploadProgress";
  * 第三条是后补的：**在跑的时候必须先说话**。上传中的稿件没有错误、没有链接、也没有字幕结论，
  * 按「有话说」的判据本来是**一行都不渲染**的 —— 于是点了上传之后卡片上什么都不动。
  * 所以上传进度单独成一块（`BiliUploadProgress`），并且让「有没有话说」也把它算进去。
+ *
+ * 第四条也是后补的：**「重试归集」点下去必须在原地留下痕迹**。那次点击在前提不满足时
+ * （视频还在审核、平台还没给分P编号）**一个归集请求都不会发**，行里的文案因此一字不变；
+ * 而唯一的回执在页顶，卡片滚在视口里的时候它在一千多像素之外（实测 `.notice` 的
+ * `top = -1115px`）。于是这个按钮在用户眼里是死的。这里补两件可观察的东西：
+ * 点击过程中的「归集中…」+ 禁用态，和结束后的「上次重试 HH:MM:SS」落款。
+ * 见 ai/ui/007。
  */
 export function BiliJobStatus({
   uploads,
@@ -39,14 +46,35 @@ export function BiliJobStatus({
 }: {
   uploads: BiliJobUploads;
   onRetryUpload: (uploadId: string) => void;
-  onRetrySeason: (seasonRecordId: string) => void;
+  /** 返回 `true` 表示这一次请求真的跑完了（不论结论是归集成功、还是「还不能归集」）。 */
+  onRetrySeason: (seasonRecordId: string) => Promise<boolean>;
   onOpenVideoPage: (url: string) => void;
 }) {
   const season = uploads.season;
   const notable = uploads.uploads.filter(isNotableUpload);
   // 上传进度只在「需要等」的时候出现（在跑 / 等审核）；它也算「有话说」。
   const waiting = jobUploadProgress(uploads.uploads)?.waiting ?? false;
+  /** 归集重试的临时状态。键是那一行的 id —— 换了合集就不该沿用上一批的落款。 */
+  const [seasonRetry, setSeasonRetry] = useState<{ id: string; busy: boolean; at: string | null } | null>(
+    null
+  );
   if (!season && !notable.length && !waiting) return null;
+
+  const retrying = seasonRetry !== null && season !== null && seasonRetry.id === season.id && seasonRetry.busy;
+  const retriedAt = seasonRetry !== null && season !== null && seasonRetry.id === season.id ? seasonRetry.at : null;
+
+  async function handleRetrySeason(seasonRecordId: string) {
+    if (retrying) return;
+    setSeasonRetry({ id: seasonRecordId, busy: true, at: retriedAt });
+    const ok = await onRetrySeason(seasonRecordId);
+    // 失败时只收起「归集中…」而不写落款：落款的意思是「这一下真的跑完了」，
+    // 请求本身挂了就不该留下它（错误另有 `.alert` 那条通道）。
+    setSeasonRetry({
+      id: seasonRecordId,
+      busy: false,
+      at: ok ? new Date().toLocaleTimeString("zh-CN", { hour12: false }) : retriedAt
+    });
+  }
 
   return (
     <div className="bili-job-status">
@@ -57,10 +85,18 @@ export function BiliJobStatus({
           {season.error && <span className="bili-status-detail">{season.error}</span>}
           {season.advice && <span className="bili-status-advice">{season.advice}</span>}
           {isRetryableSeason(season.status) && (
-            <button className="ghost-button bili-retry" type="button" onClick={() => onRetrySeason(season.id)}>
-              <RotateCcw size={15} />
-              重试归集
-            </button>
+            <>
+              <button
+                className="ghost-button bili-retry"
+                type="button"
+                disabled={retrying}
+                onClick={() => void handleRetrySeason(season.id)}
+              >
+                <RotateCcw size={15} />
+                {retrying ? "归集中…" : "重试归集"}
+              </button>
+              {retriedAt && <span className="bili-retry-stamp">上次重试 {retriedAt}</span>}
+            </>
           )}
         </div>
       )}
