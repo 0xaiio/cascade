@@ -355,7 +355,13 @@ def test_runtime_download_default_update_preserves_item_resolution_override(tmp_
                 id="job-runtime-options",
                 url="https://youtu.be/playlist",
                 title="Runtime options",
-                status="queued",
+                # **必须是 `paused`，不能是 `queued`。** 这个夹具任务在 `create_app` 启动时会被
+                # 孤儿恢复扫到：`queued` 的条目会被重新排队、worker 立刻把它跑成终态，
+                # 于是 `set_runtime_download_defaults`（只处理 queued/running/paused）就跳过了它 ——
+                # 断言随之变成「什么都没变」。机器一忙（整包跑）这个竞态就稳定翻红，
+                # 单独跑却永远绿（实测：延迟 2 秒再 PUT 必红）。`paused` 是唯一同时满足
+                # 「在 active_statuses 里」且「孤儿恢复不动它」的取值，见 orphan_recovery.py 开头。
+                status="paused",
                 options_json=job_options.model_dump_json(),
                 total_items=2,
                 download_dir=str(tmp_path / "downloads"),

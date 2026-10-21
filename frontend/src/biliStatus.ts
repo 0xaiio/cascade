@@ -13,13 +13,20 @@ import type { BiliBadge, BiliSeasonStatus, BiliSubtitleState, BiliUploadStatus }
  * 判据一律是「用户此刻该做什么」，不是「这个状态长什么样」。
  */
 
-/** 重试**真的有意义**的稿件状态。
+/** 「这条稿件已经在平台上了」。**与服务端 `bili_policy.ACCEPTED_STATUSES` 同源**：
+ * 它决定徽标算不算「已上传」，也决定上传进度条里这一条算不算「做完了」。 */
+export const ACCEPTED_UPLOAD_STATUSES: readonly BiliUploadStatus[] = ["published", "reviewing"];
+
+/** 「还在跑」（含 `submitted`：命令跑完、正在对账的那一小段）。 */
+export const IN_FLIGHT_UPLOAD_STATUSES: readonly BiliUploadStatus[] = ["queued", "uploading", "submitted"];
+
+/** 「这一步没成，可以重投」。与服务端 `REJECTED_STATUSES` 加上 `unverified`。
  *
- * - `failed` / `rejected`：重新投稿。
- * - `unverified`：**只重新对账**（投稿命令已经成功过，重投等于真的投第二遍）。
+ * 已成功的那两档**不在其中** —— 服务端会把它们挡成「什么都没做」，但按钮摆在那里就是在暗示用户去点；
+ * `unverified` 在名单里也不是「重投」：服务端对它只重新对账（投稿命令已经成功过一次）。
  *
- * 已成功的那两档（`published` / `reviewing`）**不在其中** —— 服务端会把它们挡成
- * 「什么都没做」，但按钮摆在那里就是在暗示用户去点。
+ * 三组集合（accepted / in-flight / retryable）**恰好把这 8 档分完，两两不相交** ——
+ * 上传进度与按钮语义都靠这条划分，`biliStatus.test.ts` 有一条不变式钉着它。
  */
 export const RETRYABLE_UPLOAD_STATUSES: readonly BiliUploadStatus[] = ["failed", "rejected", "unverified"];
 
@@ -51,6 +58,14 @@ function includes<T extends string>(values: readonly T[], value: T): boolean {
 
 export function isRetryableUpload(status: BiliUploadStatus): boolean {
   return includes(RETRYABLE_UPLOAD_STATUSES, status);
+}
+
+export function isAcceptedUpload(status: BiliUploadStatus): boolean {
+  return includes(ACCEPTED_UPLOAD_STATUSES, status);
+}
+
+export function isInFlightUpload(status: BiliUploadStatus): boolean {
+  return includes(IN_FLIGHT_UPLOAD_STATUSES, status);
 }
 
 export function isRetryableSeason(status: BiliSeasonStatus): boolean {

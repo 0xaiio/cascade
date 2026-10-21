@@ -1362,6 +1362,118 @@ async def test_events_are_published_for_start_and_finish(tmp_path):
     await harness.manager.stop()
 
 
+async def test_a_real_upload_walks_the_progress_gates(tmp_path):
+    """走**真实回调链**：替身按 biliup 的三类行回放，进度事件应按 0.2 / 0.6 递增。
+
+    与下一条（直接调 `_store_progress`）分工不同：这条证明 `on_progress` 真的接上了 worker，
+    下一条证明「值没变就不发」这条判据。少任何一条，另一种写法都能绿着过去。
+    """
+    seen: list[dict] = []
+
+    async def capture(payload):
+        seen.append(payload)
+
+    harness = make_harness(
+        tmp_path,
+        transport=FakeBiliTransport(archives=[{"aid": 555, "bvid": "BV1a", "title": TITLE, "state": 0}]),
+    )
+    harness.broker.publish = capture
+    items = harness.seed_job("job1", "任务", 1)
+    created = await harness.manager.submit_single(
+        job_id="job1",
+        item_id=items[0]["id"],
+        meta=harness.meta(),
+        video_path=Path(items[0]["path"]),
+        make_cover=False,
+        comment="",
+    )
+    await drain(harness.manager)
+    await asyncio.sleep(0.05)
+
+    progresses = [event["progress"] for event in seen if event["type"] == "bili_upload_progress"]
+    # 三个闸门各一条：`pre_upload` → `Upload completed` → 投稿接口回成功（替身的 stdout）。
+    # 一次投稿**最多** 3 条，这正是「不按输出行发事件」的证据。
+    assert progresses == [0.2, 0.6, 0.95]
+    assert harness.upload(created.id).progress == pytest.approx(0.95)
+    await harness.manager.stop()
+
+
+async def test_progress_events_only_fire_when_the_gate_moves(tmp_path):
+    """进度事件按「值真的变了」发，不是每读一行输出都发。
+
+    `on_progress` 是每读一行 biliup 输出就回调一次，而 `parse_progress` 只在三个闸门上行
+    返回新值。不判「变没变」的话，一次投稿会往 SSE 里灌几百条同值事件，前端跟着白拉几百次摘要。
+    这里同时钉住「只增不减」：倒退的值既不写库也不发事件。
+    """
+    seen: list[dict] = []
+
+    async def capture(payload):
+        seen.append(payload)
+
+    harness = make_harness(tmp_path)
+    harness.broker.publish = capture
+    await harness.manager.start()
+    items = harness.seed_job("job1", "任务", 1)
+    with Session(harness.engine) as session:
+        row = harness.manager._upsert_upload(
+            session,
+            job_id="job1",
+            item_id=None,
+            meta=harness.meta(),
+            video_path=Path(items[0]["path"]),
+            make_cover=False,
+            comment="",
+        )
+        session.commit()
+        upload_id = row.id
+    harness.set_status(upload_id, "uploading")
+
+    harness.manager._store_progress(upload_id, 0.2)
+    harness.manager._store_progress(upload_id, 0.2)  # 闸门没动 —— 不该再有事件
+    harness.manager._store_progress(upload_id, 0.0)  # 倒退 —— 不写、不发
+    harness.manager._store_progress(upload_id, 0.6)
+    await asyncio.sleep(0.05)
+
+    events = [payload for payload in seen if payload["type"] == "bili_upload_progress"]
+    assert [event["progress"] for event in events] == [0.2, 0.6]
+    assert all(event["upload_id"] == upload_id and event["job_id"] == "job1" for event in events)
+    assert harness.upload(upload_id).progress == 0.6
+    await harness.manager.stop()
+
+
+async def test_progress_is_ignored_once_the_record_is_no_longer_uploading(tmp_path):
+    """结论已经落账之后，迟到的进度回调不许把 0.6 写回去（也不许发事件）。"""
+    seen: list[dict] = []
+
+    async def capture(payload):
+        seen.append(payload)
+
+    harness = make_harness(tmp_path)
+    harness.broker.publish = capture
+    await harness.manager.start()
+    items = harness.seed_job("job1", "任务", 1)
+    with Session(harness.engine) as session:
+        row = harness.manager._upsert_upload(
+            session,
+            job_id="job1",
+            item_id=None,
+            meta=harness.meta(),
+            video_path=Path(items[0]["path"]),
+            make_cover=False,
+            comment="",
+        )
+        session.commit()
+        upload_id = row.id
+    harness.set_status(upload_id, BiliUploadStatus.published.value, progress=1.0)
+
+    harness.manager._store_progress(upload_id, 0.6)
+    await asyncio.sleep(0.02)
+
+    assert harness.upload(upload_id).progress == 1.0
+    assert [payload for payload in seen if payload["type"] == "bili_upload_progress"] == []
+    await harness.manager.stop()
+
+
 async def test_publishing_from_a_thread_without_a_loop_is_a_noop(tmp_path):
     """进程退出时事件循环可能已经关了。丢事件可以，让 worker 抛异常不行。"""
     harness = make_harness(tmp_path)

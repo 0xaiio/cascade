@@ -1,5 +1,6 @@
 import { Fragment } from "react";
 import { AlertTriangle, ExternalLink, RotateCcw } from "lucide-react";
+import { jobUploadProgress } from "../biliProgress";
 import {
   isBadSeason,
   isBadSubtitle,
@@ -10,6 +11,7 @@ import {
   isRetryableUpload
 } from "../biliStatus";
 import type { BiliJobUploads } from "../types";
+import { BiliUploadProgress } from "./BiliUploadProgress";
 
 /**
  * 任务卡片里的 B站 上传明细与「下一步」入口。
@@ -24,6 +26,10 @@ import type { BiliJobUploads } from "../types";
  *    「什么都没做」，但按钮摆在那就是在暗示用户去点。
  * 2. **「待核对」与「失败」用不同的措辞**：前者是「我们还不知道」，后者是「这一步没成」。
  *    把两者都说成失败，用户会去重投一条**已经投上去**的稿件。
+ *
+ * 第三条是后补的：**在跑的时候必须先说话**。上传中的稿件没有错误、没有链接、也没有字幕结论，
+ * 按「有话说」的判据本来是**一行都不渲染**的 —— 于是点了上传之后卡片上什么都不动。
+ * 所以上传进度单独成一块（`BiliUploadProgress`），并且让「有没有话说」也把它算进去。
  */
 export function BiliJobStatus({
   uploads,
@@ -38,10 +44,13 @@ export function BiliJobStatus({
 }) {
   const season = uploads.season;
   const notable = uploads.uploads.filter(isNotableUpload);
-  if (!season && !notable.length) return null;
+  // 上传进度只在「需要等」的时候出现（在跑 / 等审核）；它也算「有话说」。
+  const waiting = jobUploadProgress(uploads.uploads)?.waiting ?? false;
+  if (!season && !notable.length && !waiting) return null;
 
   return (
     <div className="bili-job-status">
+      {waiting && <BiliUploadProgress uploads={uploads.uploads} />}
       {season && (
         <div className={`bili-status-line ${isBadSeason(season.status) ? "is-bad" : ""}`}>
           <span className="bili-status-label">合集：{season.status_text}</span>

@@ -364,6 +364,122 @@ describe("App · B站 上传入口", () => {
   });
 });
 
+describe("App · B站 上传进度", () => {
+  /** 距今 N 秒的 ISO 时刻：计时是从**服务端**那个起点算的，不是从点击那一刻。 */
+  function secondsAgo(seconds: number): string {
+    return new Date(Date.now() - seconds * 1000).toISOString();
+  }
+
+  /** 某一步的状态：`is-done` / `is-active` / 空。按标签取，不按下标 —— 下标会随节点顺序变。 */
+  function stepState(label: string): string {
+    const steps = [...document.querySelectorAll(".bili-step")];
+    const step = steps.find((element) => element.textContent?.includes(label));
+    expect(step, `找不到「${label}」这一节`).toBeDefined();
+    return step!.className;
+  }
+
+  test("上传中：卡片里说清在第几步、在等什么、已经等了多久", async () => {
+    mockState.jobs = [downloadedJob()];
+    mockState.biliUploads = [
+      jobUploads(
+        [{ ...biliUploadPayload, status: "uploading", status_text: "上传中", progress: 0.2, bvid: null, video_url: null, started_at: secondsAgo(65) }],
+        { badge: "uploading", badge_text: "上传中", badge_tone: "busy" }
+      )
+    ];
+    render(<App />);
+
+    expect(await screen.findByText("上传进度")).toBeInTheDocument();
+    expect(screen.getByText("正在传输视频文件")).toBeInTheDocument();
+    // 「已用」是本地按秒推进的：biliup 在传输这一段可能几分钟不发一条输出，
+    // 只靠 SSE 刷新的话界面会静止，用户分不清是在跑还是卡死。
+    expect(screen.getByText(/已用 01:0[4-6]/)).toBeInTheDocument();
+    // 排队已走完、传输进行中 —— 两者不能都亮，也不能都灰。
+    expect(stepState("排队")).toContain("is-done");
+    expect(stepState("传输")).toContain("is-active");
+    expect(stepState("提交")).not.toContain("is-active");
+  });
+
+  test("单视频不显示「第几条」；合集显示序号与已确认条数", async () => {
+    mockState.jobs = [downloadedPlaylistJob()];
+    mockState.biliUploads = [
+      jobUploads(
+        [
+          { ...biliUploadPayload, id: "bili-p1", item_id: "item-playlist-1", title: "Part one", status: "published", progress: 1 },
+          {
+            ...biliUploadPayload,
+            id: "bili-p2",
+            item_id: "item-playlist-2",
+            title: "Part two",
+            status: "uploading",
+            status_text: "上传中",
+            progress: 0.2,
+            bvid: null,
+            video_url: null,
+            started_at: secondsAgo(10)
+          }
+        ],
+        { job_id: "job-playlist", badge: "uploading", badge_text: "上传中", badge_tone: "busy" }
+      )
+    ];
+    render(<App />);
+
+    expect(await screen.findByText(/第 2\/2 条 · Part two/)).toBeInTheDocument();
+    expect(screen.getByText(/已有 1\/2 条确认在平台上/)).toBeInTheDocument();
+  });
+
+  test("审核中：四个节点走完，明说没有百分比可读", async () => {
+    mockState.jobs = [downloadedJob()];
+    mockState.biliUploads = [
+      jobUploads(
+        [
+          {
+            ...biliUploadPayload,
+            status: "reviewing",
+            status_text: "审核中",
+            progress: 0.95,
+            started_at: secondsAgo(900),
+            finished_at: secondsAgo(720)
+          }
+        ],
+        { badge: "uploading", badge_text: "上传中", badge_tone: "busy" }
+      )
+    ];
+    render(<App />);
+
+    expect(await screen.findByText("已提交，B 站 审核中")).toBeInTheDocument();
+    // 计时换成「已提交」：审核等的是平台，不是我们的传输。
+    expect(screen.getByText(/已提交 12:0\d/)).toBeInTheDocument();
+    // 审核不是第五步：四个节点全都算走完，不能留一个在闪。
+    for (const label of ["排队", "传输", "提交", "核对"]) {
+      expect(stepState(label)).toContain("is-done");
+    }
+    expect(document.querySelector(".bili-step.is-active")).toBeNull();
+  });
+
+  test("已发布 / 失败 / 待核对都不显示进度块（已经有结论了）", async () => {
+    const cases = [
+      ["uploaded", "已上传", "ok", [biliUploadPayload], /B 站已上传；点击进入 B 站 Running video/],
+      ["failed", "上传失败", "bad", [biliUploadFailedPayload], /B站：上传失败 Running video/],
+      [
+        "unverified",
+        "待核对",
+        "warn",
+        [{ ...biliUploadPayload, status: "unverified" as const, progress: 0.95 }],
+        /B 站还没确认这条稿件/
+      ]
+    ] as const;
+    for (const [badge, text, tone, uploads, name] of cases) {
+      mockState.jobs = [downloadedJob()];
+      mockState.biliUploads = [jobUploads([...uploads], { badge, badge_text: text, badge_tone: tone })];
+      const { unmount } = render(<App />);
+      // 以**按钮的徽标文案**为「数据已经到了」的锚点：比「等一拍」可靠。
+      await screen.findByRole("button", { name });
+      expect(screen.queryByText("上传进度")).toBeNull();
+      unmount();
+    }
+  });
+});
+
 describe("App · B站 上传表单（单视频）", () => {
   test("prefills every field from the server and takes the limits from it too", async () => {
     const { dialog } = await openSingleDialog();

@@ -1212,18 +1212,43 @@ class BiliManager:
 
     # ------------------------------------------------------------ 落账
     def _store_progress(self, upload_id: str, value: float) -> None:
+        """把 biliup 的粗粒度进度写进库，**并且只在真的往前走了才发事件**。
+
+        `on_progress` 是**每读一行输出就回调一次**，但 `parse_progress` 只在三个闸门上行才
+        返回新值（`pre_upload` / `Upload completed` / 投稿成功）。每行都发事件会让 SSE 白转
+        几百次、前端白拉几百次摘要；按「值真的变了」发，一次投稿最多 3 条。
+        """
+        job_id: str | None = None
+        after = 0.0
         with self._progress_lock:
             try:
                 with Session(self.engine) as session:
                     row = session.get(BiliUpload, upload_id)
                     if row is None or row.status != BiliUploadStatus.uploading.value:
                         return
-                    row.progress = max(row.progress, value)
+                    before = row.progress
+                    after = max(before, value)
+                    if after <= before:
+                        return
+                    row.progress = after
                     row.updated_at = utc_now()
                     session.add(row)
                     session.commit()
+                    job_id = row.job_id
             except Exception:  # noqa: BLE001 - 进度写不进去不该中断正在跑的投稿
                 logger.exception("bili 上传：写进度失败 upload_id=%s", upload_id)
+                return
+        # 发事件放在锁外：`_publish_threadsafe` 自己会 schedule 回事件循环，
+        # 没有必要在持锁期间穿过线程边界。
+        if job_id is not None:
+            self._publish_threadsafe(
+                {
+                    "type": "bili_upload_progress",
+                    "job_id": job_id,
+                    "upload_id": upload_id,
+                    "progress": after,
+                }
+            )
 
     def _store_result(self, upload_id: str, result: UploadResult) -> None:
         """落一条稿件的最终结论。

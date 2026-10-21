@@ -1707,6 +1707,113 @@ th {
   text-decoration: underline;
 }
 
+/* ---------------------------------------------------------------- 上传进度
+   四个**等宽段**而不是一根百分比条：`biliup` 只管阶段不给字节数，一根停在 20% 的条
+   会被读成「卡死了」（见 frontend/src/biliProgress.ts 开头）。段宽相等是有意的 ——
+   四段代表四步，不代表四段时间。 */
+.bili-progress {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid #dbe4f2;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.bili-progress-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+/* 合集标题可能很长：这一格在 grid 里，`min-width: auto` 不允许它被压窄（ai/ui/002），
+   所以显式给 0 + 任意断行，而不是靠 overflow 藏起来。 */
+.bili-progress-count {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #475569;
+  font-weight: 700;
+}
+
+.bili-progress-clock {
+  margin-left: auto;
+  color: #475569;
+  font-weight: 800;
+  /* 秒数每秒跳动，等宽数字可以避免右边缘跟着抖。 */
+  font-variant-numeric: tabular-nums;
+}
+
+.bili-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bili-step {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: #94a3b8;
+  font-size: 11.5px;
+  font-weight: 800;
+}
+
+.bili-step-dot {
+  height: 4px;
+  border-radius: 999px;
+  background: #e6edf7;
+}
+
+.bili-step.is-done {
+  color: #0e7a56;
+}
+
+.bili-step.is-done .bili-step-dot {
+  background: #34d399;
+}
+
+.bili-step.is-active {
+  color: #1d4ed8;
+}
+
+/* 进行中的那一段：一道扫过去的亮带。**它是「还在动」的凭据** ——
+   传输阶段可能好几分钟没有事件，静止的界面分不清「在跑」还是「没反应」。 */
+.bili-step.is-active .bili-step-dot {
+  background-image: linear-gradient(90deg, #bfdbfe 0%, #1d4ed8 50%, #bfdbfe 100%);
+  background-size: 200% 100%;
+  animation: bili-progress-sweep 1.4s linear infinite;
+}
+
+@keyframes bili-progress-sweep {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bili-step.is-active .bili-step-dot {
+    animation: none;
+    background-image: none;
+    background-color: #1d4ed8;
+  }
+}
+
+.bili-progress-detail {
+  color: #334155;
+  font-weight: 700;
+}
+
+.bili-progress-detail.is-bad {
+  color: #b42318;
+}
+
 /* ------------------------------------------------- 设置面板里的 B站 区 */
 
 .bili-login-section {

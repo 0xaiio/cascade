@@ -262,7 +262,7 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 
 界面上让用户选**新建合集 / 加入已有合集 / 不归集**，但后端的新逻辑只有一行赋值：
 `submit_collection` / `submit_single` 把用户选中的编号写进 [BiliSeason.season_id](../backend/app/models.py#L195)，
-而 [_group_work](../backend/app/bili_manager.py#L1287) 本来就读它当 `existing_season_id`
+而 [_group_work](../backend/app/bili_manager.py#L1312) 本来就读它当 `existing_season_id`
 并据此跳过 `create_season`。**复用既有的「重试不重复建合集」机制，而不是另开一条归集分支** ——
 另开一条就要把「建集 + 加集 + 失败重试 + 状态收敛」再实现一遍。
 
@@ -303,7 +303,7 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 **「不归集」在两条路径上的落库行为相反，这是刻意的**：
 
 - **合集**：落成终态 [skipped](../backend/app/models.py#L129) 而不是 `pending`。
-  [_maybe_group](../backend/app/bili_manager.py#L1262) 只自动归集 `pending`，留 `pending` 会让
+  [_maybe_group](../backend/app/bili_manager.py#L1287) 只自动归集 `pending`，留 `pending` 会让
   「不归集」根本不管用，且界面上挂一个永远不会结束的徽标。但记录**照建** —— 不落库的话界面上
   什么都不显示，用户分不清是「没归集」还是「还没开始归」。
 - **单视频**：`_upsert_season(create_if_missing=False)` **一条记录都不建**。单视频的默认恰好
