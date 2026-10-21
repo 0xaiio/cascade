@@ -37,9 +37,11 @@
 
 | 对比 | 本地领先远程 | 远程领先本地 |
 | --- | --- | --- |
-| `main` vs `origin/main` | **7** | 0 |
+| `main` vs `origin/main` | **0** | 0 |
 
-即：本地 `main` 比 `origin/main` **多 7 个提交（尚未推送）**。其余四个远程分支均**完全落后于** main（0 领先）。
+生成本文时本地 `main` 曾领先 `origin/main` **7** 个提交；该 7 个提交（含本文与
+[CHANGELOG.md](CHANGELOG.md) 的入库、按 changelog 补齐的文档更新）已于 2026-10-21 推送，
+现两端一致（`ls-remote` 核对：`refs/heads/main` = 本地 HEAD）。其余四个远程分支均**完全落后于** main（0 领先）。
 
 ## 四、自视频基准 `0dd4b5d` 以来的提交分布
 
@@ -51,6 +53,8 @@
 1. **制作新视频用 `main` HEAD**，不要基于任何其它分支——其它分支都已过时且内容被 main 完全覆盖。
 2. **清理过期分支**：`bilibili`、`fix/item-level-concurrency`、`fix/progress-percent-stuck`、
    `feature/audit-format-metadata` 均已并入 main，可删除（尤其是远程跟踪分支），避免混淆。
-3. **推送本地 main**：本地领先 `origin/main` 7 个提交，制作前建议先 `git push` 保持远端同步
-   （注意：本仓库 SSH 22 端口曾被本机代理拦截，必要时改用 `git push https://github.com/0xaiio/cascade.git main`）。
-4. 如需在视频里说「最新版」，可在文案中标注版本锚点为当前 `main` 的 HEAD 提交 `614b06e`。
+3. **推送本地 main**：已于 2026-10-21 完成（本地与 `origin/main` 一致）。若之后再产生新提交，
+   制作前建议先 `git push` 保持远端同步（注意：本仓库 SSH 22 端口曾被本机代理拦截，
+   必要时改用 `git push https://github.com/0xaiio/cascade.git main`）。
+4. 如需在视频里说「最新版」，可在文案中标注版本锚点为当前 `main` 的 HEAD 提交 `614b06e`
+   （生成时的 HEAD；其后的文档更新提交见 `git log`）。
