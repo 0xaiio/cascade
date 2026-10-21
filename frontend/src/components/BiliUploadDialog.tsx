@@ -6,11 +6,13 @@ import {
   GROUP_MODE_EXISTING,
   GROUP_MODE_NEW,
   GROUP_MODE_NONE,
+  charBudget,
+  collectionTitleBudget,
   countTags,
   findChosenSeason,
   groupHint,
   localPreflight,
-  renderTemplate
+  renderItemTitle
 } from "../biliForm";
 import { errorMessage } from "../errors";
 import type { BiliGroupMode, BiliMetadata, BiliPrefill, BiliPrefillItem, BiliSeasonList } from "../types";
@@ -168,15 +170,35 @@ export function BiliUploadDialog({
         comment,
         limits,
         isCollection,
+        // 合集场景下标题判据量的是**渲染后的每一条**，所以必须把条目传进去 ——
+        // 只量模板会让 `{title}` 这种短模板永远「合规」，而渲染后可能超出几十个字。
+        items: prefill.items,
+        jobTitle: prefill.job_title,
         groupMode,
         seasonId,
         seasonsLoaded,
         chosenSeason
       }),
-    [chosenSeason, comment, groupMode, isCollection, limits, metadata, seasonId, seasonsLoaded]
+    [chosenSeason, comment, groupMode, isCollection, limits, metadata, prefill.items, prefill.job_title, seasonId, seasonsLoaded]
   );
   const notReady = prefill.items.filter((item) => !item.ready);
   const blocked = localProblems.length > 0 || notReady.length > 0;
+
+  // 字段旁边那几个 `71/80` 的**状态**（不只是数字）。
+  const titleB = charBudget(metadata.title, limits.title);
+  const descB = charBudget(metadata.desc, limits.desc);
+  const tagsB = charBudget(metadata.tags, limits.tags);
+  const commentB = charBudget(comment, limits.comment);
+  // 合集的标题预算：`template` 是用户正在编辑的那串字，`longest` 是渲染后最长的一条。
+  // 只有后者参与判据（服务端不校验模板），但前者要显示出来 —— 用户得知道自己在打多少字。
+  const renderedTitles = isCollection
+    ? collectionTitleBudget({
+        template: metadata.title,
+        items: prefill.items,
+        jobTitle: prefill.job_title,
+        limits
+      })
+    : null;
   const groupHintText = groupHint({
     groupMode,
     seasonTitle,
@@ -184,15 +206,14 @@ export function BiliUploadDialog({
     isCollection
   });
 
-  /** 逐条预览要提交的标题。**只是预览** —— 真正提交的内容由服务端渲染（见 `biliForm.renderTemplate`）。 */
+  /** 逐条预览要提交的标题。**只是预览** —— 真正提交的内容由服务端渲染。
+   *  与预检共用 `renderItemTitle`：两处若各拼一次参数，就会出现「预览 79 字、判据 85 字」。 */
   function previewTitle(item: BiliPrefillItem): string {
-    return renderTemplate({
+    return renderItemTitle({
       template: metadata.title,
-      index: item.index,
-      title: item.source_title,
+      item,
       count: prefill.items.length,
-      job: prefill.job_title,
-      source: item.source_url
+      jobTitle: prefill.job_title
     });
   }
 
@@ -253,10 +274,27 @@ export function BiliUploadDialog({
               value={metadata.title}
               onChange={(event) => setMetadata({ ...metadata, title: event.target.value })}
               placeholder={isCollection ? "{title}" : "视频标题"}
+              // 语义化的「这一格填得不对」：读屏、以及 CSS（`[aria-invalid="true"]`）都用得上。
+              aria-invalid={titleB.over > 0 || undefined}
+              aria-describedby="bili-title-budget"
             />
-            <span className="char-count">
-              {metadata.title.length}/{limits.title}
+            <span id="bili-title-budget" className={titleB.over > 0 ? "char-count is-over" : "char-count"}>
+              {titleB.label}
+              {titleB.warning ? ` · ${titleB.warning}` : ""}
             </span>
+            {/* 合集才有这一行，而且它是**真正的判据**：服务端量的是渲染后的每一条。
+                `{title}` 这样的模板永远只有 7 个字，只看上一行会给出一个假的「没问题」。 */}
+            {renderedTitles?.longest && (
+              <span
+                className={renderedTitles.longest.budget.over > 0 ? "char-count is-over" : "char-count"}
+              >
+                {`渲染后最长 ${renderedTitles.longest.budget.label}（第 ${renderedTitles.longest.index} 条`}
+                {renderedTitles.longest.budget.over > 0
+                  ? `，超出 ${renderedTitles.longest.budget.over} 个字`
+                  : ""}
+                ）
+              </span>
+            )}
           </div>
 
           <div className="field">

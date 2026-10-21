@@ -1536,6 +1536,22 @@ th {
   line-height: 1.4;
 }
 
+/* 超限的计数：与下面那份问题列表同一个红（`#b42318`）—— 两处说的是**同一件事**
+   （这个字段超限了），用两个颜色会让用户以为它们是两个问题。
+   只改颜色与字重，不挪位置（`justify-self` 在上一档，别在这里重复）。 */
+.char-count.is-over {
+  color: #b42318;
+  font-weight: 700;
+}
+
+/* 「这一格填得不对」的语义标记。边框只染上传表单里的输入框：`aria-invalid`
+   目前只有 B站 上传表单在写（标题超限时），全局改会连解析面板的输入框一起染上，
+   而那里没有这个语义。 */
+.modal-body input[aria-invalid="true"],
+.modal-body textarea[aria-invalid="true"] {
+  border-color: #b42318;
+}
+
 .bili-preview-wrap {
   max-height: 260px;
   overflow: auto;

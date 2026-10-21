@@ -38,7 +38,7 @@
 | FR-16 | 已配置的 cookies 可被校验：离线检查格式/域名/鉴权项/过期，可选联网确认登录态，输出「未配置 / 未登录 / 已登录」三档结论与证据。 | [`cookie_health.py`](../backend/app/cookie_health.py#L234)、[`POST /api/cookies/verify`](../backend/app/routers/cookies.py#L24) |
 | FR-17 | 依赖与 JS 运行时状态可在不重启应用的前提下重新探测，并把结论回显到界面。 | [`POST /api/diagnostics/runtime`](../backend/app/routers/diagnostics.py#L52)、[`runtime_env.py`](../backend/app/runtime_env.py#L58) |
 | FR-18 | 界面上的解释性内容默认收起，挂在其所解释的对象旁边，按需展开；展开时不抢占输入焦点、不阻塞其他操作，钉住状态可记忆。 | [`HelpPopover`](../frontend/src/components/HelpPopover.tsx#L42)、[用户手册：辅助说明的查看方式](user-manual.md#辅助说明的查看方式) |
-| FR-19 | 支持把**已下载完成**的视频投稿到 B站：点任务行/条目行上的 B站 上传按钮弹出表单，默认值由后端预填（标题、分区、标签、简介），用户可改后确认。 | [`bili_create_upload`](../backend/app/routers/bilibili.py#L185)、[`BiliUploadDialog`](../frontend/src/components/BiliUploadDialog.tsx#L63) |
+| FR-19 | 支持把**已下载完成**的视频投稿到 B站：点任务行/条目行上的 B站 上传按钮弹出表单，默认值由后端预填（标题、分区、标签、简介），用户可改后确认。 | [`bili_create_upload`](../backend/app/routers/bilibili.py#L185)、[`BiliUploadDialog`](../frontend/src/components/BiliUploadDialog.tsx#L65) |
 | FR-20 | 支持把整个 playlist 任务按**模板**批量投稿：标题/简介可用 `{title}` `{index}` `{count}` `{job}` 占位符，后端为每条视频各渲染一份，逐条串行投稿，全部确认发布后自动归入同一个 B站 合集。 | [`MetadataTemplate`](../backend/app/bili_meta.py#L263)、[`bili_create_collection`](../backend/app/routers/bilibili.py#L244) |
 | FR-21 | 提交前校验平台硬限（标题 ≤ 80、简介 ≤ 250、标签总长 < 200 且最多 10 个、单个标签 ≤ 20、评论 ≤ 1000）；**超限只报错不截断**，合集要把问题定位到第几条。 | [`validate`](../backend/app/bili_meta.py#L353)、[`limits`](../backend/app/bili_meta.py#L338) |
 | FR-22 | 提供 B站 环境体检（投稿工具是否可用、ffmpeg、登录态、缺项清单），每条结论文案必须自带「下一步」；并支持修复投稿工具、扫码登录、导入已有登录文件三种前置动作。 | [`bili_status`](../backend/app/routers/bilibili.py#L67)、[`BiliLoginSection`](../frontend/src/components/BiliLoginSection.tsx#L32) |
@@ -64,6 +64,7 @@
 
 | FR-42 | 投稿失败必须按**失败语句**分类，不能按成功日志里也会出现的名词分类（`登录` / `cookie` 这类裸词曾在「通过cookie登录」上命中，把标题错误报成登录失效）。平台错误码 `21104`（标题/文件名超过 80 字符）单独成一条；B站 的 App 接口把**视频文件名**（不含扩展名）也按 80 字符校验，超过时用一个同目录**硬链接**换短名上传，原文件不动、也不复制；硬链接不可用时退回原名并如实说明。 | [`classify_failure`](../backend/app/bili_policy.py#L275)、[`_short_name_video`](../backend/app/bili_upload.py#L228) |
 | FR-43 | 「重新体检」必须有可观察的反馈：点下去立刻禁用并显示「体检中…」，结束后写入「上次体检 HH:MM:SS」；账号探测 12 秒未返回就退回**离线**体检（工具与登录文件的存在性）并说明原因，不允许停在无响应状态。 | [`runHealthCheck`](../frontend/src/biliHealth.ts#L48)、[`BiliLoginSection`](../frontend/src/components/BiliLoginSection.tsx#L32) |
+| FR-44 | 投稿表单要能**在提交前**就看出标题超没超：字段旁给 `已用/上限`，超限时追加「超出 N 个字」并标 `aria-invalid`，输入**不截断**。合集量的是**渲染后的每一条**（不是模板本身 —— `{title}` 这种 7 个字的模板永远「合规」，只量模板等于什么都没查），另给一行「渲染后最长 N/上限（第 X 条，超出 M 个字）」；多条超限时先说有几条、再点名超出最多的那条；条目还没读到时不报假警。上限取自 `prefill.limits`，**服务端 `validate` 仍是唯一权威**。 | [`charBudget`](../frontend/src/biliForm.ts#L129)、[`collectionTitleBudget`](../frontend/src/biliForm.ts#L180)、[`BiliUploadDialog`](../frontend/src/components/BiliUploadDialog.tsx#L65) |
 
 ## 非功能需求
 

@@ -577,6 +577,34 @@ describe("App · B站 上传表单（单视频）", () => {
     expect(within(dialog).getByRole("button", { name: "开始上传" })).toBeDisabled();
   });
 
+  test("says how many characters over right next to the title box, not only in the list below", async () => {
+    const { user, dialog } = await openSingleDialog();
+
+    const title = within(dialog).getByLabelText("标题");
+    await user.clear(title);
+    await user.type(title, "标".repeat(90));
+
+    // 原先四个计数只渲染数字，超限与合规长得一模一样（同一档灰字），
+    // 用户得先读数字、再去别处比对上限才知道自己超了。
+    const budget = document.getElementById("bili-title-budget") as HTMLElement;
+    expect(budget).toHaveTextContent("90/80");
+    expect(budget).toHaveTextContent("超出 10 个字");
+    expect(budget.className).toContain("is-over");
+    // 同一个事实也要对读屏与 CSS 可见（不是只给眼睛看的红字）。
+    expect(title).toHaveAttribute("aria-invalid", "true");
+  });
+
+  test("a title within the limit carries no warning at all", async () => {
+    const { dialog } = await openSingleDialog();
+
+    const budget = document.getElementById("bili-title-budget") as HTMLElement;
+    expect(budget).toHaveTextContent("22/80");
+    expect(budget.className).not.toContain("is-over");
+    expect(within(dialog).getByLabelText("标题")).not.toHaveAttribute("aria-invalid");
+    // 单视频没有「渲染后」这回事 —— 那一行只为合集存在。
+    expect(within(dialog).queryByText(/渲染后最长/)).not.toBeInTheDocument();
+  });
+
   test("defaults to 转载 and prefills the original link of that very video", async () => {
     const { dialog } = await openSingleDialog();
 
@@ -732,6 +760,79 @@ describe("App · B站 上传表单（合集）", () => {
 
     expect(within(dialog).getByText("第01集：Part one")).toBeInTheDocument();
     expect(within(dialog).getByText("第02集：Part two")).toBeInTheDocument();
+  });
+
+  /**
+   * 标题长度：判据量的是**渲染后的每一条**，不是模板本身。
+   *
+   * 夹具里那两条原标题一样长（都是 8 个字），验不出「点名的是哪一条」，
+   * 所以这里把第 2 条换成一个明显更长的标题 —— 合集的真实数据正是这样长短不一的。
+   */
+  const TITLE_LIMIT = biliStatusPayload.limits.title;
+  const LONG_SECOND_TITLE = "Part two that is much longer than the first one";
+  /** 模板本身 51 个字，远在上限之内；替换掉占位符之后第 2 条会超。 */
+  const TEMPLATE_WITH_SOURCE = "{job} · 第 {index}/{count} 集 · {title} · 原视频：{source}";
+
+  function collectionWithLongSecondItem() {
+    return {
+      ...biliPrefillCollectionPayload,
+      items: [
+        { ...biliPrefillCollectionPayload.items[0], ready: true },
+        { ...biliPrefillCollectionPayload.items[1], source_title: LONG_SECOND_TITLE, ready: true }
+      ]
+    };
+  }
+
+  /** 第 N 条按模板渲染后的标题。**用替换算出来**，不手数字符 —— 数错一个就变成另一个断言。 */
+  function renderedSecond(template: string, index: string, source: string): string {
+    return template
+      .replace("{job}", "Playlist batch")
+      .replace("{index}", index)
+      .replace("{count}", "2")
+      .replace("{title}", LONG_SECOND_TITLE)
+      .replace("{source}", source);
+  }
+
+  test("checks the length of every rendered title, not the length of the template", async () => {
+    const { dialog } = await openCollectionDialog(collectionWithLongSecondItem());
+
+    const title = within(dialog).getByLabelText("标题模板");
+    fireEvent.change(title, { target: { value: TEMPLATE_WITH_SOURCE } });
+
+    const rendered = renderedSecond(TEMPLATE_WITH_SOURCE, "02", "https://youtu.be/two");
+    const over = rendered.length - TITLE_LIMIT;
+    // 前提：这一条确实超了，否则整条用例都在断言一个空集。
+    expect(over).toBeGreaterThan(0);
+
+    // 输入框旁边就写明「渲染后最长多少、第几条、超几个字」。
+    expect(
+      within(dialog).getByText(`渲染后最长 ${rendered.length}/${TITLE_LIMIT}（第 2 条，超出 ${over} 个字）`)
+    ).toBeInTheDocument();
+    // 问题列表点名**渲染后**超长的那一条（服务端回的是原始标题，前端给的是渲染结果）。
+    expect(within(dialog).getByText(`第 2 条「${rendered}」渲染后超出 ${over} 个字`)).toBeInTheDocument();
+    // 第 1 条渲染后是合规的，不该被一起点名。
+    expect(within(dialog).queryByText(/第 1 条「/)).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "开始上传全部" })).toBeDisabled();
+
+    // 改回一个短模板就该放行 —— 只断言「按钮会灰」等于没测判据。
+    fireEvent.change(title, { target: { value: "{title}" } });
+    await waitFor(() =>
+      expect(within(dialog).getByRole("button", { name: "开始上传全部" })).toBeEnabled()
+    );
+    expect(within(dialog).queryByText(/渲染后超出/)).not.toBeInTheDocument();
+    expect(within(dialog).getByText(`渲染后最长 ${LONG_SECOND_TITLE.length}/${TITLE_LIMIT}（第 2 条）`)).toBeInTheDocument();
+  });
+
+  test("a template that fits everywhere leaves the rendered line unmarked", async () => {
+    const { dialog } = await openCollectionDialog(collectionWithLongSecondItem());
+
+    // 默认模板渲染出来的两条都远在上限之内。
+    const line = within(dialog).getByText(/渲染后最长/);
+    expect(line.className).not.toContain("is-over");
+    expect(line).not.toHaveTextContent("超出");
+    // 两条渲染后一样长时点名第 1 条（用户从上往下改，第一条更有指导性）。
+    const first = "Playlist batch · 第 01/2 集";
+    expect(within(dialog).getByText(`渲染后最长 ${first.length}/${TITLE_LIMIT}（第 1 条）`)).toBeInTheDocument();
   });
 
   test("tells which subtitle each entry will carry before submitting", async () => {

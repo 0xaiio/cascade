@@ -72,4 +72,18 @@ describe("styles.css · 源文不变式", () => {
       expect(body).not.toMatch(/text-overflow\s*:/);
     }
   });
+
+  // 标题超限要在框旁边就看得出来（ai/bug-fix/019）。jsdom 量不出「红没红」，
+  // 但能盯住根因对应的那条声明：`.char-count.is-over` 这一档必须存在，
+  // 且**只改颜色与字重** —— 位置由 `.field` 的 grid 与上一档的 `justify-self` 决定，
+  // 在这里重复写版式正是 ui/001 里「基类声明在变体之后静默吃掉变体重置」那类病的入口。
+  test("gives the over-limit character count its own tone", () => {
+    const bodies = cssRuleBodies(stylesCss);
+    const over = bodies.get(".char-count.is-over") ?? [];
+    expect(over.length).toBeGreaterThan(0);
+    expect(over.join("\n")).toMatch(/color\s*:/);
+    for (const body of over) {
+      expect(body).not.toMatch(/(?<![-\w])(justify-self|margin|padding|width|font-size)\s*:/);
+    }
+  });
 });

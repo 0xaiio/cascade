@@ -7,6 +7,8 @@ import {
   GROUP_MODE_EXISTING,
   GROUP_MODE_NEW,
   GROUP_MODE_NONE,
+  charBudget,
+  collectionTitleBudget,
   countTags,
   findChosenSeason,
   groupHint,
@@ -14,8 +16,10 @@ import {
   localPreflight,
   longestTag,
   noticeTarget,
+  renderItemTitle,
   renderTemplate
 } from "./biliForm";
+import type { TitleSourceItem } from "./biliForm";
 import type { BiliGroupMode, BiliLimits, BiliMetadata, BiliSeasonOption } from "./types";
 
 /**
@@ -43,12 +47,34 @@ function preflight(overrides: Partial<Parameters<typeof localPreflight>[0]> = {}
     comment: "",
     limits: LIMITS,
     isCollection: false,
+    // 合集场景下标题判据量的是**渲染后的每一条**，所以这两项是判据的一部分 ——
+    // 单视频传空数组即可（它量的是标题本身，不看 items）。
+    items: [],
+    jobTitle: "任务",
     groupMode: GROUP_MODE_NONE,
     seasonId: null,
     seasonsLoaded: false,
     chosenSeason: undefined,
     ...overrides
   });
+}
+
+/**
+ * 一组条目：第 2 条的原始标题正好压在上限上，第 1 条很短。
+ *
+ * 用它来验「报的是渲染后最糟的那条」—— 若判据错量成模板本身，这两条的差别就消失了。
+ */
+const ITEMS: readonly TitleSourceItem[] = [
+  { index: 1, source_title: "短", source_url: "https://youtu.be/1" },
+  { index: 2, source_title: "字".repeat(LIMITS.title), source_url: "https://youtu.be/2" }
+];
+
+/** 合集场景的预检。`items` 是判据的一部分，所以显式给。 */
+function collectionPreflight(
+  title: string,
+  overrides: Partial<Parameters<typeof localPreflight>[0]> = {}
+): string[] {
+  return preflight({ isCollection: true, metadata: metadata({ title }), items: ITEMS, ...overrides });
 }
 
 function seasonOption(seasonId: number, title = `合集 ${seasonId}`): BiliSeasonOption {
@@ -176,6 +202,126 @@ describe("模板预览", () => {
   test("标题里带花括号不会让预览抛异常", () => {
     const out = renderTemplate({ template: "{title}", index: 1, title: "a{b}c", count: 1, job: "j", source: "" });
     expect(out).toBe("a{b}c");
+  });
+});
+
+/* ================================================================ 字符预算 */
+describe("字符预算", () => {
+  test("超没超与数字一起算出来：合成一个字符串，不分别渲染", () => {
+    const ok = charBudget("字".repeat(LIMITS.title), LIMITS.title);
+    expect(ok.over).toBe(0);
+    expect(ok.warning).toBe("");
+    expect(ok.label).toBe(`${LIMITS.title}/${LIMITS.title}`);
+
+    const over = charBudget("字".repeat(LIMITS.title + 3), LIMITS.title);
+    expect(over.over).toBe(3);
+    expect(over.warning).toBe("超出 3 个字");
+    expect(over.label).toBe(`${LIMITS.title + 3}/${LIMITS.title}`);
+  });
+
+  test("over 永不为负 —— 「-3」会被读成「还剩 3」", () => {
+    expect(charBudget("字", LIMITS.title).over).toBe(0);
+    expect(charBudget("", LIMITS.title).over).toBe(0);
+  });
+});
+
+/* ============================================================ 合集的标题判据 */
+/**
+ * 合集量的是**渲染后的每一条**，不是模板本身。
+ *
+ * 这一组是「投稿时就要能看出标题超限」这件事的真正缺口所在：单视频那一档
+ * （标题框旁边那个 `71/80`）改动前已经有了，而合集只量模板 —— `{title}` 这种
+ * 7 个字的模板永远合规，预检给出一个**假的通过**，用户点提交后才吃到 400，
+ * 或者更糟：提交成功、传到一半才失败。判据见 `ai/bug-fix/019`。
+ */
+describe("合集标题：判据量的是渲染后的每一条", () => {
+  test("模板合规、渲染后超限 —— 必须报出来，并点名是哪一条", () => {
+    const template = "P {title}";
+    // 前提：模板本身远在上限之内（否则这条测的就不是「渲染后」了）。
+    expect(template.length).toBeLessThan(LIMITS.title);
+
+    const problems = collectionPreflight(template);
+
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain("第 2 条");
+    // 第 2 条渲染后 = "P " + 上限那么多个字 → 超出 2 个。
+    expect(problems[0]).toContain("超出 2 个字");
+  });
+
+  test("只量模板就会给出假的通过 —— 这是本函数存在的唯一理由", () => {
+    // 反证：把 `ITEMS` 拿掉（等价于「只量模板」），同一个模板是「没问题」的。
+    expect(collectionPreflight("P {title}", { items: [] })).toEqual([]);
+    expect(collectionPreflight("P {title}")).toHaveLength(1);
+  });
+
+  test("模板自己超长、渲染后合规 —— 不拦（服务端不校验模板本身）", () => {
+    // `{index}` 是 7 个字，渲染出来只有 2 个（"01"）：模板长度可以远大于渲染结果。
+    // 前端若拿模板去拦提交，就会出现「界面说超了、服务端说没事」。
+    const template = "{index}".repeat(Math.ceil((LIMITS.title + 1) / 7));
+    expect(template.length).toBeGreaterThan(LIMITS.title);
+    expect(collectionPreflight(template)).toEqual([]);
+  });
+
+  test("多条超限：先说有几条，再点名超出最多的那条", () => {
+    const items: readonly TitleSourceItem[] = [
+      { index: 1, source_title: "字".repeat(LIMITS.title + 1), source_url: "" },
+      { index: 2, source_title: "字".repeat(LIMITS.title + 5), source_url: "" }
+    ];
+    const problems = collectionPreflight("PP{title}", { items });
+
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain("有 2 条渲染后的标题超限");
+    // 报的是超出最多的那条（第 2 条，超 7 个），不是先遇到的那条。
+    expect(problems[0]).toContain("第 2 条");
+    expect(problems[0]).toContain("超出 7 个字");
+  });
+
+  test("单视频量的仍然是标题本身 —— 传了 items 也不参与", () => {
+    expect(preflight({ metadata: metadata({ title: "字".repeat(LIMITS.title + 1) }), items: ITEMS })).toEqual([
+      "标题超出 1 个字"
+    ]);
+  });
+
+  test("条目还没读到时不报假警（空 items 不是「全都合规」的相反面）", () => {
+    expect(collectionPreflight("随便一个模板", { items: [] })).toEqual([]);
+  });
+});
+
+describe("合集标题预算", () => {
+  test("longest 是渲染后最长的那条；等长时取先出现的（序号小的）", () => {
+    const budget = collectionTitleBudget({
+      template: "{title}",
+      items: [
+        { index: 1, source_title: "字".repeat(30), source_url: "" },
+        { index: 2, source_title: "字".repeat(10), source_url: "" },
+        { index: 3, source_title: "字".repeat(30), source_url: "" }
+      ],
+      jobTitle: "任务",
+      limits: LIMITS
+    });
+    expect(budget.longest?.index).toBe(1);
+    expect(budget.longest?.budget.length).toBe(30);
+    expect(budget.rendered).toHaveLength(3);
+  });
+
+  test("判据与预览用的是同一个渲染结果（否则会出现「预览 79 字、判据 85 字」）", () => {
+    const template = "{job}-{title}";
+    const budget = collectionTitleBudget({ template, items: ITEMS, jobTitle: "任务", limits: LIMITS });
+    for (const entry of budget.rendered) {
+      const item = ITEMS.find((candidate) => candidate.index === entry.index)!;
+      expect(entry.title).toBe(
+        renderItemTitle({ template, item, count: ITEMS.length, jobTitle: "任务" })
+      );
+      expect(entry.budget.length).toBe(entry.title.length);
+    }
+  });
+
+  test("模板那一档也返回，但不参与判据 —— 界面要知道用户正在打多少字", () => {
+    const template = "P {title}";
+    const budget = collectionTitleBudget({ template, items: ITEMS, jobTitle: "任务", limits: LIMITS });
+    expect(budget.template.length).toBe(template.length);
+    expect(budget.template.over).toBe(0);
+    expect(budget.longest?.budget.over).toBeGreaterThan(0);
   });
 });
 
