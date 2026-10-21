@@ -1,7 +1,7 @@
 ﻿import { useEffect, useState } from "react";
 import { Check, ChevronDown, Copy, ExternalLink, FileX2, FolderOpen, Gauge, Pause, Play, RotateCcw, Trash2 } from "lucide-react";
 import type { BiliJobUploads, BiliUpload, Job, JobBatchAction, ResolutionFallback, SubtitleOpenMode } from "../types";
-import { uploadedTargetUrl } from "../biliStatus";
+import { retryableUploadIds, uploadedTargetUrl } from "../biliStatus";
 import {
   formatBytesPerSecond,
   formatClock,
@@ -28,6 +28,7 @@ export function JobQueue({
   onBatchAction,
   onBiliRetrySeason,
   onBiliRetryUpload,
+  onBiliRetryMany,
   onBiliUpload,
   onCopyLink,
   onDelete,
@@ -51,6 +52,11 @@ export function JobQueue({
   onBatchAction: (action: JobBatchAction, deleteFiles?: boolean) => void;
   onBiliRetrySeason: (seasonRecordId: string) => void;
   onBiliRetryUpload: (uploadId: string) => void;
+  /**
+   * 一次补多条：`unverified`（只核对）与 `partial`（有的上去了有的没上去）两档的按钮走这里。
+   * **逐条交给服务端按各自终态决定动作**，前端不替它判断哪条该重投、哪条只该核对。
+   */
+  onBiliRetryMany: (uploadIds: string[]) => void;
   /** `itemId` 为空 = 上传整个任务（单视频任务 / 合集流程）。 */
   onBiliUpload: (jobId: string, itemId: string | null) => void;
   onCopyLink: (sourceUrl: string) => Promise<void>;
@@ -227,6 +233,10 @@ export function JobQueue({
                   // 合集页（`collectiondetail?sid=`）要账号 mid，前端不为此多引一次账号请求。
                   openUrl={uploadedTargetUrl(jobBili?.uploads)}
                   onOpenUrl={onOpenVideoPage}
+                  // 「待核对 / 部分失败」两档只补**还没成功的那几条**：已经投上去的再投一遍
+                  // 会在 B站 留下重复稿件，而那是不可撤销的。
+                  retryableIds={retryableUploadIds(jobBili?.uploads)}
+                  onRetry={onBiliRetryMany}
                   onClick={() => onBiliUpload(job.id, isPlaylist ? null : primaryItem?.id ?? null)}
                 />
                 {isPlaylist && (
@@ -436,6 +446,8 @@ export function JobQueue({
                           // 条目级只认这一条自己的链接：**不拿同任务别的稿件顶替**。
                           openUrl={uploadedTargetUrl(itemBili ? [itemBili] : null)}
                           onOpenUrl={onOpenVideoPage}
+                          retryableIds={retryableUploadIds(itemBili ? [itemBili] : null)}
+                          onRetry={onBiliRetryMany}
                           onClick={() => onBiliUpload(job.id, item.id)}
                         />
                         <button

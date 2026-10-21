@@ -76,11 +76,28 @@ export function isNotableSubtitle(state: BiliSubtitleState): boolean {
 /** 徽标里「还没上传」那一档。按钮文案要在这一档换成动作词（「上传」而不是「未上传」）。 */
 export const BADGE_NONE: BiliBadge = "none";
 
+/** 徽标里「正在跑」那一档。**这一档的按钮什么都不能做** —— 在跑的东西不需要再点一次。 */
+export const BADGE_UPLOADING: BiliBadge = "uploading";
+
 /**
  * 徽标里「已经传上去了」那一档。按钮在这一档改成「进入 B 站」——
  * 再点一次只会投出第二条同名稿件，那不是用户此刻想做的事。
  */
 export const BADGE_UPLOADED: BiliBadge = "uploaded";
+
+/**
+ * 徽标里「我们不知道它在不在平台上」那一档（对账没查到）。
+ *
+ * **它不等于失败，也不等于没上传。** 投稿命令是成功过的，所以重投就是这个视频的**第二遍**。
+ * 这一档唯一有意义的动作是「再去平台上核对一次」。
+ */
+export const BADGE_UNVERIFIED: BiliBadge = "unverified";
+
+/** 徽标里「有成功的也有没成功的」那一档。**已成功的那几条绝不能再投**。 */
+export const BADGE_PARTIAL: BiliBadge = "partial";
+
+/** 徽标里「这一步没成」那一档。只有这一档适合重新走一遍投稿表单（元数据可能要改）。 */
+export const BADGE_FAILED: BiliBadge = "failed";
 
 /** 「已上传」按钮点下去要打开的 B 站页面。
  *
@@ -102,6 +119,21 @@ export function uploadedTargetUrl(
     if (upload.video_url) return upload.video_url;
   }
   return null;
+}
+
+/**
+ * 「现在点这一下，该去补哪几条」——`unverified` 与 `partial` 两档共用的那条判据。
+ *
+ * 两档的共同点是**已经有记录可能躺在平台上了**，所以按钮只能补「还没成功的那几条」，
+ * 不能把整批重投一遍。返回的是**记录 id**，具体走「重新排队」还是「只核对」由服务端
+ * 按每条自己的终态决定（`bili_manager.retry_upload` 的三条分支）——
+ * 前端再判一次就会出现两套真相。
+ */
+export function retryableUploadIds(
+  uploads: readonly { id: string; status: BiliUploadStatus }[] | null | undefined
+): string[] {
+  if (!uploads) return [];
+  return uploads.filter((upload) => isRetryableUpload(upload.status)).map((upload) => upload.id);
 }
 
 /** 一条稿件在任务卡片里是否**有话说**（值得渲染一行）。

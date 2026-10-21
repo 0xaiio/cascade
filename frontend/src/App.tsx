@@ -560,6 +560,28 @@ export default function App() {
     await runBiliRetry(() => retryBiliUpload(uploadId), "重试失败");
   }
 
+  /**
+   * 一次补多条：`待核对` 与 `部分失败` 两档的按钮走这里。
+   *
+   * **逐条串行**（上传队列本来就是串行的，并发发 N 个请求只会让服务端逐个排队），
+   * 而每条到底做什么由服务端按它自己的终态决定（重新排队 / 只核对 / 什么都不做）。
+   * 所以回执按**实际发生的动作**分别计数：笼统一句「已处理 N 条」会让人以为全补投了，
+   * 而其中可能有一半只是「再核对了一次」。
+   */
+  async function handleBiliRetryMany(uploadIds: string[]) {
+    if (!uploadIds.length) return;
+    try {
+      const results: Array<{ action: string; message: string }> = [];
+      for (const uploadId of uploadIds) {
+        results.push(await retryBiliUpload(uploadId));
+      }
+      setBiliNotice(biliRetrySummary(results));
+      await refreshBiliUploads();
+    } catch (err) {
+      setError(biliMessage(err, "重试失败"));
+    }
+  }
+
   async function handleBiliRetrySeason(seasonRecordId: string) {
     await runBiliRetry(() => retryBiliSeason(seasonRecordId), "重试归集失败");
   }
@@ -716,6 +738,7 @@ export default function App() {
               onBatchAction={(action, deleteFiles) => void handleBatchAction(action, deleteFiles).catch((err) => setError(err.message))}
               onBiliRetrySeason={(seasonRecordId) => void handleBiliRetrySeason(seasonRecordId)}
               onBiliRetryUpload={(uploadId) => void handleBiliRetryUpload(uploadId)}
+              onBiliRetryMany={(uploadIds) => void handleBiliRetryMany(uploadIds)}
               onBiliUpload={(jobId, itemId) => void handleBiliUpload(jobId, itemId)}
               onDelete={(jobId, deleteFiles) => void handleDeleteJob(jobId, deleteFiles).catch((err) => setError(err.message))}
               onDeleteItems={(jobId, itemIds, deleteFiles) =>
@@ -796,4 +819,24 @@ function biliMessage(err: unknown, fallback: string): string {
   }
   const advice = err.detail.advice?.trim();
   return advice ? `${message} —— ${advice}` : message;
+}
+
+/**
+ * 批量补投/核对的回执。
+ *
+ * 一条就照抄服务端那句话（与明细行的单条重试保持同一措辞）；多条按**动作**分别计数 ——
+ * `reupload`（重新排队）与 `reverify`（只核对）是两件不同的事，合并成一句「已处理」等于
+ * 隐瞒了「有没有真的再投一遍」。
+ */
+function biliRetrySummary(results: Array<{ action: string; message: string }>): string {
+  if (!results.length) return "没有需要处理的记录";
+  if (results.length === 1) return results[0].message;
+  const reuploaded = results.filter((result) => result.action === "reupload").length;
+  const reverified = results.filter((result) => result.action === "reverify").length;
+  const skipped = results.length - reuploaded - reverified;
+  const parts: string[] = [];
+  if (reuploaded) parts.push(`${reuploaded} 条已重新排队`);
+  if (reverified) parts.push(`${reverified} 条已重新核对`);
+  if (skipped) parts.push(`${skipped} 条无需处理`);
+  return parts.length ? parts.join("，") : "没有改动任何记录";
 }

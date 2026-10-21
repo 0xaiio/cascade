@@ -1,7 +1,11 @@
 import { describe, expect, test } from "vitest";
 import {
+  BADGE_FAILED,
   BADGE_NONE,
+  BADGE_PARTIAL,
   BADGE_UPLOADED,
+  BADGE_UPLOADING,
+  BADGE_UNVERIFIED,
   BAD_SEASON_STATUSES,
   BAD_UPLOAD_STATUSES,
   RETRYABLE_SEASON_STATUSES,
@@ -13,6 +17,7 @@ import {
   isNotableUpload,
   isRetryableSeason,
   isRetryableUpload,
+  retryableUploadIds,
   uploadedTargetUrl
 } from "./biliStatus";
 import type { BiliSeasonStatus, BiliSubtitleState, BiliUploadStatus } from "./types";
@@ -136,8 +141,13 @@ describe("徽标与条目可见性", () => {
 });
 
 describe("「已上传」点进去打开哪一个页面", () => {
-  test("徽标取值与服务端一致", () => {
+  test("六档徽标的取值都与服务端一致", () => {
+    expect(BADGE_NONE).toBe("none");
+    expect(BADGE_UPLOADING).toBe("uploading");
     expect(BADGE_UPLOADED).toBe("uploaded");
+    expect(BADGE_UNVERIFIED).toBe("unverified");
+    expect(BADGE_PARTIAL).toBe("partial");
+    expect(BADGE_FAILED).toBe("failed");
   });
 
   test("任务级取第一条有链接的稿件（`uploads` 已按条目序号排过 = 第一个视频）", () => {
@@ -161,6 +171,32 @@ describe("「已上传」点进去打开哪一个页面", () => {
     expect(uploadedTargetUrl([{ video_url: "" }, { video_url: "https://www.bilibili.com/video/BV1two" }])).toBe(
       "https://www.bilibili.com/video/BV1two"
     );
+  });
+});
+
+describe("「待核对 / 部分失败」该补哪几条", () => {
+  test("只挑真正能重试的三档；已成功与在途一条都不碰", () => {
+    // 已成功的再投一遍会在 B站 留下第二条稿件，在途的正在跑 —— 两类都不能进这个名单。
+    expect(
+      retryableUploadIds([
+        { id: "a", status: "published" },
+        { id: "b", status: "failed" },
+        { id: "c", status: "unverified" },
+        { id: "d", status: "uploading" },
+        { id: "e", status: "reviewing" },
+        { id: "f", status: "rejected" }
+      ])
+    ).toEqual(["b", "c", "f"]);
+  });
+
+  test("空值一律空数组 —— 按钮据此判定「不接管这一下」，而不是拿着 undefined 去点", () => {
+    expect(retryableUploadIds(null)).toEqual([]);
+    expect(retryableUploadIds(undefined)).toEqual([]);
+    expect(retryableUploadIds([])).toEqual([]);
+  });
+
+  test("整组都成功时返回空：那一档的按钮走「打开页面」", () => {
+    expect(retryableUploadIds([{ id: "a", status: "published" }, { id: "b", status: "reviewing" }])).toEqual([]);
   });
 });
 

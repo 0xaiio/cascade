@@ -43,7 +43,7 @@
 | FR-21 | 提交前校验平台硬限（标题 ≤ 80、简介 ≤ 250、标签总长 < 200 且最多 10 个、单个标签 ≤ 20、评论 ≤ 1000）；**超限只报错不截断**，合集要把问题定位到第几条。 | [`validate`](../backend/app/bili_meta.py#L348)、[`limits`](../backend/app/bili_meta.py#L333) |
 | FR-22 | 提供 B站 环境体检（投稿工具是否可用、ffmpeg、登录态、缺项清单），每条结论文案必须自带「下一步」；并支持修复投稿工具、扫码登录、导入已有登录文件三种前置动作。 | [`bili_status`](../backend/app/routers/bilibili.py#L67)、[`BiliLoginSection`](../frontend/src/components/BiliLoginSection.tsx#L29) |
 | FR-23 | 投稿命令返回成功**不等于**已发布：必须回读账号稿件列表对账；对不上的记录进入「待核对」而非「已发布」或「失败」，且两者的推荐动作不同。 | [`find_archive`](../backend/app/bili_api.py#L127)、[`UPLOAD_UNVERIFIED`](../backend/app/bili_policy.py#L267) |
-| FR-24 | 任务行与条目行各有 B站 上传图标，状态由**后端**按该任务的全部记录聚合出一档徽标（未上传/上传中/已上传/待核对/部分失败/失败），前端不自行推导。 | [`derive_badge`](../backend/app/bili_read_model.py#L60)、[`BiliUploadButton`](../frontend/src/components/BiliUploadButton.tsx#L30) |
+| FR-24 | 任务行与条目行各有 B站 上传图标，状态由**后端**按该任务的全部记录聚合出一档徽标（未上传/上传中/已上传/待核对/部分失败/失败），前端不自行推导。 | [`derive_badge`](../backend/app/bili_read_model.py#L60)、[`BiliUploadButton`](../frontend/src/components/BiliUploadButton.tsx#L42) |
 | FR-25 | 失败与待核对可单条重试，动作按终态三选一：重新投稿 / **只**重新核对（不重投）/ 什么都不做；合集归集失败可单独重试，且**不会重复建合集**。 | [`BiliRetryRead`](../backend/app/schemas.py#L580)、[`bili_retry_season`](../backend/app/routers/bilibili.py#L311) |
 | FR-26 | 投稿可自动生成封面（ffmpeg 抽帧）并自动发送、置顶一条评论；评论发送失败不影响稿件本身的状态。 | [`extract_cover_frame`](../backend/app/bili_bin.py#L288)、[`send_and_top_comment`](../backend/app/bili_api.py#L441) |
 | FR-27 | B站 凭据只以文件形式保存，API 与界面**只回传名字与计数**（不返回值、不返回掩码前缀）；登录文件被 git 跟踪时单独作为一条阻断项报出。 | [`cookie_summary`](../backend/app/bili_auth.py#L379)、[`is_cookie_tracked_by_git`](../backend/app/bili_auth.py#L390) |
@@ -56,9 +56,10 @@
 | FR-34 | 投稿表单在**提交前**告诉用户每条视频会带什么字幕（如 `en · 人工`、`无字幕`）；这句文案由服务端拼好，前端不自己拼一遍。 | [`subtitle_summary`](../backend/app/subtitle_plan.py#L92)、[`BiliPrefillItem.subtitle`](../backend/app/schemas.py#L411) |
 | FR-35 | 任务中心每个已下到字幕的视频条目都能**用本机的程序打开字幕文件**：按钮位于「打开视频所在文件夹」右侧、图标是字幕（CC）、悬停提示「打开字幕文件」。点主段用系统关联打开，点右段弹系统的「打开方式」窗口自行挑程序。**不自己维护编辑器清单、不自己记「上次用的程序」**——那两件事的所有者是操作系统。 | [`SubtitleOpenButton`](../frontend/src/components/SubtitleOpenButton.tsx#L17)、[`open_path_with_chooser`](../backend/app/system_open.py#L46)、[`subtitle_file`](../backend/app/job_artifacts.py#L56) |
 | FR-36 | 没有字幕文件的条目，该按钮**必须置灰**并说明原因；后端对这种情况返回 `409`，而不是 204 空转。按钮的可点性只看读模型给的 `subtitle_path`（真的存在才给值）。 | [`_project_subtitle_path`](../backend/app/job_read_model.py#L110)、[`existing_subtitle_file`](../backend/app/output_paths.py#L184) |
-| FR-37 | 「打开字幕」不接收前端传入的路径；`mode` 只有 `default` / `chooser` 两个取值，其余一律 `422`。打开失败的原因显示在**对应那一行**，不进全局提示区。 | [`SubtitleOpenMode`](../backend/app/routers/job_files.py#L23)、[`runLocalFileAction`](../frontend/src/components/JobQueue.tsx#L126) |
-| FR-38 | 字幕这一步的结论**必须在任务卡片里看得见、失败时点得到**：`posted` / `failed` 渲染一行「CC 字幕」+ 服务端那句文案，`failed` 还给「重传字幕」；`skipped` 不渲染（表单里已写过「无字幕」）。与稿件行**分两行**，互不冒充。 | [`BiliJobStatus`](../frontend/src/components/BiliJobStatus.tsx#L28)、[`isBadSubtitle`](../frontend/src/biliStatus.ts#L68)、[`isNotableUpload`](../frontend/src/biliStatus.ts#L113) |
-| FR-39 | 「已上传」那一档的按钮**不再重新投稿**：点击打开该稿件在 B站 的页面，悬停提示「B 站已上传；点击进入 B 站」。任务级打开该任务的第一个稿件，条目级**只**打开这一条（不拿别的顶替）；本地没记下 `bvid` 时退回上传入口，不给一个点下去什么都不发生的绿按钮。该档的可点性**不受本地视频文件是否存在影响**。 | [`uploadedTargetUrl`](../frontend/src/biliStatus.ts#L97)、[`BiliUploadButton`](../frontend/src/components/BiliUploadButton.tsx#L30) |
+| FR-37 | 「打开字幕」不接收前端传入的路径；`mode` 只有 `default` / `chooser` 两个取值，其余一律 `422`。打开失败的原因显示在**对应那一行**，不进全局提示区。 | [`SubtitleOpenMode`](../backend/app/routers/job_files.py#L23)、[`runLocalFileAction`](../frontend/src/components/JobQueue.tsx#L132) |
+| FR-38 | 字幕这一步的结论**必须在任务卡片里看得见、失败时点得到**：`posted` / `failed` 渲染一行「CC 字幕」+ 服务端那句文案，`failed` 还给「重传字幕」；`skipped` 不渲染（表单里已写过「无字幕」）。与稿件行**分两行**，互不冒充。 | [`BiliJobStatus`](../frontend/src/components/BiliJobStatus.tsx#L28)、[`isBadSubtitle`](../frontend/src/biliStatus.ts#L68)、[`isNotableUpload`](../frontend/src/biliStatus.ts#L145) |
+| FR-39 | 「已上传」那一档的按钮**不再重新投稿**：点击打开该稿件在 B站 的页面，悬停提示「B 站已上传；点击进入 B 站」。任务级打开该任务的第一个稿件，条目级**只**打开这一条（不拿别的顶替）；本地没记下 `bvid` 时退回上传入口，不给一个点下去什么都不发生的绿按钮。该档的可点性**不受本地视频文件是否存在影响**。 | [`uploadedTargetUrl`](../frontend/src/biliStatus.ts#L114)、[`BiliUploadButton`](../frontend/src/components/BiliUploadButton.tsx#L42) |
+| FR-40 | 上传入口的其余档位按「这一步到底缺什么」分流：`uploading` **禁用**且提示不承诺任何点击；`unverified`（待核对）点击**只重新核对**（提示明说不会重投）—— 它的投稿命令已经成功过一次；`partial` 点击**只补没成功的那几条**，绝不重投已发布的；只有 `failed` 走投稿表单。批量补投逐条串行、动作由服务端按各自终态决定，回执按实际动作分别计数。 | [`retryableUploadIds`](../frontend/src/biliStatus.ts#L132)、[`retry_upload`](../backend/app/bili_manager.py#L921) |
 
 ## 非功能需求
 

@@ -261,14 +261,106 @@ describe("App · B站 上传入口", () => {
     expect(open).toHaveBeenCalledWith("https://www.bilibili.com/video/BV1two", "_blank", "noopener,noreferrer");
   });
 
-  test("disables the button and says why while an upload is in flight", async () => {
+  test("stays disabled while an upload is in flight, and promises nothing", async () => {
+    const user = userEvent.setup();
     mockState.jobs = [downloadedJob()];
     mockState.biliUploads = [jobUploads([], { badge: "uploading", badge_text: "上传中", badge_tone: "busy" })];
     render(<App />);
 
     const button = await screen.findByRole("button", { name: /B站：上传中 Running video/ });
     expect(button).toBeDisabled();
-    expect(button).toHaveAttribute("title", expect.stringContaining("正在上传中，等这批跑完"));
+    // 这一档以前提示「点击重新上传」—— 一个灰着的按钮还许诺点击，是自相矛盾的。
+    expect(button).toHaveAttribute("title", "正在上传中；跑完会自动变成「已上传」或「失败」");
+    expect(button.getAttribute("title")).not.toContain("点击");
+
+    await user.click(button);
+    expect(mockState.biliPrefillQueries).toEqual([]);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  test("待核对 只重新核对，绝不重新投稿", async () => {
+    const user = userEvent.setup();
+    mockState.jobs = [downloadedJob()];
+    mockState.biliRetryAction = "reverify";
+    // 「待核对」不是失败：投稿命令已经成功过一次，平台上很可能已经有这条稿件 ——
+    // 重投就是这个视频的第二遍，而平台侧撤不回来。
+    mockState.biliUploads = [
+      jobUploads(
+        [
+          {
+            ...biliUploadPayload,
+            status: "unverified",
+            status_text: "待核对",
+            badge: "unverified",
+            badge_text: "待核对",
+            badge_tone: "warn",
+            error: "已提交，但还没在 B站 看到它",
+            advice: "B站 的稿件列表有延迟，稍后再查一次"
+          }
+        ],
+        { badge: "unverified", badge_text: "待核对", badge_tone: "warn" }
+      )
+    ];
+    render(<App />);
+
+    const button = await screen.findByRole("button", {
+      name: /B 站还没确认这条稿件；点击重新核对（不会重投） Running video/
+    });
+    expect(button).toBeEnabled();
+
+    await user.click(button);
+
+    // 走的是「重新核对」那条接口（服务端对 `unverified` 只回读平台列表，不发投稿）。
+    await waitFor(() => expect(mockState.biliRetryUploadIds).toEqual(["bili-1"]));
+    expect(mockState.biliPrefillQueries).toEqual([]);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(mockState.biliUploadBodies).toEqual([]);
+    await waitFor(() => expect(notice()).toHaveTextContent("已重新核对。"));
+  });
+
+  test("部分失败 只补没成功的那几条，不碰已经上传的", async () => {
+    const user = userEvent.setup();
+    mockState.jobs = [downloadedPlaylistJob()];
+    mockState.biliRetryAction = "reupload";
+    mockState.biliUploads = [
+      jobUploads(
+        [
+          { ...biliUploadPayload, id: "bili-ok", item_id: "item-playlist-1", title: "Part one" },
+          { ...biliUploadFailedPayload, id: "bili-bad", item_id: "item-playlist-2", title: "Part two" }
+        ],
+        { job_id: "job-playlist", badge: "partial", badge_text: "部分失败", badge_tone: "warn" }
+      )
+    ];
+    render(<App />);
+
+    const button = await screen.findByRole("button", { name: /重试没成功的 1 条 Playlist batch/ });
+    expect(button).toHaveAttribute("title", "有 1 条还没投上去；点击只重试这几条，不会重投已上传的");
+
+    await user.click(button);
+
+    // **只碰失败的那条**：已发布的 `bili-ok` 一次都不能被提交。
+    await waitFor(() => expect(mockState.biliRetryUploadIds).toEqual(["bili-bad"]));
+    expect(mockState.biliPrefillQueries).toEqual([]);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(mockState.biliUploadBodies).toEqual([]);
+    await waitFor(() => expect(notice()).toHaveTextContent("已重新排队。"));
+  });
+
+  test("失败 仍然走投稿表单（没有记录在平台上，元数据可能还要改）", async () => {
+    const user = userEvent.setup();
+    mockState.jobs = [downloadedJob()];
+    mockState.biliUploads = [
+      jobUploads([biliUploadFailedPayload], { badge: "failed", badge_text: "上传失败", badge_tone: "bad" })
+    ];
+    render(<App />);
+
+    const button = await screen.findByRole("button", { name: /B站：上传失败 Running video/ });
+    expect(button).toHaveAttribute("title", "B站：上传失败 · 点击重新上传");
+    await user.click(button);
+    await waitFor(() =>
+      expect(mockState.biliPrefillQueries).toEqual([{ jobId: "job-running", itemId: "item-running" }])
+    );
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
   });
 });
 
