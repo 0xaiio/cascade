@@ -18,19 +18,12 @@ class LocalOpenError(RuntimeError):
 # 抛的就是 `OSError(WinError 1155)` —— 它不是打开失败，只是「还没人认领」。
 ERROR_NO_ASSOCIATION = 1155
 
-# `SHOpenWithDialog` 的三个开关（shlobj.h）：
-#   ALLOW_REGISTRATION —— 窗口里可以勾「始终使用此应用」；
-#   HIDE_REGISTRATION  —— 不显示那行「以后都用这个打开」的注册提示（勾选框仍可用）；
-#   EXEC               —— 挑完直接执行，不用再让调用方自己起进程。
-OAIF_ALLOW_REGISTRATION = 0x00000001
-OAIF_EXEC = 0x00000002
-OAIF_HIDE_REGISTRATION = 0x00000020
+# 自带选择对话框的窗口特征（tkinter 顶层窗口；标题与 `_CHOOSER_TITLE` 一致才认领）。
+CHOOSER_WINDOW_CLASS = "TkTopLevel"
+CHOOSER_TITLE = "打开方式"
 
-# 系统「打开方式」对话框的窗口类名（shell32 在本进程内绘制，不经过 explorer 托管的弹层）。
-OPEN_WITH_DIALOG_CLASS = "Shell_Dialog"
-
-# 等窗口出现的时间。实测冷启动 0.1~0.4s；超过这个数还没窗口，就当作「弹不出来」。
-OPEN_WITH_APPEAR_TIMEOUT_SECONDS = 2.5
+# 等对话框出现的时间。实测 0.1~0.4s；超过这个数还没窗口，就当作「弹不出来」。
+OPEN_WITH_APPEAR_TIMEOUT_SECONDS = 3.0
 
 
 @dataclass(frozen=True)
@@ -38,6 +31,23 @@ class VideoPlayerCandidate:
     name: str
     command: list[str]
     robust: bool
+
+
+@dataclass(frozen=True)
+class ProgramCandidate:
+    """一个「能打开这个文件」的程序：显示名 + 可执行文件。"""
+
+    name: str
+    executable: Path
+
+
+@dataclass
+class ChooserOutcome:
+    """选择对话框的结局：`cancelled` = 用户点了取消；`error` = 对话框/打开动作本身出错。"""
+
+    cancelled: bool = False
+    error: str | None = None
+    launched: str | None = None
 
 
 def open_path_with_default_app(path: Path) -> None:
@@ -59,24 +69,22 @@ def open_path_with_default_app(path: Path) -> None:
 
 
 def open_path_with_chooser(path: Path) -> None:
-    """让**系统**弹出「打开方式」窗口，由用户在系统自己的列表里挑一个程序。
+    """弹一个「打开方式」对话框，由用户挑一个程序来打开这个文件。
 
-    列表里是**系统注册的全部处理器**。自己维护一份编辑器清单只会是它的子集
-    （用户装了什么我们无从得知），还要为每个平台各维护一份 —— 所以这里不造第二个列表。
+    **为什么不再用系统的那个窗口。** 系统本来有这个 UI，但它不是稳定的依赖：本机实测
+    Win11 的「选取应用」弹层（`OpenAs_RunDLL` 那条路）调用返回 0 却什么窗口都没有；改用文档化的
+    `SHOpenWithDialog` 之后，无论标志位怎么给、文件是什么类型（`.txt` / `.mp4` / `.vtt`），
+    弹出来的都是一个 680x118 的提示框 ——「若要更改默认应用，请转到"设置">"应用">"默认应用"。」，
+    里面**没有可选程序列表**。也就是说这套系统 UI 在这台机器上整体降级了，任何"请它出来"的
+    做法都拿不到选择器。
 
-    用户在窗口里勾「始终使用此应用」，系统就把这个后缀的关联记下来了
-    （`HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\.srt\\UserChoice`），
-    **之后用文件关联打开时就是那个程序**。也就是说「记住上一次用的查看器」由系统负责，
-    应用侧不另存一份 —— 两处各记一份时，先信谁就会变成一个说不清的问题。
+    所以这里自己画一个对话框（tkinter，与目录选择器同一套依赖），但**不自己编程序清单**：
+    候选来自系统注册表里为这个后缀登记过的处理器（见 `_program_candidates`），列表为空时
+    （`.vtt` / `.srt` 通常就是空的）由用户「浏览…」挑一个可执行文件。选择与启动都在本进程内
+    完成，**不接受前端传入的程序路径**。
 
-    **窗口必须在「我们自己的进程里」画出来**：Win11 的「选取应用」是 explorer 托管的现代
-    弹层，`rundll32 shell32.dll,OpenAs_RunDLL` 只是请它出来；那个宿主一旦失效（本机实测过：
-    调用返回 0、`OpenWith.exe` 起来了、窗口一个也没有），用户看到的就是「点了没反应」。
-    所以这里用文档化的 `SHOpenWithDialog` —— 对话框（窗口类 `Shell_Dialog`）由 shell32 在
-    本进程内绘制，不经过那个宿主。
-
-    它是**模态**的：调用会一直阻塞到用户选完或取消，所以放在自己的线程里，接口这边等到
-    「窗口真的出现」就返回；**窗口没出现就当失败**抛 `LocalOpenError`，绝不再 204 空转。
+    对话框是模态的，跑在自己的线程里；接口这边等到「窗口真的出现」就返回，**窗口没出现就当
+    失败**抛 `LocalOpenError`，绝不 204 空转。
 
     其它平台没有等价入口（macOS 的 `open -a` 要的是应用名，Linux 的 `xdg-open` 只有默认），
     于是退化成「用默认程序打开」。见 `docs/technical.md#打开字幕文件`。
@@ -88,34 +96,31 @@ def open_path_with_chooser(path: Path) -> None:
 
 
 def _open_windows_chooser(path: Path) -> None:
-    """Windows 上的「挑程序」：在本进程里画 `SHOpenWithDialog`，并**确认它真的画出来了**。
+    """Windows 上的「挑程序」：起自带对话框，并**确认它真的出来了**。
 
-    三步都必要：
+    四条都是踩出来的：
     1. 已经有一个窗口在等用户时不再叠一个 —— 连点几下会得到一摞一模一样的模态窗口；
-    2. 模态调用放进自己的线程，这里只等到「窗口出现」为止（否则接口会挂到用户点完）；
-    3. 窗口始终没出现 = 失败。**静默 204 是最糟的结果**：界面看起来点过了，其实什么都没发生。
-
-    **前台**：窗口刚创建时它自己在激活；这时去抢会被前台锁拒绝，而且被拒之后它就不再自行
-    激活（本机实测：提前抢 → 前台始终是浏览器；不碰它 → 对话框自己上来）。所以先给它时间
-    自己上来，确实没上来才用 `_ensure_dialog_foreground` 里的 attach 手法。
+    2. 对话框跑在自己的线程里，这里只等到「窗口出现」为止（否则接口会挂到用户点完）；
+    3. 窗口始终没出现 = 失败；**静默 204 是最糟的结果**（界面看起来点过了，其实什么都没发生）；
+    4. 用户点「取消」不是失败，也不该弹错误。
     """
-    if _open_with_dialog_window():
+    if _chooser_window():
         raise LocalOpenError(
             "已经有一个「打开方式」窗口在等你选择：先在那个窗口里选完（或取消），再点一次。"
         )
 
-    outcome = OpenWithOutcome()
+    outcome = ChooserOutcome()
     worker = threading.Thread(
-        target=_run_open_with_dialog,
+        target=_run_chooser,
         args=(path, outcome),
-        name="open-with-dialog",
+        name="open-with-chooser",
         daemon=True,
     )
     worker.start()
 
     deadline = time.monotonic() + OPEN_WITH_APPEAR_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
-        window = _open_with_dialog_window()
+        window = _chooser_window()
         if window:
             _ensure_dialog_foreground(window)
             return
@@ -123,60 +128,252 @@ def _open_windows_chooser(path: Path) -> None:
             break
         time.sleep(0.03)
 
-    if outcome.hresult:
-        detail = f"（HRESULT {outcome.hresult & 0xFFFFFFFF:#010x}）"
-    elif outcome.error:
-        detail = f"（{outcome.error}）"
-    else:
-        detail = ""
+    if outcome.cancelled:
+        return
+    detail = f"（{outcome.error}）" if outcome.error else ""
     raise LocalOpenError(
-        "系统没能弹出「打开方式」窗口"
+        "没能弹出「打开方式」窗口"
         f"{detail}。可以先点「打开视频所在文件夹」，在资源管理器里右键那个字幕文件 → 打开方式；"
         "或者把该后缀的默认程序在系统设置里指定一次。"
     )
 
 
-@dataclass
-class OpenWithOutcome:
-    """`SHOpenWithDialog` 的结果。有值 = 调用已返回；`None` = 还在等用户选。"""
-
-    hresult: int | None = None
-    error: str | None = None
-
-
-class _OpenAsInfo(ctypes.Structure):
-    _fields_ = [
-        ("pcszFile", wintypes.LPCWSTR),
-        ("pcszClass", wintypes.LPCWSTR),
-        ("oaifInFlags", ctypes.c_int),
-    ]
-
-
-def _run_open_with_dialog(path: Path, outcome: OpenWithOutcome) -> None:
-    """在工作线程里调 `SHOpenWithDialog`：模态，会一直阻塞到用户选完或取消。"""
-    ole32 = ctypes.windll.ole32  # type: ignore[attr-defined]
+def _run_chooser(path: Path, outcome: ChooserOutcome) -> None:
+    """对话框 + 启动被选中的程序。整段异常都要落到 `outcome.error`，线程不许静默结束。"""
     try:
-        ole32.CoInitializeEx(None, 0x2)  # COINIT_APARTMENTTHREADED
-    except Exception:
-        pass
-    try:
-        info = _OpenAsInfo(
-            str(path),
-            None,
-            OAIF_ALLOW_REGISTRATION | OAIF_HIDE_REGISTRATION | OAIF_EXEC,
-        )
-        outcome.hresult = int(ctypes.windll.shell32.SHOpenWithDialog(None, ctypes.byref(info)))
-    except Exception as exc:  # ctypes 层的失败也要如实报出来，别让线程静默结束
+        executable = _ask_program(path)
+    except Exception as exc:  # 例如环境里没有 tkinter
         outcome.error = f"{type(exc).__name__}: {exc}"
+        return
+    if executable is None:
+        outcome.cancelled = True
+        return
+    try:
+        _open_process([str(executable), str(path)], title_hint=path.name)
+        outcome.launched = str(executable)
+    except Exception as exc:
+        outcome.error = f"{type(exc).__name__}: {exc}"
+
+
+def _ask_program(path: Path) -> Path | None:
+    """画「打开方式」对话框并等用户选择；返回选中的可执行文件，取消则返回 `None`。"""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog, ttk
+    except Exception as exc:
+        raise LocalOpenError(
+            "这个环境没有图形界面组件（tkinter），没法弹出「打开方式」窗口。"
+            "可以先点「打开视频所在文件夹」，在资源管理器里右键那个字幕文件 → 打开方式。"
+        ) from exc
+
+    candidates = _program_candidates(path.suffix)
+    root = tk.Tk()
+    root.title(CHOOSER_TITLE)
+    root.geometry("620x360")
+    root.minsize(480, 260)
+    root.attributes("-topmost", True)
+
+    chosen: dict[str, Path | None] = {"exe": None}
+
+    tk.Label(
+        root,
+        text=f"用哪个程序打开「{_shorten(path.name, 64)}」？",
+        anchor="w",
+        justify="left",
+        wraplength=580,
+    ).pack(fill="x", padx=14, pady=(14, 6))
+
+    body = tk.Frame(root)
+    body.pack(fill="both", expand=True, padx=14)
+    listbox = tk.Listbox(body, activestyle="none", exportselection=False)
+    scrollbar = ttk.Scrollbar(body, orient="vertical", command=listbox.yview)
+    listbox.configure(yscrollcommand=scrollbar.set)
+    listbox.pack(side="left", fill="both", expand=True)
+    scrollbar.pack(side="right", fill="y")
+    for candidate in candidates:
+        listbox.insert("end", f"{candidate.name}    —    {candidate.executable}")
+    if candidates:
+        listbox.selection_set(0)
+
+    hint = (
+        "这些是系统为这个后缀登记过的程序。"
+        if candidates
+        else "系统还没有为这个后缀登记任何程序，点「浏览…」挑一个（记事本、VS Code、VLC 都行）。"
+    )
+    tk.Label(root, text=hint, anchor="w", justify="left", wraplength=580, fg="#4a5a70").pack(
+        fill="x", padx=14, pady=(8, 0)
+    )
+    tk.Label(
+        root,
+        text="想让它以后默认用某个程序打开，请到「设置 > 应用 > 默认应用」。",
+        anchor="w",
+        justify="left",
+        wraplength=580,
+        fg="#6b7a8f",
+    ).pack(fill="x", padx=14)
+
+    buttons = tk.Frame(root)
+    buttons.pack(fill="x", padx=14, pady=12)
+
+    accept = lambda: _accept(listbox, candidates, chosen, root)  # noqa: E731
+    open_button = tk.Button(
+        buttons,
+        text="打开",
+        width=10,
+        state="normal" if candidates else "disabled",
+        command=accept,
+    )
+    open_button.pack(side="right")
+    tk.Button(buttons, text="取消", width=10, command=root.destroy).pack(side="right", padx=6)
+
+    def browse() -> None:
+        picked = filedialog.askopenfilename(
+            parent=root,
+            title="选择用来打开它的程序",
+            filetypes=[("程序", "*.exe"), ("所有文件", "*.*")],
+        )
+        if picked:
+            chosen["exe"] = Path(picked)
+            root.destroy()
+
+    tk.Button(buttons, text="浏览…", width=10, command=browse).pack(side="left")
+    listbox.bind("<Double-Button-1>", lambda _event: accept())
+    listbox.bind("<Return>", lambda _event: accept())
+    root.bind("<Return>", lambda _event: accept())
+    root.bind("<Escape>", lambda _event: root.destroy())
+    if candidates:
+        listbox.focus_set()
+
+    root.grab_set()
+    root.lift()
+    root.focus_force()
+    try:
+        root.mainloop()
     finally:
         try:
-            ole32.CoUninitialize()
+            root.destroy()
         except Exception:
             pass
+    return chosen["exe"]
 
 
-def _open_with_dialog_window() -> int | None:
-    """本进程里已经画出来的「打开方式」窗口句柄（没有就 `None`）。"""
+def _accept(
+    listbox: object,
+    candidates: list[ProgramCandidate],
+    chosen: dict[str, Path | None],
+    root: object,
+) -> None:
+    selection = listbox.curselection()  # type: ignore[attr-defined]
+    if not selection:
+        return
+    chosen["exe"] = candidates[selection[0]].executable
+    root.destroy()  # type: ignore[attr-defined]
+
+
+def _shorten(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _program_candidates(ext: str) -> list[ProgramCandidate]:
+    """系统为这个后缀登记过的处理器（读注册表），去重、只留真实存在的可执行文件。
+
+    三个来源都是**系统自己的登记**，不是我们编的清单：
+      - `HKCU\\...\\FileExts\\<ext>\\OpenWithList`（用户用过的，带 MRU 顺序）；
+      - `HKCR\\<ext>\\OpenWithList`（按 exe 名登记）；
+      - `HKCR\\<ext>\\OpenWithProgids`（按 ProgID 登记，命令在 `HKCR\\<ProgID>\\shell\\open\\command`）。
+    """
+    if os.name != "nt" or not ext:
+        return []
+    try:
+        import winreg
+    except Exception:
+        return []
+
+    extension = ext if ext.startswith(".") else f".{ext}"
+    entries: list[ProgramCandidate] = []
+    seen: set[str] = set()
+
+    def add(name: str, executable: str | Path) -> None:
+        exe = Path(os.path.expandvars(str(executable).strip().strip('"')))
+        if not exe.is_file():
+            return
+        key = str(exe).lower()
+        if key in seen:
+            return
+        seen.add(key)
+        # `AppX4ztfk9wxr86nxmzzq47px0nh0e58b8fw` 这种是包标识，不是给人看的名字。
+        label = exe.stem if not name or name.startswith("AppX") else name
+        entries.append(ProgramCandidate(label, exe))
+
+    def read_exe_names(root_key: int, sub_key: str) -> None:
+        try:
+            with winreg.OpenKey(root_key, sub_key) as key:
+                index = 0
+                while True:
+                    try:
+                        name, value, _kind = winreg.EnumValue(key, index)
+                    except OSError:
+                        break
+                    index += 1
+                    if name.isdigit():  # `a` / `b` / `MRUList` 这些不是程序项
+                        add(Path(str(value)).stem, str(value))
+        except OSError:
+            pass
+
+    read_exe_names(
+        winreg.HKEY_CURRENT_USER,
+        rf"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\{extension}\\OpenWithList",
+    )
+    read_exe_names(winreg.HKEY_CLASSES_ROOT, rf"{extension}\\OpenWithList")
+
+    progids: list[str] = []
+    try:
+        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, rf"{extension}\\OpenWithProgids") as key:
+            index = 0
+            while True:
+                try:
+                    name, _value, _kind = winreg.EnumValue(key, index)
+                except OSError:
+                    break
+                index += 1
+                progids.append(name)
+    except OSError:
+        progids = []
+
+    for progid in progids:
+        try:
+            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, rf"{progid}\\shell\\open\\command") as key:
+                command = str(winreg.QueryValue(key, None) or "")
+        except OSError:
+            continue
+        add(_progid_label(winreg, progid), _command_executable(command))
+
+    return entries
+
+
+def _command_executable(command: str) -> str:
+    """从 `"C:\\Program Files\\App\\app.exe" "%1"` 这种命令里取出可执行文件路径。"""
+    text = command.strip()
+    if text.startswith('"'):
+        return text.split('"')[1]
+    return text.split(" ")[0] if text else ""
+
+
+def _progid_label(winreg: object, progid: str) -> str:
+    """ProgID 的显示名：优先它自己的默认值，其次 `\\Application` 子键的默认值。"""
+    for key_path in (progid, rf"{progid}\\Application"):
+        try:
+            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, key_path) as key:  # type: ignore[attr-defined]
+                value = winreg.QueryValue(key, None)  # type: ignore[attr-defined]
+        except OSError:
+            continue
+        if value:
+            return str(value)
+    return progid
+
+
+def _chooser_window() -> int | None:
+    """本进程里已经画出来的选择对话框（按类名 + 标题认领；没有就 `None`）。"""
     if os.name != "nt":
         return None
     try:
@@ -197,7 +394,11 @@ def _open_with_dialog_window() -> int | None:
                 return True
             name = ctypes.create_unicode_buffer(256)
             user32.GetClassNameW(hwnd, name, 256)
-            if name.value == OPEN_WITH_DIALOG_CLASS:
+            if name.value != CHOOSER_WINDOW_CLASS:
+                return True
+            title = ctypes.create_unicode_buffer(256)
+            user32.GetWindowTextW(hwnd, title, 256)
+            if title.value == CHOOSER_TITLE:
                 found.append(hwnd)
                 return False
         except Exception:

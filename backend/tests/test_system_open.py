@@ -103,34 +103,23 @@ def test_windows_file_errors_that_are_not_about_associations_are_raised(
     assert getattr(exc_info.value, "winerror", None) == 5
 
 
-def test_chooser_returns_once_the_system_dialog_is_on_screen(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_chooser_returns_once_its_dialog_is_on_screen(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     started: list[Path] = []
     subtitle = tmp_path / "video.en.vtt"
     subtitle.write_text("subs", encoding="utf-8")
 
     monkeypatch.setattr(system_open.os, "name", "nt")
-    # 第一次调用是「开窗前的检查」（这时还没有窗口），之后是「等它出现」（已经有了）。
+    # 第一次是「开窗前的检查」（这时还没有窗口），之后是「等它出现」（已经有了）。
     windows = iter([None])
-    monkeypatch.setattr(system_open, "_open_with_dialog_window", lambda: next(windows, 4242))
+    monkeypatch.setattr(system_open, "_chooser_window", lambda: next(windows, 4242))
     raised: list[int] = []
     # 置前那一步要碰真实窗口 API（会抢用户的焦点），单测里替换掉，只断言「窗口被认领了」。
     monkeypatch.setattr(system_open, "_ensure_dialog_foreground", lambda hwnd: raised.append(hwnd) or True)
-    monkeypatch.setattr(
-        system_open,
-        "_run_open_with_dialog",
-        lambda path, _outcome: started.append(path),  # 模态调用的线程在这里立即结束
-    )
-    monkeypatch.setattr(
-        system_open.os,
-        "startfile",
-        lambda _target: pytest.fail("chooser must not go through the default association"),
-        raising=False,
-    )
+    monkeypatch.setattr(system_open, "_run_chooser", lambda path, _outcome: started.append(path))
 
     system_open.open_path_with_chooser(subtitle)
 
-    # 判据是「本进程里真的画出了 Shell_Dialog」：窗口一出现就认领它并返回，
-    # 不再像旧实现那样去起进程、也没有 204 空转的余地。
+    # 判据是「对话框真的画出来了」：出现即认领并返回，不阻塞到用户选完、也不 204 空转。
     assert started == [subtitle]
     assert raised == [4242]
 
@@ -140,22 +129,63 @@ def test_chooser_reports_a_dialog_that_never_appears(monkeypatch: pytest.MonkeyP
     subtitle.write_text("subs", encoding="utf-8")
 
     monkeypatch.setattr(system_open.os, "name", "nt")
-    monkeypatch.setattr(system_open, "_open_with_dialog_window", lambda: None)
+    monkeypatch.setattr(system_open, "_chooser_window", lambda: None)
 
-    def fail_immediately(_path: Path, outcome: system_open.OpenWithOutcome) -> None:
-        # 这是真机实测到的失败形态：调用返回 0、什么窗口也没有。旧实现只会回 204。
-        outcome.hresult = 0x80004005
+    def fail_immediately(_path: Path, outcome: system_open.ChooserOutcome) -> None:
+        outcome.error = "RuntimeError: 这个环境没有图形界面组件（tkinter）"
 
-    monkeypatch.setattr(system_open, "_run_open_with_dialog", fail_immediately)
+    monkeypatch.setattr(system_open, "_run_chooser", fail_immediately)
 
     with pytest.raises(system_open.LocalOpenError) as exc_info:
         system_open.open_path_with_chooser(subtitle)
 
     message = str(exc_info.value)
     assert "打开方式" in message
-    assert "0x80004005" in message
+    assert "tkinter" in message
     # 报错必须给出下一步，而不是让用户对着「没能弹出」发呆。
     assert "资源管理器" in message
+
+
+def test_chooser_treats_cancel_as_cancel_not_as_an_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    subtitle = tmp_path / "video.en.vtt"
+    subtitle.write_text("subs", encoding="utf-8")
+
+    monkeypatch.setattr(system_open.os, "name", "nt")
+    monkeypatch.setattr(system_open, "_chooser_window", lambda: None)
+    # 用户点了取消：对话框确实出现过又消失了，线程正常结束。
+    monkeypatch.setattr(
+        system_open,
+        "_run_chooser",
+        lambda _path, outcome: setattr(outcome, "cancelled", True),
+    )
+
+    system_open.open_path_with_chooser(subtitle)  # 不抛
+
+
+def test_chooser_launches_the_program_the_user_picked(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    launched: list[list[str]] = []
+    subtitle = tmp_path / "video.en.vtt"
+    subtitle.write_text("subs", encoding="utf-8")
+    program = tmp_path / "Notepad.exe"
+    program.write_text("MZ", encoding="utf-8")
+
+    monkeypatch.setattr(system_open.os, "name", "nt")
+    monkeypatch.setattr(system_open, "_ask_program", lambda _path: program)
+    monkeypatch.setattr(
+        system_open,
+        "_open_process",
+        lambda command, **_kwargs: launched.append(command),
+    )
+
+    outcome = system_open.ChooserOutcome()
+    system_open._run_chooser(subtitle, outcome)
+
+    # 程序是用户在对话框里选的，路径由本进程拼：`[exe, 文件]`，不经 shell。
+    assert launched == [[str(program), str(subtitle)]]
+    assert outcome.launched == str(program)
+    assert outcome.error is None
 
 
 def test_chooser_does_not_stack_a_second_dialog(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -163,10 +193,10 @@ def test_chooser_does_not_stack_a_second_dialog(monkeypatch: pytest.MonkeyPatch,
     subtitle.write_text("subs", encoding="utf-8")
 
     monkeypatch.setattr(system_open.os, "name", "nt")
-    monkeypatch.setattr(system_open, "_open_with_dialog_window", lambda: 4242)
+    monkeypatch.setattr(system_open, "_chooser_window", lambda: 4242)
     monkeypatch.setattr(
         system_open,
-        "_run_open_with_dialog",
+        "_run_chooser",
         lambda *_args: pytest.fail("已经有一个窗口在等用户，不该再起一个"),
     )
 
@@ -174,6 +204,41 @@ def test_chooser_does_not_stack_a_second_dialog(monkeypatch: pytest.MonkeyPatch,
         system_open.open_path_with_chooser(subtitle)
 
     assert "已经有一个" in str(exc_info.value)
+
+
+def test_program_candidates_skip_dead_entries_and_duplicates(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    alive = tmp_path / "Code.exe"
+    alive.write_text("MZ", encoding="utf-8")
+
+    rows = [
+        system_open.ProgramCandidate("VS Code", alive),
+        system_open.ProgramCandidate("VS Code（重复）", alive),
+        system_open.ProgramCandidate("已卸载", tmp_path / "Gone.exe"),
+    ]
+
+    def fake_candidates(_ext: str) -> list[system_open.ProgramCandidate]:
+        return [row for row in rows if row.executable.is_file()]
+
+    monkeypatch.setattr(system_open, "_program_candidates", fake_candidates)
+    # 只验证「对话框只列真实存在的程序」，不真的开窗口。
+    monkeypatch.setattr(system_open, "_ask_program", lambda _path: None)
+    monkeypatch.setattr(system_open.os, "name", "nt")
+
+    outcome = system_open.ChooserOutcome()
+    system_open._run_chooser(tmp_path / "video.en.vtt", outcome)
+
+    assert outcome.cancelled is True
+
+
+def test_command_executable_handles_quoted_and_bare_paths() -> None:
+    assert (
+        system_open._command_executable('"C:\\Program Files\\App\\app.exe" "%1"')
+        == "C:\\Program Files\\App\\app.exe"
+    )
+    assert system_open._command_executable("C:\\Windows\\notepad.exe %1") == "C:\\Windows\\notepad.exe"
+    assert system_open._command_executable("") == ""
 
 
 def test_chooser_falls_back_to_the_default_app_off_windows(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

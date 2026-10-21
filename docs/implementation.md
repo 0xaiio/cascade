@@ -238,11 +238,11 @@ B站 上传的界面由四个组件加一个图标组成：[BiliIcon](../fronten
 本机打开器位于 [system_open.py](../backend/app/system_open.py)。打开目录时显式调用 `explorer.exe /n, <folder>` 并尽量把窗口置前，减少已有窗口只在任务栏闪烁但没有前置的情况。播放视频不再盲目使用默认文件关联，而是优先选择 VLC、mpv、PotPlayer、MPC、IINA 等可确认解码能力更强的播放器；常见 MP4 可回退到 Windows Media Player。找不到合适播放器时返回 `409`，错误内容包含当前格式和建议安装的播放器。
 
 **打开字幕不挑程序**：`POST /api/jobs/{job_id}/open-subtitle` 与条目级同名接口把
-`JobItem.subtitle_path` 交给系统 —— 缺省（界面走的就是这条）用
-`shell32.SHOpenWithDialog` 在本进程内画出系统的「打开方式」对话框（见 [open_path_with_chooser](../backend/app/system_open.py#L61)）；
-`?mode=default` 才走文件关联，Windows 上该后缀还没有关联程序时**自动改弹选择器**而不是把 `WinError 1155` 抛给用户。
-这条路的坑有三个，都要按顺序处理：**不要请 explorer 托管的现代弹层**（那个宿主失效时调用照样返回 0、窗口一个也没有）；
-**弹不出来必须报错**（等 2.5s 仍没有 `Shell_Dialog` 就 400，绝不 204 空转）；
+`JobItem.subtitle_path` 交给系统 —— 缺省（界面走的就是这条）弹**应用自带的「打开方式」对话框**，候选读系统注册表为该后缀登记的处理器（见 [open_path_with_chooser](../backend/app/system_open.py#L71)）；
+`?mode=default` 才走文件关联，Windows 上该后缀还没有关联程序时**自动改弹这个对话框**而不是把 `WinError 1155` 抛给用户。
+三个坑按顺序处理：**系统那套「打开方式」界面不可依赖**（`OpenAs_RunDLL` 什么窗口都没有；`SHOpenWithDialog`
+在 5 种标志位 × 3 种后缀下都只给一个 680×118 的提示框，没有程序列表）；
+**弹不出来必须报错**（等 3s 仍没有 `TkTopLevel` 就 400，绝不 204 空转；用户点取消则静默返回）；
 **前台只能等、不能抢**（提前 `SetForegroundWindow` 会被前台锁拒绝，而且被拒后对话框不再自行激活）。
 实测与细节见 [technical.md](technical.md#打开字幕文件) 第二~四节。
 字幕位置由 [existing_subtitle_file](../backend/app/output_paths.py#L184) 算：库里的 `subtitle_path` 优先（只验存在），

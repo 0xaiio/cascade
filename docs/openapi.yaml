@@ -866,9 +866,11 @@ paths:
         Hands the subtitle file (`JobItem.subtitle_path`) to the operating system —
         the backend never picks a program itself.
 
-        - `mode=chooser` (**the default**): show the system's "Open with" dialog, so the
-          user picks the program on the spot (and can let Windows remember it). This is
-          the only mode the task center button uses — one click, one dialog.
+        - `mode=chooser` (**the default**): show the app's own "Open with" dialog, which
+          lists the programs the OS has registered for that extension (plus a "Browse…"
+          escape hatch). The app draws this dialog itself because the OS one degrades to
+          a plain notice on some machines. This is the only mode the task center button
+          uses — one click, one dialog.
         - `mode=default`: run the registered handler for the file type. Kept for API
           callers (scripts); the UI no longer offers it, because a click that silently
           depends on a remembered association is exactly what looked like "nothing
@@ -882,8 +884,8 @@ paths:
         - name: mode
           in: query
           required: false
-          description: Which shell verb to use. `chooser` = the system "Open with" dialog
-            (default), `default` = the remembered association.
+          description: Which action to take. `chooser` = the app's "Open with" dialog
+            (default), `default` = the remembered file association.
           schema:
             type: string
             enum: [default, chooser]
@@ -977,8 +979,8 @@ paths:
         - name: mode
           in: query
           required: false
-          description: Which shell verb to use. `chooser` = the system "Open with" dialog
-            (default), `default` = the remembered association.
+          description: Which action to take. `chooser` = the app's "Open with" dialog
+            (default), `default` = the remembered file association.
           schema:
             type: string
             enum: [default, chooser]
