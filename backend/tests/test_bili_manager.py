@@ -161,6 +161,17 @@ class Harness:
             session.add(row)
             session.commit()
 
+    def set_item_subtitle(self, item_id: str, path: Path, language: str = "en") -> None:
+        """给下载条目挂一份字幕（投稿时字幕是从 `JobItem` 读的，不复制到投稿记录）。"""
+        with Session(self.engine) as session:
+            item = session.get(JobItem, item_id)
+            assert item is not None, item_id
+            item.subtitle_path = str(path)
+            item.subtitle_language = language
+            item.subtitle_source = "human"
+            session.add(item)
+            session.commit()
+
     def meta(self, title: str = TITLE) -> UploadMetadata:
         return UploadMetadata(title=title, desc="简介", tags="标签", tid="122")
 
@@ -695,6 +706,96 @@ async def test_retry_on_a_failed_upload_requeues_the_command(tmp_path):
     assert row.attempt == 2
     # 第一次是**命令失败**（`_reject` 路径不查对账），所以整场只发生了一次对账。
     assert harness.transport.called("/x/web/archives") == 1
+    await harness.manager.stop()
+
+
+async def test_retry_on_a_reviewing_upload_only_reuploads_the_subtitle(tmp_path):
+    """审核中的稿件拿不到分P编号 → 字幕记 `failed` → 点重试**只补字幕，不重投视频**。
+
+    这条钉的是「实测会丢字幕」的救回路径。现场（2026-10-19 本机库）：稿件 `state=-30`、
+    `cid` 为空、下载条目里 `en` 人工字幕的 `.vtt` 就在磁盘上。修复前这种情形记成
+    `skipped`，用户点重试得到的回答是「这一条已经上传成功，没有重复投稿」——
+    字幕永远上不去，除非重投一条重复稿件。
+    """
+    calls: list[list[str]] = []
+
+    def counting_runner(argv, timeout, on_line):
+        calls.append(list(argv))
+        if on_line is not None:
+            for line in ("start pre_upload", "Upload completed", "APP接口投稿成功"):
+                on_line(line)
+        return CommandResult(0, "APP接口投稿成功", "")
+
+    transport = FakeBiliTransport(
+        archives=[{"aid": 9, "bvid": "BV9", "title": TITLE, "state": -30}],
+        video=None,  # 审核中：`x/web-interface/view` 取不到，cid 因此为空
+    )
+    harness = make_harness(tmp_path, transport=transport, runner=counting_runner)
+    items = harness.seed_job("job1", "任务", 1)
+    subtitle = Path(items[0]["path"]).with_suffix(".en.vtt")
+    subtitle.write_text("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHello\n", encoding="utf-8")
+    harness.set_item_subtitle(items[0]["id"], subtitle)
+
+    created = await harness.manager.submit_single(
+        job_id="job1", item_id=items[0]["id"], meta=harness.meta(), video_path=Path(items[0]["path"]), make_cover=False, comment=""
+    )
+    await drain(harness.manager)
+
+    first = harness.upload(created.id)
+    assert first.status == BiliUploadStatus.reviewing.value
+    assert first.cid is None
+    assert first.subtitle_state == "failed"
+    assert "分P编号" in first.subtitle_message
+    assert len(calls) == 1
+
+    # 第一次重试：稿件还在审核，cid 依旧取不到 —— 结论必须**如实说仍然失败**，
+    # 而且投稿命令不能再跑一次（那就是账号上多一条重复稿件）。
+    still = await harness.manager.retry_upload(created.id)
+    assert still.action == "reverify"
+    assert "仍然没传上去" in still.message
+    assert len(calls) == 1
+
+    # 审核通过、详情接口能查到 cid 之后，再点一次：这次真的补上了。
+    transport.video = {"cid": 7001, "pic": "https://i0.hdslb.com/bfs/archive/pic.jpg"}
+    done = await harness.manager.retry_upload(created.id)
+    assert done.action == "reverify"
+    assert done.message == "已补传字幕"
+    assert done.upload.subtitle_state == "posted"
+    assert transport.subtitles[0]["oid"] == 7001
+    assert len(calls) == 1  # 全程只有一次投稿命令
+    await harness.manager.stop()
+
+
+async def test_retry_can_still_attach_a_subtitle_that_was_skipped_before_the_fix(tmp_path):
+    """库里**已经**记成 `skipped` 的历史行也要能救回来。
+
+    修复只对新任务生效是不够的：那两条实测丢字幕的稿件就躺在库里、状态已被写成
+    `skipped`。所以判据不能只认 `failed`，还得认「**有字幕文件却没 `posted`**」。
+    反过来也钉住：没有字幕文件的稿件点重试仍然什么都不做（见
+    `test_retry_on_a_published_upload_does_nothing`），补传不是无条件的。
+    """
+    transport = FakeBiliTransport(archives=[{"aid": 5, "bvid": "BV5", "title": TITLE, "state": 0}])
+    harness = make_harness(tmp_path, transport=transport)
+    items = harness.seed_job("job1", "任务", 1)
+    subtitle = Path(items[0]["path"]).with_suffix(".en.vtt")
+    subtitle.write_text("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHello\n", encoding="utf-8")
+    harness.set_item_subtitle(items[0]["id"], subtitle)
+    created = await harness.manager.submit_single(
+        job_id="job1", item_id=items[0]["id"], meta=harness.meta(), video_path=Path(items[0]["path"]), make_cover=False, comment=""
+    )
+    await drain(harness.manager)
+
+    # 复现修复前的历史状态：稿件已发布，字幕却被记成 skipped。
+    harness.set_status(
+        created.id,
+        BiliUploadStatus.published.value,
+        subtitle_state="skipped",
+        subtitle_message="稿件还没核对到 aid/cid，跳过字幕上传",
+    )
+    result = await harness.manager.retry_upload(created.id)
+    assert result.action == "reverify"
+    assert result.upload.subtitle_state == "posted"
+    assert transport.subtitles[-1]["oid"] == 7001
     await harness.manager.stop()
 
 

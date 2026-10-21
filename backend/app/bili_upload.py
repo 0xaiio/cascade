@@ -68,7 +68,7 @@ from .bili_policy import (
     platform_state_text,
     status_for_platform_state,
 )
-from .bili_subtitle import SUBTITLE_SKIPPED, bilibili_language, upload_subtitle
+from .bili_subtitle import SUBTITLE_FAILED, SUBTITLE_SKIPPED, bilibili_language, upload_subtitle
 from .log_safety import sanitize_log_message
 from .models import BiliSeasonStatus, BiliUploadStatus
 
@@ -305,20 +305,47 @@ def _verify(
 def _attach_subtitle(context: UploadContext, target: UploadTarget, result: UploadResult) -> None:
     """稿件已在平台上之后，把 CC 字幕挂上去。**这一步不参与稿件状态的判定。**
 
-    三个前置条件，缺一个就 `skipped`（都是「这次没有字幕可传」，不是失败）：
+    三个前置条件，缺一个就不传（都是「这次没有字幕可传」，但**不是同一种"没有"**）：
 
     1. 有字幕文件 —— 下载阶段就可能判成「该视频没有可用字幕」（需求允许跳过）；
-    2. 稿件已核对到 `aid` / `cid` —— 字幕是挂在**分P**上的，拿不到编号就无处可挂；
-    3. 稿件在平台上（`result.ok`）—— 未核实的稿件连存不存在都不知道。
+    2. 稿件在平台上（`result.ok`）—— 未核实的稿件连存不存在都不知道；
+    3. 稿件对上了 `aid` / `bvid` / `cid` —— 字幕挂在**分P**上，拿不到编号就无处可挂。
+
+    三条的结论分别落成 `skipped` / `skipped` / **`failed`**：
+
+    前两条是「本来就没有可传的东西」，重投时会再走一遍，不需要用户做什么；
+    第三条是**有字幕却挂不上去**，必须记 `failed` —— 因为 `bili_manager.retry_upload`
+    只对 `failed` 开放「只补传字幕、绝不重投视频」那条路。记成 `skipped` 就等于
+    这条字幕永久丢失（实测 2026-10-19 两条真实稿件正是这样丢的：稿件进了审核、
+    `x/web-interface/view` 取不到 cid，字幕被静默跳过，之后点重试只会被告知
+    「已经上传成功」）。
     """
     if not target.subtitle_path:
         result.subtitle_message = "没有已下载的字幕，跳过字幕上传"
+        logger.info("bili 字幕跳过：index=%s reason=没有字幕文件", target.index)
         return
     if not result.ok:
         result.subtitle_message = "稿件未确认已发布，跳过字幕上传"
+        logger.info(
+            "bili 字幕跳过：index=%s status=%s reason=稿件未确认已发布", target.index, result.status
+        )
         return
     if not (result.aid and result.cid and result.bvid):
-        result.subtitle_message = "稿件还没核对到 aid/cid，跳过字幕上传"
+        # 走到这里说明稿件**确实在平台上**（`ok` 为真），但分P编号还取不到。
+        # 审核/转码中的稿件查 `x/web-interface/view` 会得到 -404，`cid` 因此为空。
+        result.subtitle_state = SUBTITLE_FAILED
+        result.subtitle_message = (
+            f"稿件已提交（{result.status}），但平台还没给出分P编号，字幕暂时传不了；"
+            "稍后在字幕这一行点「重传字幕」，只会补传字幕、不会重投视频"
+        )
+        logger.warning(
+            "bili 字幕暂不可挂：index=%s status=%s aid=%s bvid=%s cid=%s",
+            target.index,
+            result.status,
+            result.aid,
+            result.bvid,
+            result.cid,
+        )
         return
 
     lan = bilibili_language(target.subtitle_language)

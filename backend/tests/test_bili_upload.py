@@ -241,6 +241,32 @@ def test_without_a_subtitle_the_step_is_skipped_not_failed(tmp_path):
     assert transport.called("/x/v2/dm/subtitle/draft/save") == 0
 
 
+def test_subtitle_that_cannot_get_a_cid_is_failed_so_it_can_be_retried(tmp_path):
+    """审核中的稿件取不到分P编号（`x/web-interface/view` 返回 -404），字幕必然传不了。
+
+    **结论必须是 `failed` 而不是 `skipped`。** 只有 `failed` 才让
+    `bili_manager.retry_upload` 打开「只补传字幕、绝不重投视频」那条路；记成 `skipped`，
+    用户点重试只会被告知「这一条已经上传成功」，这条字幕就永久丢了。
+
+    实测依据（2026-10-19，本机库）：两条 `reviewing` 稿件 `aid`/`bvid` 都有、`cid` 为空、
+    下载条目里 `en` 人工字幕的 `.vtt` 就在磁盘上 —— 修复前就是被记成 `skipped` 的。
+    """
+    transport = FakeBiliTransport(archives=[archive(aid=111, bvid="BV1xx", state=-30)], video=None)
+    video = write_video(tmp_path / "a.mp4")
+    result = run_single(
+        make_context(transport, runner=command_runner(), tmp_path=tmp_path),
+        UploadTarget(1, TITLE, video, subtitle_path=_subtitle(tmp_path), subtitle_language="en"),
+        single_meta(),
+    )
+    assert result.status == BiliUploadStatus.reviewing.value
+    assert result.ok is True
+    assert result.cid is None
+    assert result.subtitle_state == "failed"
+    assert "分P编号" in result.subtitle_message
+    assert "重传字幕" in result.subtitle_message
+    assert transport.called("/x/v2/dm/subtitle/draft/save") == 0
+
+
 def test_subtitle_is_skipped_when_the_video_never_got_verified(tmp_path):
     """未核实的稿件连存不存在都不知道，拿不到 aid/cid，字幕无处可挂。"""
     transport = FakeBiliTransport(archives=[])

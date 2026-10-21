@@ -6,12 +6,14 @@ import {
   RETRYABLE_SEASON_STATUSES,
   RETRYABLE_UPLOAD_STATUSES,
   isBadSeason,
+  isBadSubtitle,
   isBadUpload,
+  isNotableSubtitle,
   isNotableUpload,
   isRetryableSeason,
   isRetryableUpload
 } from "./biliStatus";
-import type { BiliSeasonStatus, BiliUploadStatus } from "./types";
+import type { BiliSeasonStatus, BiliSubtitleState, BiliUploadStatus } from "./types";
 
 /**
  * 状态判定。
@@ -116,13 +118,29 @@ describe("徽标与条目可见性", () => {
   });
 
   test("有错误或有视频链接的条目才值得渲染一行", () => {
-    expect(isNotableUpload({ error: "失败了", video_url: null })).toBe(true);
-    expect(isNotableUpload({ error: null, video_url: "https://www.bilibili.com/video/BV1xx411c7mD" })).toBe(true);
-    expect(isNotableUpload({ error: "失败了", video_url: "https://www.bilibili.com/video/BV1xx411c7mD" })).toBe(true);
+    expect(isNotableUpload({ error: "失败了", video_url: null, subtitle_state: "skipped" })).toBe(true);
+    expect(isNotableUpload({ error: null, video_url: "https://www.bilibili.com/video/BV1xx411c7mD", subtitle_state: "skipped" })).toBe(true);
+    expect(isNotableUpload({ error: "失败了", video_url: "https://www.bilibili.com/video/BV1xx411c7mD", subtitle_state: "skipped" })).toBe(true);
   });
 
   test("两样都没有就不渲染 —— 空字符串等同于「没有」，不是「有」", () => {
-    expect(isNotableUpload({ error: null, video_url: null })).toBe(false);
-    expect(isNotableUpload({ error: "", video_url: "" })).toBe(false);
+    expect(isNotableUpload({ error: null, video_url: null, subtitle_state: "skipped" })).toBe(false);
+    expect(isNotableUpload({ error: "", video_url: "", subtitle_state: "posted" })).toBe(false);
+  });
+
+  test("字幕失败也算「有话说」—— 否则没有 bvid 的稿件会把这件事藏掉", () => {
+    expect(isNotableUpload({ error: null, video_url: null, subtitle_state: "failed" })).toBe(true);
+  });
+});
+
+describe("CC 字幕的两档判据与稿件状态无关", () => {
+  const ALL_SUBTITLE_STATES: BiliSubtitleState[] = ["posted", "skipped", "failed"];
+
+  test("只有失败算「出问题」：已上传的稿件也可能字幕失败", () => {
+    expect(ALL_SUBTITLE_STATES.filter(isBadSubtitle)).toEqual(["failed"]);
+  });
+
+  test("posted 与 failed 都要说一句，skipped 不必（表单里已经写过「无字幕」）", () => {
+    expect(ALL_SUBTITLE_STATES.filter(isNotableSubtitle)).toEqual(["posted", "failed"]);
   });
 });

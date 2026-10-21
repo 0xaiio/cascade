@@ -43,6 +43,8 @@
 | [013](013-season-section-id-confusion.md) | 「新建合集」之后的归集把合集 id 当成分区 id，平台每次都 `-404` 且重试不自愈 | 本次 | `season/add` 回的是**合集** id，而归集接口的 `sectionId` 要的是**分区** id（实测 `9343273` → `10455347`）。两者都是 `int`、又被同一个变量名装着，替身还一律回 `code:0` —— 本地全绿、真账号必失败；重试读回落库的 `season_id`，于是同一个错值再发一遍 |
 | [014](014-a-dead-notify-switch.md) | 「完成后通知」是一个谁都没实现的开关 | `e74fddc` | 字段在 `schemas.py`、开关在 `DownloadOptionsPanel`，但前后端**没有任何一行**消费它（检索 `notify` 只命中定义处）。现按「全局选方式 + 逐任务决定要不要」两层接线：提醒在浏览器里做（Web Audio 合成提示音 + 右下角自动缩回的浮层），后端只存偏好并把逐任务开关从 `options_json` 抬进 `JobRead` |
 | [015](015-orphan-items-never-resume.md) | 进程重启后，没下完的任务永远停在「排队中」 | `ead7b81` | 队列是内存里的 `asyncio.Queue`，进程一退 id 就没了，而库里还留着 `queued`/`running` —— 没有任何代码在启动时把两者对上，于是它们既不在队列也不在终态（生产库曾 332 `queued` + 3 `running`）。启动时先改库、再起 worker；默认重新排队并断点续传，`paused` 与被取消的任务保持原样 |
+| [016](016-subtitle-lost-while-the-video-is-in-review.md) | 稿件审核期间，字幕被静默丢掉且再也补不上 | 本次 | 稿件进审核时 `x/web-interface/view` 拿不到分P编号 ⇒ `cid` 为空 ⇒ 字幕挂不上，却被记成 `skipped`；而重试只对 `failed` 开放「只补字幕」⇒ 有字幕的稿件字幕永久丢失（实测本机库 2 条）。改为记 `failed`，并把补传判据放宽到「有字幕文件且还没 `posted`」，历史 `skipped` 行也能救回 |
+| [017](017-subtitle-status-never-reached-the-ui.md) | 字幕结论从来没有在界面上出现过 | 本次 | 后端三档状态、文案、字段都齐了，但渲染代码（`BiliJobStatus.tsx` / `biliStatus.ts` / `types.ts`）与用例都漏在工作区、没进版本库 ⇒ 用户看不到「CC 字幕」那一行，也没有「重传字幕」入口。本轮补上渲染并新增 5 + 2 条用例；此前 `tsc` 也是红的（测试调用漏了新参数） |
 
 ## 本轮（2026-10-01）背景
 

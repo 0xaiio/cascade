@@ -52,11 +52,12 @@
 | FR-30 | 同一语言内**人工/官方字幕优先**，缺失才降级到机器生成（ASR）；两者都没有则**跳过字幕、不中断下载**。「跳过」必须请求一个匹配不到任何轨的语言代码实现，不得退化成空列表或 `["all"]`。 | [resolve_subtitle_plan](../backend/app/subtitle_plan.py#L200)、[`_options_with_subtitle_plan`](../backend/app/job_manager.py#L1019) |
 | FR-31 | 下载结论要记录**语言 + 来源类型（人工 / 自动生成）+ 文件路径**，供上传环节消费；落库判据是**磁盘上真的有那个文件**，不是下载前的计划。 | [`_record_subtitle_result`](../backend/app/job_manager.py#L1062)、[`find_subtitle_file`](../backend/app/output_paths.py#L162) |
 | FR-32 | 视频投稿成功后把已下载的字幕**一并提交为可关闭的 CC 字幕**（字幕轨而非硬字幕）：SRT/VTT 转成 BCC，挂在分P 的 `cid` 上，语言标识用**平台白名单里的值**。 | [`upload_subtitle`](../backend/app/bili_subtitle.py#L218)、[`save_subtitle`](../backend/app/bili_api.py#L366)、[`_attach_subtitle`](../backend/app/bili_upload.py#L305) |
-| FR-33 | 无可用字幕时**只跳过字幕上传**，视频投稿流程照常完成；字幕这一步失败**不把已发布的稿件翻成失败**，且提供**只重传字幕**（绝不重投视频）的重试。 | [`SubtitleOutcome`](../backend/app/bili_subtitle.py#L209)、[`retry_upload`](../backend/app/bili_manager.py#L921) |
+| FR-33 | 无可用字幕时**只跳过字幕上传**，视频投稿流程照常完成；字幕这一步失败**不把已发布的稿件翻成失败**，且提供**只重传字幕**（绝不重投视频）的重试。**「跳过」与「没做成」必须分开**：稿件在审核/转码中时平台还查不到分P编号，这是「有字幕但挂不上」，要记成失败并允许补传 —— 记成跳过等于那条字幕永久丢失（见 [016](../ai/bug-fix/016-subtitle-lost-while-the-video-is-in-review.md)）。 | [`SubtitleOutcome`](../backend/app/bili_subtitle.py#L209)、[`retry_upload`](../backend/app/bili_manager.py#L921)、[`_attach_subtitle`](../backend/app/bili_upload.py#L305) |
 | FR-34 | 投稿表单在**提交前**告诉用户每条视频会带什么字幕（如 `en · 人工`、`无字幕`）；这句文案由服务端拼好，前端不自己拼一遍。 | [`subtitle_summary`](../backend/app/subtitle_plan.py#L92)、[`BiliPrefillItem.subtitle`](../backend/app/schemas.py#L411) |
 | FR-35 | 任务中心每个已下到字幕的视频条目都能**用本机的程序打开字幕文件**：按钮位于「打开视频所在文件夹」右侧、图标是字幕（CC）、悬停提示「打开字幕文件」。点主段用系统关联打开，点右段弹系统的「打开方式」窗口自行挑程序。**不自己维护编辑器清单、不自己记「上次用的程序」**——那两件事的所有者是操作系统。 | [`SubtitleOpenButton`](../frontend/src/components/SubtitleOpenButton.tsx#L17)、[`open_path_with_chooser`](../backend/app/system_open.py#L46)、[`subtitle_file`](../backend/app/job_artifacts.py#L56) |
 | FR-36 | 没有字幕文件的条目，该按钮**必须置灰**并说明原因；后端对这种情况返回 `409`，而不是 204 空转。按钮的可点性只看读模型给的 `subtitle_path`（真的存在才给值）。 | [`_project_subtitle_path`](../backend/app/job_read_model.py#L110)、[`existing_subtitle_file`](../backend/app/output_paths.py#L184) |
 | FR-37 | 「打开字幕」不接收前端传入的路径；`mode` 只有 `default` / `chooser` 两个取值，其余一律 `422`。打开失败的原因显示在**对应那一行**，不进全局提示区。 | [`SubtitleOpenMode`](../backend/app/routers/job_files.py#L23)、[`runLocalFileAction`](../frontend/src/components/JobQueue.tsx#L125) |
+| FR-38 | 字幕这一步的结论**必须在任务卡片里看得见、失败时点得到**：`posted` / `failed` 渲染一行「CC 字幕」+ 服务端那句文案，`failed` 还给「重传字幕」；`skipped` 不渲染（表单里已写过「无字幕」）。与稿件行**分两行**，互不冒充。 | [`BiliJobStatus`](../frontend/src/components/BiliJobStatus.tsx#L28)、[`isBadSubtitle`](../frontend/src/biliStatus.ts#L68)、[`isNotableUpload`](../frontend/src/biliStatus.ts#L85) |
 
 ## 非功能需求
 

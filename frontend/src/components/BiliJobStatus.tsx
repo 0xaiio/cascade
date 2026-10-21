@@ -1,5 +1,14 @@
+import { Fragment } from "react";
 import { AlertTriangle, ExternalLink, RotateCcw } from "lucide-react";
-import { isBadSeason, isBadUpload, isNotableUpload, isRetryableSeason, isRetryableUpload } from "../biliStatus";
+import {
+  isBadSeason,
+  isBadSubtitle,
+  isBadUpload,
+  isNotableSubtitle,
+  isNotableUpload,
+  isRetryableSeason,
+  isRetryableUpload
+} from "../biliStatus";
 import type { BiliJobUploads } from "../types";
 
 /**
@@ -50,32 +59,62 @@ export function BiliJobStatus({
         // 先取出这个值：它在下面的闭包里要用，而对象属性的窄化**不会**穿过闭包 ——
         // 于是只能写成 `upload.video_url as string` 这种把类型系统关掉的写法。
         const videoUrl = upload.video_url;
+        // 字幕这一行只在**有话要说**时出现（`posted` / `failed`）。`skipped` 是「这个视频
+        // 本来就没字幕」，投稿表单里已经写过「无字幕」，每行再写一遍只会把任务卡片塞满。
+        const subtitleNotable = isNotableSubtitle(upload.subtitle_state) && Boolean(upload.subtitle_message);
+        const subtitleBad = isBadSubtitle(upload.subtitle_state);
         return (
-          <div key={upload.id} className={`bili-status-line ${isBadUpload(upload.status) ? "is-bad" : ""}`}>
-            <span className="bili-status-label">
-              {upload.index}. {upload.title} · {upload.status_text}
-            </span>
-            {videoUrl && (
-              <button
-                className="bili-link"
-                type="button"
-                onClick={() => onOpenVideoPage(videoUrl)}
-                aria-label={`在 B 站打开 ${upload.title}`}
-              >
-                <ExternalLink size={14} />
-                在 B 站查看
-              </button>
+          // 用 Fragment 而不是包一层 div：`.bili-job-status` 是 `display: grid` + `gap`，
+          // 多包一层就把「一行一个网格项」的节奏打断，行距会变成两层叠加。
+          <Fragment key={upload.id}>
+            <div className={`bili-status-line ${isBadUpload(upload.status) ? "is-bad" : ""}`}>
+              <span className="bili-status-label">
+                {upload.index}. {upload.title} · {upload.status_text}
+              </span>
+              {videoUrl && (
+                <button
+                  className="bili-link"
+                  type="button"
+                  onClick={() => onOpenVideoPage(videoUrl)}
+                  aria-label={`在 B 站打开 ${upload.title}`}
+                >
+                  <ExternalLink size={14} />
+                  在 B 站查看
+                </button>
+              )}
+              {upload.error && <span className="bili-status-detail">{upload.error}</span>}
+              {upload.advice && <span className="bili-status-advice">{upload.advice}</span>}
+              {isRetryableUpload(upload.status) && (
+                <button className="ghost-button bili-retry" type="button" onClick={() => onRetryUpload(upload.id)}>
+                  <RotateCcw size={15} />
+                  {upload.status === "unverified" ? "重新核对" : "重试"}
+                </button>
+              )}
+              {upload.status === "unverified" && <AlertTriangle size={14} className="bili-warn-icon" />}
+            </div>
+            {subtitleNotable && (
+              // 字幕与稿件**分两行说**：一条 `published` 的稿件可以同时是字幕 `failed`，
+              // 挤进上面那行会让「已上传」和「字幕失败」看起来互相矛盾。
+              <div className={`bili-status-line bili-subtitle-line ${subtitleBad ? "is-bad" : ""}`}>
+                {subtitleBad && <AlertTriangle size={14} className="bili-warn-icon" />}
+                <span className="bili-status-label">CC 字幕</span>
+                <span className="bili-status-detail">{upload.subtitle_message}</span>
+                {subtitleBad && (
+                  // 复用同一个重试入口：服务端看到「已发布 + 字幕失败」只会重传字幕，
+                  // **不会再投一遍视频**（见 `bili_manager.retry_upload`）。
+                  <button
+                    className="ghost-button bili-retry"
+                    type="button"
+                    onClick={() => onRetryUpload(upload.id)}
+                    aria-label={`重新上传字幕 ${upload.title}`}
+                  >
+                    <RotateCcw size={15} />
+                    重传字幕
+                  </button>
+                )}
+              </div>
             )}
-            {upload.error && <span className="bili-status-detail">{upload.error}</span>}
-            {upload.advice && <span className="bili-status-advice">{upload.advice}</span>}
-            {isRetryableUpload(upload.status) && (
-              <button className="ghost-button bili-retry" type="button" onClick={() => onRetryUpload(upload.id)}>
-                <RotateCcw size={15} />
-                {upload.status === "unverified" ? "重新核对" : "重试"}
-              </button>
-            )}
-            {upload.status === "unverified" && <AlertTriangle size={14} className="bili-warn-icon" />}
-          </div>
+          </Fragment>
         );
       })}
     </div>

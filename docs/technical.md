@@ -218,7 +218,7 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 投稿走 `biliup-rs 0.2.4`（`biliup.exe`，安装方式 `winget install --id ForgQi.biliup-rs --exact`），命令组装在 [build_upload_argv](../backend/app/bili_bin.py#L143)。三个必须知道的事实：
 
 - **登录必须一路做到拿到投稿令牌。** `biliup` 的 `login_by_cookies` 在**发出任何投稿请求之前**会拿 `token_info.access_token` 去 `passport.bilibili.com/x/passport-login/oauth2/info` 校验一次；`access_token` 是空串时 B站 返回 `-400 请求错误`，`biliup` 随即以 `Err` 退出 —— 全程约 1 秒、一个字节都不会上传，而错误码本身读不出「缺令牌」这层意思。所以 [exchange_tv_token](../backend/app/bili_auth.py#L142) 会补上 TV 端三步交换（申请二维码 → 用用户自己的 cookies 替他确认 → 轮询换回 `token_info`），「登录」的完成判据是**拿到令牌**而不是「文件里有 SESSDATA」。详见 bug-fix 记录 [011](../ai/bug-fix/011-biliup-refuses-a-token-less-cookie-file.md)。
-- **返回码 0 只说明命令跑完了，不说明平台上多了稿**。所以 [run_single](../backend/app/bili_upload.py#L346) 在命令返回后一定进 [_verify](../backend/app/bili_upload.py#L258)：用 `GET https://member.bilibili.com/x/web/archives` 回读账号近期稿件，按标题前缀在列表里找（[find_archive](../backend/app/bili_api.py#L127)，带退避重试，因为平台侧列表有延迟）。**查不到就停在 `unverified`** —— 这是本功能唯一不肯妥协的一条，宁可让用户去创作中心确认，也不拿「命令没报错」冒充「已发布」。
+- **返回码 0 只说明命令跑完了，不说明平台上多了稿**。所以 [run_single](../backend/app/bili_upload.py#L373) 在命令返回后一定进 [_verify](../backend/app/bili_upload.py#L258)：用 `GET https://member.bilibili.com/x/web/archives` 回读账号近期稿件，按标题前缀在列表里找（[find_archive](../backend/app/bili_api.py#L127)，带退避重试，因为平台侧列表有延迟）。**查不到就停在 `unverified`** —— 这是本功能唯一不肯妥协的一条，宁可让用户去创作中心确认，也不拿「命令没报错」冒充「已发布」。
 - **`--submit` 这个开关照传，但它不起作用。** 上游 0.2.4 的 `match submit` 两个分支都调 `submit_by_app`（web 分支被注释掉了），实际提交永远走 `/x/vu/app/add`。早先文档里「`--submit web` 是必需的」是一条**写错的结论**：真正拦住投稿的是上面那次启动时的令牌校验，不是提交接口。
 
 
@@ -262,7 +262,7 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 
 界面上让用户选**新建合集 / 加入已有合集 / 不归集**，但后端的新逻辑只有一行赋值：
 `submit_collection` / `submit_single` 把用户选中的编号写进 [BiliSeason.season_id](../backend/app/models.py#L195)，
-而 [_group_work](../backend/app/bili_manager.py#L1271) 本来就读它当 `existing_season_id`
+而 [_group_work](../backend/app/bili_manager.py#L1287) 本来就读它当 `existing_season_id`
 并据此跳过 `create_season`。**复用既有的「重试不重复建合集」机制，而不是另开一条归集分支** ——
 另开一条就要把「建集 + 加集 + 失败重试 + 状态收敛」再实现一遍。
 
@@ -303,7 +303,7 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 **「不归集」在两条路径上的落库行为相反，这是刻意的**：
 
 - **合集**：落成终态 [skipped](../backend/app/models.py#L129) 而不是 `pending`。
-  [_maybe_group](../backend/app/bili_manager.py#L1246) 只自动归集 `pending`，留 `pending` 会让
+  [_maybe_group](../backend/app/bili_manager.py#L1262) 只自动归集 `pending`，留 `pending` 会让
   「不归集」根本不管用，且界面上挂一个永远不会结束的徽标。但记录**照建** —— 不落库的话界面上
   什么都不显示，用户分不清是「没归集」还是「还没开始归」。
 - **单视频**：`_upsert_season(create_if_missing=False)` **一条记录都不建**。单视频的默认恰好
@@ -362,8 +362,23 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
   「视频已经传成功」之后，抛出去会让一条**已发布**的稿件被标成失败，而用户看到的错误还是「字幕没传上去」。
 - **字幕的三档状态不进徽标**。徽标回答「传上去没有」；把「已发布 + 字幕失败」显示成一种新的失败档，
   用户能做的唯一正确动作却是「重传字幕」而不是「重投视频」。
-- **补救只重传字幕**：已发布/审核中且 `subtitle_state=failed` 时，重试走 `_reverify_work` 并带上字幕，
-  回执「已重新上传字幕」。重投视频不可撤销，只重传字幕是幂等的。
+- **补救只重传字幕**：已发布/审核中、且字幕「失败过」或「有字幕文件却没 `posted`」时，重试走
+  `_reverify_work` 并带上字幕，**不跑投稿命令**。重投视频不可撤销，只重传字幕是幂等的
+  （同一语言轨再传是覆盖）。补传的结果按实际结论回话：成功是「已补传字幕」，
+  仍失败是「字幕仍然没传上去：<原因>」—— 稿件还在审核时补传本来就可能再次失败。
+
+### 「跳过」和「没做成」必须分开记
+
+字幕有 `posted` / `skipped` / `failed` 三档，其中 **`skipped` 只该表示「这个视频确实没有可传的字幕」**
+（没下载到、文件已被删、格式不是 SRT/VTT）。「有字幕但挂不上去」是另一回事，必须记 `failed`。
+
+最典型的一种是**稿件还在审核/转码就投稿了字幕**：B站 的 `x/web-interface/view` 对这类稿件返回 `-404`，
+`cid` 取不到，而字幕正是挂在分P（`cid`）上的。这时如果记成 `skipped`，下游
+`retry_upload` 会因为「状态不是 failed」直接回「这一条已经上传成功」，**这条字幕就永久丢了**
+（2026-10-19 本机库实测丢了两条，见 [ai/bug-fix/016](../ai/bug-fix/016-subtitle-lost-while-the-video-is-in-review.md)）。
+
+判据一句话：**一个枚举值不能同时表达「不需要」和「没做成」** —— 下游一定是按键值分支的，
+两种含义共用一个值，就必然有一条分支走错。
 
 转换侧另有两条：读文件用 `utf-8-sig`（带 BOM 的 SRT 不是罕见情况）；**只合并相邻且内容完全相同**
 的字幕（ASR 常把一句话切成好几条，但「内容相同却不相邻」是副歌/重复台词，不能合并）。

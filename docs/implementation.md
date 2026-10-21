@@ -188,7 +188,7 @@ B站 上传是一条与下载完全解耦的链路，模块划分（详见 [设�
   所以 `zh-Hans` 压成 `zh`、繁体三档原样保留、认不出来退 `en`。
   这条实测靠 `submit=false`（只存草稿、不发布）逐个枚举候选值得到 —— 它是唯一能在
   **不动任何已发布稿件**的前提下验证接口形态的方式。
-- **字幕路径只在 `JobItem` 上存一份**（[`_subtitle_of`](../backend/app/bili_manager.py#L1140) 从那里读），
+- **字幕路径只在 `JobItem` 上存一份**（[`_subtitle_of`](../backend/app/bili_manager.py#L1156) 从那里读），
   投稿记录里不复制；读的时候还要**再看一次文件在不在**，不在就当没有。
 - **字幕失败有专门的补救动作**：已发布/审核中且 `subtitle_state=failed` 的稿件，重试走
   `_reverify_work` 并带上字幕，回执「已重新上传字幕」。**绝不**为了字幕重投一次视频。
@@ -197,7 +197,7 @@ B站 上传是一条与下载完全解耦的链路，模块划分（详见 [设�
 
 前端 API 调用集中在 [api.ts](../frontend/src/api.ts#L40)。共享类型集中在 [types.ts](../frontend/src/types.ts)。[App.tsx](../frontend/src/App.tsx#L68) 只做状态编排与布局，展示拆成解析面板 [UrlAnalyzer](../frontend/src/components/UrlAnalyzer.tsx#L29)、解析结果 [AnalysisPanel](../frontend/src/components/AnalysisPanel.tsx#L12)、下载选项 [DownloadOptionsPanel](../frontend/src/components/DownloadOptionsPanel.tsx#L26)、任务中心 [JobQueue](../frontend/src/components/JobQueue.tsx#L23)、设置 [SettingsPanel](../frontend/src/components/SettingsPanel.tsx#L70)，基础件是 [SearchableLanguageSelect](../frontend/src/components/SearchableLanguageSelect.tsx#L16) / [Toggle](../frontend/src/components/Toggle.tsx#L9) / [StatusPill](../frontend/src/components/StatusPill.tsx#L4)；cookies 区域与代理区域分别是 [CookieSection](../frontend/src/components/CookieSection.tsx#L121) 和 [ProxySection](../frontend/src/components/ProxySection.tsx#L140)。字幕文案与来源归一是纯模块 [subtitles.ts](../frontend/src/subtitles.ts#L12)，cookies 锁库错误到界面状态的映射是 [cookieLock.ts](../frontend/src/cookieLock.ts#L20)。
 
-B站 上传的界面由四个组件加一个图标组成：[BiliIcon](../frontend/src/components/BiliIcon.tsx#L12)（手绘 SVG，品牌色只落在图标本身）、[BiliUploadButton](../frontend/src/components/BiliUploadButton.tsx#L19)（图标 + 一句人话，`idle` 档显示动作词，其余档原样显示后端徽标文案）、[BiliUploadDialog](../frontend/src/components/BiliUploadDialog.tsx#L63)（单视频与合集**共用**一个模态表单，合集显示逐条预览）、[BiliJobStatus](../frontend/src/components/BiliJobStatus.tsx#L19)（任务卡片里的明细与重试入口，**只在有话说时才渲染**）、[BiliLoginSection](../frontend/src/components/BiliLoginSection.tsx#L29)（设置面板里的体检 / 扫码 / 导入 / 修复工具）。硬限数字与状态文案全部来自服务端，前端只负责显示成 `12/80` 与选颜色 —— 自己写一份常量迟早出现「界面说没超、提交回来 400」。
+B站 上传的界面由四个组件加一个图标组成：[BiliIcon](../frontend/src/components/BiliIcon.tsx#L12)（手绘 SVG，品牌色只落在图标本身）、[BiliUploadButton](../frontend/src/components/BiliUploadButton.tsx#L19)（图标 + 一句人话，`idle` 档显示动作词，其余档原样显示后端徽标文案）、[BiliUploadDialog](../frontend/src/components/BiliUploadDialog.tsx#L63)（单视频与合集**共用**一个模态表单，合集显示逐条预览）、[BiliJobStatus](../frontend/src/components/BiliJobStatus.tsx#L28)（任务卡片里的明细与重试入口，**只在有话说时才渲染**）、[BiliLoginSection](../frontend/src/components/BiliLoginSection.tsx#L29)（设置面板里的体检 / 扫码 / 导入 / 修复工具）。硬限数字与状态文案全部来自服务端，前端只负责显示成 `12/80` 与选颜色 —— 自己写一份常量迟早出现「界面说没超、提交回来 400」。
 
 辅助说明统一走 [HelpPopover](../frontend/src/components/HelpPopover.tsx#L42)：它是**非模态浮层**，默认收起；桌面端悬停即看、点击钉住，窄屏（`≤640px`）渲染为贴底抽屉。三条实现约定值得单独记住：
 

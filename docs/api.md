@@ -335,17 +335,19 @@ cookies 体检结果。字段分三层：
 
 | 字段 | 取值 | 说明 |
 | --- | --- | --- |
-| `subtitle_state` | `posted` / `skipped` / `failed`，默认 `skipped` | 字幕这一步自己的结论。**不参与徽标聚合**，也绝不把 `published` 翻成 `failed` |
+| `subtitle_state` | `posted` / `skipped` / `failed`，默认 `skipped` | 字幕这一步自己的结论。**不参与徽标聚合**，也绝不把 `published` 翻成 `failed`。`skipped` 只表示「确实没有可传的字幕」；「有字幕但挂不上」（例如稿件还在审核、拿不到分P编号）记 `failed` |
 | `subtitle_lan` | 平台侧实际用的标识（`zh` / `en` / `zh-Hant`…），未传时 `""` | **不是** `zh-CN` / `en-US` —— 平台不接受这两个值（实测 `code=79011 不合法的语言`），也不接受 `zh-Hans` / `en-GB`。白名单只有 `zh` / `en` / `zh-Hant` / `zh-TW` / `zh-HK` / `ja` / `ko` / `yue` / `fr` |
-| `subtitle_message` | 恒非空（成功也写一句） | 给用户看的那句：「没有已下载的字幕，跳过字幕上传」/「CC 字幕已上传（N 条，en），观众可在播放器里开关」/ 失败原因 |
+| `subtitle_message` | 恒非空（成功也写一句） | 给用户看的那句：「没有已下载的字幕，跳过字幕上传」/「CC 字幕已上传（N 条，en），观众可在播放器里开关」/「稿件已提交（reviewing），但平台还没给出分P编号…」/ 失败原因 |
 
 提交前，`GET /api/bilibili/prefill` 的每条 `BiliPrefillItem.subtitle` 会告诉界面**这一条会带什么字幕**
 （`en · 人工` / `zh · 自动生成` / `无字幕` / 空串）。这句文案由服务端
 [`subtitle_summary`](../backend/app/subtitle_plan.py#L92) 拼好 —— 前端自己拼一遍就会出现
 「界面写自动生成、后端写 ASR」两套说法。
 
-已发布/审核中且 `subtitle_state == failed` 的稿件，重试走**只重传字幕**（`action=reverify`、
-回执「已重新上传字幕」），**不会**为了字幕重投一次视频。
+已发布/审核中的稿件，只要字幕**失败过**、或者**有字幕文件却还没 `posted`**，重试就走
+**只重传字幕**（`action=reverify`），**不会**为了字幕重投一次视频。回执按实际结论给：
+补上了是「已补传字幕」，仍失败是「字幕仍然没传上去：<原因>」（稿件还在审核时补传本来就可能再失败）。
+补传对同一语言轨是**覆盖**，不是新增。
 
 ## 错误语义
 

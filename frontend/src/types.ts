@@ -284,6 +284,14 @@ export type BiliUploadStatus =
 /** 合集归集状态。`skipped` = 用户在投稿时选了「不归集」，是**终态**。 */
 export type BiliSeasonStatus = "pending" | "grouping" | "grouped" | "failed" | "skipped";
 
+/**
+ * CC 字幕这一步的结论。**取值与服务端 `bili_subtitle` 的三档一一对应**。
+ *
+ * 它**不是**稿件状态的一档：`published` + `failed` 是合法组合（视频投上去了、字幕没传成），
+ * 界面必须能把这两件事分开说。`skipped` 表示「这次没有字幕可传」，是常态而不是错误。
+ */
+export type BiliSubtitleState = "posted" | "skipped" | "failed";
+
 /** 版权取值。与 B站 接口的 `copyright` 同值域，所以界面不需要翻译层。 */
 export type BiliCopyright = "1" | "2";
 
@@ -447,7 +455,7 @@ export interface BiliUpload {
    * CC 字幕这一步的结论。**它与 `status` 是两件事**：字幕没传上去时 `status` 照样是
    * `published`，界面要能同时说清这两件事，而不是二选一。
    */
-  subtitle_state: "posted" | "skipped" | "failed";
+  subtitle_state: BiliSubtitleState;
   subtitle_lan: string;
   subtitle_message: string;
   error: string | null;

@@ -86,7 +86,7 @@ from .bili_policy import (
     MISSING_VIDEO,
     NOT_LOGGED_IN,
 )
-from .bili_subtitle import SUBTITLE_FAILED
+from .bili_subtitle import SUBTITLE_FAILED, SUBTITLE_POSTED
 from .subtitle_plan import subtitle_summary
 from .bili_read_model import (
     IN_FLIGHT_STATUSES,
@@ -937,13 +937,19 @@ class BiliManager:
                 # **字幕是唯一还能补做的动作**：视频已经在平台上了，重投只会多一条重复稿件；
                 # 但字幕那次失败很可能是暂时的（平台侧延迟 / 限流），而且它是幂等的
                 # （同一个语言轨再传一次是覆盖，不是多一条）。
-                if row.subtitle_state != SUBTITLE_FAILED:
+                subtitle_path, subtitle_language = self._subtitle_of(session, row)
+                # 两把钥匙都开这扇门：
+                #   - `failed`：字幕这一次确实传失败了；
+                #   - **有字幕文件但还没 `posted`**：`skipped` 混着两种含义（本来就没字幕 /
+                #     有字幕但当时挂不上）。只认 `failed` 的话，修复前被误记成 `skipped`
+                #     的历史行（实测两条）永远救不回来。见 `ai/bug-fix/016`。
+                recoverable = subtitle_path is not None and row.subtitle_state != SUBTITLE_POSTED
+                if row.subtitle_state != SUBTITLE_FAILED and not recoverable:
                     return BiliRetryRead(
                         action="none",
                         message="这一条已经上传成功，没有重复投稿（避免在 B 站留下重复稿件）",
                         upload=read,
                     )
-                subtitle_path, subtitle_language = self._subtitle_of(session, row)
                 updated = await asyncio.to_thread(
                     self._reverify_work,
                     upload_id,
@@ -953,7 +959,17 @@ class BiliManager:
                     subtitle_path,
                     subtitle_language,
                 )
-                return BiliRetryRead(action="reverify", message="已重新上传字幕", upload=updated)
+                return BiliRetryRead(
+                    action="reverify",
+                    # 补传**可能还是失败**（稿件还在审核、cid 依旧取不到）。笼统说「已重新上传字幕」
+                    # 会让用户以为成了 —— 这里按实际结论回话，失败时把平台的或我们自己的原因带出来。
+                    message=(
+                        f"字幕仍然没传上去：{updated.subtitle_message or '原因未记录'}"
+                        if updated.subtitle_state == SUBTITLE_FAILED
+                        else "已补传字幕"
+                    ),
+                    upload=updated,
+                )
 
         subtitle_path, subtitle_language = None, None
         if status == BiliUploadStatus.unverified.value:
