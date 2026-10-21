@@ -339,6 +339,47 @@ def test_prefill_422s_without_a_job_id(client):
     assert client.client.get("/api/bilibili/prefill").status_code == 422
 
 
+def test_prefill_says_it_is_not_reusing_anything_by_default(client):
+    """没投过就**没有**复用 —— `reused` 说 `False`，界面才不会提示一句假话。"""
+    client.seed_job("job1", "单视频任务", 1)
+    body = client.client.get("/api/bilibili/prefill", params={"job_id": "job1", "item_id": "job1-i1"}).json()
+    assert body["reused"] is False
+    assert body["season_title"] == ""
+
+
+def test_prefill_reuses_the_last_submission_over_http(client):
+    """投过一次之后，预填回来的就是**上一次提交的那一份**，而不是按视频标题现算的默认值。
+
+    这条走完整条 HTTP 链（路由 → manager → 库），钉的是「复用」这件事在接口层真的成立 ——
+    单元测试只验到 `build_prefill`，中间任何一层把字段吞了就这里红。
+    """
+    client.seed_job("job1", "单视频任务", 1)
+    payload = single_payload(
+        client,
+        metadata={
+            "title": "上次写的标题",
+            "desc": "上次写的简介",
+            "tags": "上次,标签",
+            "tid": "207",
+            "copyright": COPYRIGHT_SELF,
+            "source": "",
+        },
+        make_cover=False,
+        comment="上次的置顶评论",
+    )
+    assert client.client.post("/api/bilibili/uploads", json=payload).status_code == 200
+
+    body = client.client.get("/api/bilibili/prefill", params={"job_id": "job1", "item_id": "job1-i1"}).json()
+    assert body["reused"] is True
+    assert body["metadata"]["title"] == "上次写的标题"
+    assert body["metadata"]["desc"] == "上次写的简介"
+    assert body["metadata"]["tags"] == "上次,标签"
+    assert body["metadata"]["tid"] == "207"
+    assert body["metadata"]["copyright"] == COPYRIGHT_SELF
+    assert body["comment"] == "上次的置顶评论"
+    assert body["make_cover"] is False
+
+
 # ================================================================ 读回
 def test_summary_only_lists_jobs_that_have_records(client):
     """没有记录的任务**不在这里** —— 界面默认就是「未上传」，不必知道这件事。"""

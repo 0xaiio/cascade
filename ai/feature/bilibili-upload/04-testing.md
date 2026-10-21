@@ -709,3 +709,69 @@ FINAL: reviewing | bvid=BV1iunv61Eu4 | error=None
   本轮只保证判据同源。
 - **服务端预填时给的 `prefill.problems` 是旧模板的快照**，与本地预检可能同时出现、措辞不同
   （服务端点名原始标题、前端点名渲染结果）。本轮没有去重 —— 去重会把「服务端认为有问题」这个事实藏起来。
+
+## 15. 重投不重填：预填复用上一次投稿（FR-B37）
+
+### 15.1 为什么这件事值得单独一轮
+
+输入是一句体验反馈：「上传失败后点重新上传，之前填的信息没保存，很沮丧」。
+查完之后发现**后端早就有这些数据**：`bili_upload` 每一行都存着标题/简介/标签/分区/版权/来源/
+封面开关/置顶评论（理由就写在模型注释里 —— 投稿是异步的，worker 要能在用户关掉页面之后照着重投）。
+缺的只是**表单打开时把它读回来**。于是这一轮几乎没有新概念，只有一条新数据（合集模板原文）。
+
+### 15.2 用例
+
+| 层 | 用例 | 钉住什么 |
+| --- | --- | --- |
+| manager（+7） | `test_prefill_reuses_the_previous_submission_for_a_single_video` | **全部字段**复用：标题/简介/标签/分区/版权/来源/评论/封面，少一个用户就得重填那一格 |
+| manager | `test_prefill_falls_back_to_defaults_when_nothing_was_submitted` | 没投过就是默认值，且 `reused=False`（否则界面提示一句假话） |
+| manager | `test_prefill_reuse_survives_opening_the_dialog_from_the_other_entry` | 从任务行投过、带条目 id 来问也找得到（两个入口的键不同） |
+| manager | `test_prefill_reports_the_reused_values_when_they_break_a_limit` | 复用的值超限时照实报错、不截断（值仍是完整 90 字） |
+| manager | `test_collection_prefill_reuses_the_stored_template_and_collection_name` | 模板原文/合集名/简介/评论/封面全回来，逐条预览按**上次那个模板**重算 |
+| manager | `test_collection_prefill_without_a_previous_submission_is_all_defaults` | 没投过时模板是默认的、`season_title` 空 |
+| manager | `test_collection_prefill_survives_a_corrupt_stored_template` | 模板列读不回来 ⇒ 退回默认模板、`reused=False`、**不抛异常** |
+| manager | `test_a_single_video_submission_does_not_wipe_the_stored_template` | 单视频投稿不清空合集那边存的模板（共用一个归集记录） |
+| manager | `test_resubmitting_updates_the_stored_template` | 改过的模板覆盖旧的 —— 复用上一次不等于永远复用第一次 |
+| api（+2） | `test_prefill_says_it_is_not_reusing_anything_by_default` / `test_prefill_reuses_the_last_submission_over_http` | 走完整条 HTTP 链：中间任何一层吞了字段就这里红 |
+| 前端（+4） | 提示出现/不出现（单视频与合集各一）、合集名复用与退回任务名 | 界面真的把「复用了」说出来，且合集名优先用上次那个 |
+
+### 15.3 一个只有真跑一遍才发现的坑
+
+合集分支第一版写的是 `_previous_upload(session, job.id, None)` —— 找「整任务一条」的那一行。
+**合集根本没有那样的行**（每条各有一行），于是评论与封面开关永远拿不到，而复用看起来是好的
+（模板与合集名都回来了）。单测第一轮就红在 `prefill.comment` 上：
+`'本视频由个人工作流同步上传…' == '上次的置顶评论'`。
+
+教训与 [018](../../../bug-fix/018-a-long-file-name-looks-like-a-login-failure.md) 同形：
+**「大部分复用了」和「没复用」在用户眼里是同一种沮丧**，所以用例必须逐字段断言，
+不能只断言「标题对了」。
+
+### 15.4 真实浏览器：`tmp_acceptance/ui_bili_reuse.py`（**23 条断言，全过**）
+
+合成一个 playlist + 合成预填（`reused: true` 带上次那一份），其余请求照旧打真实后端：
+
+```
+合集：提示可见（宽高 > 0）；标题模板 = 上次那个；合集名 = 上次起的那个（不是任务名）；
+      置顶评论 = 上次写的；提交按钮可点（复用的值合法，复用不能把一次重投变成一次 400）
+对照：reused=False ⇒ 没有那句提示，合集名退回任务名
+单视频：标题框里是上次那个（不是按视频标题现算的默认值），提示同样可见
+```
+
+探针自身的两个坑（都已修，都 worth 记住）：
+
+1. **夹具必须自己改成合集的口径**。第一版从单视频预填改造时漏了 `default_group_mode`
+   （仍是 `none`）与 `job_title`（仍是那条 71 字的 Ep 105 标题）⇒ 「合集名」输入框
+   根本不渲染（断言拿到 `null`），且模板渲染后超限让按钮被**正确地**禁用。
+   两个 FAIL 都是夹具不真实，不是产品坏 —— 但若当时顺手把断言改松，就会漏掉真问题。
+2. 与 §14.4 同一条：`Fetch.enable` 必须收窄 `resourceType: XHR|Fetch`，拦 Document 会让
+   `Page.navigate` 永远不返回。
+
+### 15.5 未覆盖 / 如实说明
+
+- **「失败徽标 → 点按钮 → 表单里是上次那一段」这条路径只走到「徽标为未上传」**：
+  探针把 `uploads/summary` 拦成空列表，所以按钮走的是 `none` 档。`failed` 档点下去
+  走的也是同一个 `handleBiliUpload`（FR-B32），但**没有真的构造一条 failed 记录去点**。
+- **归集方式不复用是有意的取舍**，没有验证「用户第二次想改归集方式时会不会困惑」——
+  界面上它每次回到默认值，这一点写进了用户手册。
+- **合集模板只在本轮新提交之后才有**：升级前投过的合集没有 `template_json`，
+  那些任务第一次重投时仍会看到默认模板（已如实降级，不会报错）。

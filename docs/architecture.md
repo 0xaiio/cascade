@@ -27,7 +27,7 @@ PlantUML 源文件：[system-context.puml](diagrams/system-context.puml)。
 | 代理与连通性自检 | 解析代理来源（显式 > 系统 > 环境变量）并**真的发一次请求**验证连通；cookies 体检则把离线格式检查与 `LOGGED_IN` 探针合成一个结论。 | [proxy.py](../backend/app/proxy.py#L169)、[connectivity.py](../backend/app/connectivity.py#L73)、[cookie_health.py](../backend/app/cookie_health.py#L234) |
 | 错误翻译与自检留痕 | 把异常链翻译成「诊断 / 原因 / 建议」三段可执行结论；启动时摘除会打坏 JS 运行时的宿主环境变量并留痕。 | [error_advice.py](../backend/app/error_advice.py#L116)、[runtime_env.py](../backend/app/runtime_env.py#L58) |
 | 本机打开器 | 选择可解码播放器打开视频、打开输出目录、把字幕文件交给系统打开（默认关联 / 系统「打开方式」）。**不维护程序偏好** —— 用哪个程序由系统记。 | [system_open.py](../backend/app/system_open.py#L23) |
-| B站 上传编排 | 单 worker 串行投稿、投稿间隔、状态写库与重启收敛、环境体检、事件发布。与下载链路**完全解耦**：独立账号、独立登录文件、独立队列。 | [BiliManager](../backend/app/bili_manager.py#L333) |
+| B站 上传编排 | 单 worker 串行投稿、投稿间隔、状态写库与重启收敛、环境体检、事件发布。与下载链路**完全解耦**：独立账号、独立登录文件、独立队列。 | [BiliManager](../backend/app/bili_manager.py#L420) |
 | B站 领域与边界 | 单次投稿的领域逻辑（对账后定结论）、`biliup` 子进程边界、B站 会员态客户端、扫码登录与凭据摘要、元数据与硬限、文案常量。 | [bili_upload.py](../backend/app/bili_upload.py#L299)、[bili_bin.py](../backend/app/bili_bin.py#L271)、[bili_api.py](../backend/app/bili_api.py#L124)、[bili_auth.py](../backend/app/bili_auth.py#L75)、[bili_meta.py](../backend/app/bili_meta.py#L202)、[bili_policy.py](../backend/app/bili_policy.py#L38) |
 
 ## 组件关系
@@ -93,7 +93,7 @@ B站 上传有**自己的两套状态**，与 `JobStatus` 无关：
 - 合集 [BiliSeasonStatus](../backend/app/models.py#L122)：`pending` → `grouping` → `grouped` / `failed`。`grouped` 只表示「已提交归集」——B站 对合集还有一道人工审核。
 - 字幕 `subtitle_state`：`skipped`（默认，没有字幕可传）→ `posted` / `failed`。它**不是** `BiliUploadStatus` 的一档：字幕挂在投稿**之后**，把「已发布 + 字幕失败」折成一种失败，用户能做的唯一正确动作（重传字幕）就被隐藏了。下载侧另有 `subtitle_source`（`human` / `auto` / `none`），其中 `none` 是「这个视频没有可用中英字幕」的**结论**，与 `NULL`（这一轮还没有结论）不同。
 
-进程重启后，停在 `uploading` 的记录（含 `queued`）一律折成**可重试的失败**，而不是永远停在「上传中」，见 [resume_interrupted](../backend/app/bili_manager.py#L375)。
+进程重启后，停在 `uploading` 的记录（含 `queued`）一律折成**可重试的失败**，而不是永远停在「上传中」，见 [resume_interrupted](../backend/app/bili_manager.py#L462)。
 
 **下载侧的策略与它相反**：残留的 `queued`/`running` 条目默认**重新排队并断点续传**，见 [recover_orphaned_work](../backend/app/job_manager.py#L83)。判据是「重做一次的代价」：下载是幂等且可续传的（`.part` 接着用），最坏只是多下一遍；投稿重投会在平台上留下重复稿件。同一条原则在两个链路上导出两个相反的默认值 —— 别把其中一个当成通用规则。用户按过「暂停」的任务在任何策略下都不恢复。
 

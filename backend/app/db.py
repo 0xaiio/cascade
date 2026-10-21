@@ -92,6 +92,11 @@ def _ensure_columns(engine: Engine) -> None:
             "subtitle_lan": "TEXT DEFAULT ''",
             "subtitle_message": "TEXT DEFAULT ''",
         },
+        "bili_season": {
+            # 上一次提交的模板原文。补列时老行是空串 ⇒ 读出来是 `None` ⇒ 表单退回默认模板，
+            # 这是**正确的降级**：没有上次模板时按默认值填，比拦住投稿好。
+            "template_json": "TEXT DEFAULT ''",
+        },
     }
     with engine.begin() as connection:
         for table_name, columns in additions.items():

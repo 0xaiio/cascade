@@ -3210,6 +3210,21 @@ components:
         season_desc:
           type: string
           default: ""
+        season_title:
+          type: string
+          default: ""
+          description: >
+            Collection name the user typed last time, reused so a retry does not
+            start from an empty box. Only ever non-empty when `reused` is true:
+            for `existing` the platform owns the name and the server stores "".
+        reused:
+          type: boolean
+          default: false
+          description: >
+            These values came from the previous submission instead of being
+            derived from the video title. The dialog says so out loud — a form
+            that arrives pre-filled and unexplained reads as "the app guessed",
+            and the user dare not touch it.
         default_group_mode:
           type: string
           default: "none"

@@ -42,6 +42,18 @@ function notice(): HTMLElement | null {
   return document.querySelector(".notice");
 }
 
+/**
+ * 「已填入上一次投稿…」那句提示。
+ *
+ * **不能 `getByText(/已填入/)`**：那句话里的「上一次投稿」包在 `<strong>` 里，
+ * 文本被拆成多个节点，正则整段匹配不到（RTL 会明确告诉你 text is broken up）。
+ * 所以按 `<p class="hint">` 整段取，再判 `textContent`。
+ */
+function reuseHint(dialog: HTMLElement): HTMLElement | null {
+  const found = [...dialog.querySelectorAll("p.hint")].find((p) => p.textContent?.includes("已填入上一次投稿"));
+  return (found as HTMLElement | undefined) ?? null;
+}
+
 /** 一个「视频已经下载好」的单视频任务。 */
 function downloadedJob(overrides: Record<string, unknown> = {}) {
   return {
@@ -83,9 +95,12 @@ function jobUploads(uploads = [biliUploadPayload], overrides: Record<string, unk
 }
 
 /** 打开单视频上传表单。 */
-async function openSingleDialog() {
+async function openSingleDialog(prefill: typeof mockState.biliPrefill = biliPrefillSinglePayload) {
   const user = userEvent.setup();
   mockState.jobs = [downloadedJob()];
+  // 与 `openCollectionDialog` 同一条规矩：**显式赋值**。`biliPrefill` 每用例被 harness
+  // 重置成单视频预填，只在它为 null 时才赋值会让「改过预填的用例」悄悄用回默认值。
+  mockState.biliPrefill = prefill;
   render(<App />);
   const button = await screen.findByRole("button", { name: /上传到 B 站 Running video/ });
   await user.click(button);
@@ -502,6 +517,25 @@ describe("App · B站 上传表单（单视频）", () => {
     expect(within(dialog).getByLabelText("标题")).toHaveFocus();
   });
 
+  test("says out loud when the values come from the previous submission", async () => {
+    const { dialog } = await openSingleDialog({
+      ...biliPrefillSinglePayload,
+      metadata: { ...biliPrefillSinglePayload.metadata!, title: "上次写的标题" },
+      reused: true
+    });
+
+    // 不说出来，用户会以为这些值是应用按视频标题猜的 —— 一个「被猜中」的表单
+    // 比空表单更不敢改，而它恰恰是他自己上次亲手填的那一份。
+    expect(reuseHint(dialog)).not.toBeNull();
+    expect(within(dialog).getByLabelText("标题")).toHaveValue("上次写的标题");
+  });
+
+  test("stays quiet about reuse when the values were derived, not remembered", async () => {
+    const { dialog } = await openSingleDialog();
+
+    expect(reuseHint(dialog)).toBeNull();
+  });
+
   test("submits exactly what the user typed", async () => {
     const user = userEvent.setup();
     mockState.jobs = [downloadedJob()];
@@ -748,6 +782,29 @@ describe("App · B站 上传表单（合集）", () => {
     // 预览表用**当前**模板重算，改一个字就能看到每条会变成什么。
     expect(within(dialog).getByText("Playlist batch · 第 01/2 集")).toBeInTheDocument();
     expect(within(dialog).getByText("Playlist batch · 第 02/2 集")).toBeInTheDocument();
+  });
+
+  test("reuses the template and the collection name from the previous submission", async () => {
+    const { dialog } = await openCollectionDialog({
+      ...biliPrefillCollectionPayload,
+      items: biliPrefillCollectionPayload.items.map((item) => ({ ...item, ready: true })),
+      template: { ...biliPrefillCollectionPayload.template!, title: "{index} - {title}" },
+      season_title: "上次起的合集名",
+      reused: true
+    });
+
+    // 合集名**优先用上次填的那个**，退回任务名只在没有上次值时发生 ——
+    // 让用户每次重投都重新打一遍合集名，和让他重新打标题是同一种沮丧。
+    expect(within(dialog).getByLabelText("合集名")).toHaveValue("上次起的合集名");
+    expect(within(dialog).getByLabelText("标题模板")).toHaveValue("{index} - {title}");
+    expect(reuseHint(dialog)).not.toBeNull();
+  });
+
+  test("falls back to the job title for the collection name when nothing was reused", async () => {
+    const { dialog } = await openReadyCollectionDialog();
+
+    expect(within(dialog).getByLabelText("合集名")).toHaveValue("Playlist batch");
+    expect(reuseHint(dialog)).toBeNull();
   });
 
   test("re-renders the preview from the edited template", async () => {

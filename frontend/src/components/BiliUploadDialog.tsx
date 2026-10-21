@@ -113,7 +113,10 @@ export function BiliUploadDialog({
     prefill.default_group_mode ?? (isCollection ? GROUP_MODE_NEW : GROUP_MODE_NONE)
   );
   const [seasonId, setSeasonId] = useState<number | null>(null);
-  const [seasonTitle, setSeasonTitle] = useState(prefill.job_title);
+  // 合集名**优先用上次填的那个**（`prefill.season_title`，只有复用时才有值），
+  // 否则退回任务名 —— 与「留空会用任务名顶上」是同一条口径，只是把默认值从
+  // 「服务端现算」换成了「用户上次写的」。
+  const [seasonTitle, setSeasonTitle] = useState(prefill.season_title || prefill.job_title);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
@@ -263,6 +266,15 @@ export function BiliUploadDialog({
               <>这里填的内容会原样提交给 B站。上传完成后会自动核对一次，确认平台上真的有了这条稿件。</>
             )}
           </p>
+
+          {/* 复用了上一次投稿的值时**必须说出来**。不说，用户会以为这些标题/标签是
+              应用按视频标题猜的 —— 一个「被猜中」的表单比空表单更不敢改，
+              而它恰恰就是用户自己上次亲手填的那一份。 */}
+          {prefill.reused && (
+            <p className="hint">
+              已填入<strong>上一次投稿</strong>时写的内容（标题、简介、标签、分区、版权、封面与评论），可以直接改，也可以清空重填。
+            </p>
+          )}
 
           <div className="field">
             <label className="field-label" htmlFor="bili-title">

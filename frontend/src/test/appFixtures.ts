@@ -434,6 +434,9 @@ export const biliPrefillSinglePayload: BiliPrefill = {
   make_cover: true,
   make_comment: true,
   season_desc: "",
+  season_title: "",
+  // 默认不是复用的：表单里的值是服务端按视频标题现算的。
+  reused: false,
   // 单视频的默认是「不归集」——与服务端 `DEFAULT_SINGLE_GROUP_MODE` 一致。
   default_group_mode: "none"
 };
@@ -485,6 +488,9 @@ export const biliPrefillCollectionPayload: BiliPrefill = {
   make_cover: true,
   make_comment: true,
   season_desc: "Playlist batch（共 2 个视频，由本机下载工作流自动上传）",
+  season_title: "",
+  // 默认不是复用的：模板是服务端按默认规则生成的。
+  reused: false,
   // 合集的默认是「新建」——与服务端 `DEFAULT_GROUP_MODE` 一致（改动前的行为）。
   default_group_mode: "new"
 };

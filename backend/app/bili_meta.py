@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 
@@ -401,6 +402,54 @@ def default_single(*, job_title: str, item_title: str, source_url: str) -> Uploa
         copyright=DEFAULT_COPYRIGHT,
         source=effective_source(DEFAULT_COPYRIGHT, source_url),
     )
+
+
+def template_to_json(template: MetadataTemplate) -> str:
+    """把模板序列化成一列文本，存进 `bili_season.template_json`。
+
+    **为什么要存**：合集表单里用户填的是模板，而 `bili_upload` 每一行存的是**渲染后**的
+    元数据。重投时若只靠那些行反推模板，只能猜（哪些字是字面量、哪些是占位符）——
+    猜错的后果是「重投一次，每条标题都变了」。存原文是最便宜也最准的做法。
+    """
+    return json.dumps(
+        {
+            "title_template": template.title_template,
+            "desc_template": template.desc_template,
+            "tags": template.tags,
+            "tid": template.tid,
+            "copyright": template.copyright,
+        },
+        ensure_ascii=False,
+    )
+
+
+def template_from_json(text: str) -> MetadataTemplate | None:
+    """反序列化上一次提交的模板。**读不回来就给 `None`**（表单退回默认值）。
+
+    三条防御，每条都对应一种真实会发生的坏数据：
+
+    1. 空串 / 不是 JSON —— 老行补列时的默认值就是空串（`db._ensure_columns`）；
+    2. 顶层不是对象；
+    3. 字段类型不对（手改过库、或将来改了字段名）。
+
+    **绝不让一次坏数据把投稿表单整个挡住**：用户此时正急着重投，最不该看到的是一个 500。
+    """
+    try:
+        data = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    try:
+        return MetadataTemplate(
+            title_template=str(data.get("title_template", "")),
+            desc_template=str(data.get("desc_template", "")),
+            tags=str(data.get("tags", "")),
+            tid=str(data.get("tid", "")),
+            copyright=normalize_copyright(data.get("copyright")),
+        )
+    except TypeError:  # pragma: no cover - 五个字段都是 str，构造不会抛
+        return None
 
 
 def default_collection_template(job_title: str) -> MetadataTemplate:

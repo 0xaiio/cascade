@@ -1328,6 +1328,274 @@ async def test_build_prefill_offers_the_partition_list_and_limits(tmp_path):
     assert prefill.limits.tag_item == 20
 
 
+# ================================================================ 复用上一次投稿
+async def test_prefill_reuses_the_previous_submission_for_a_single_video(tmp_path):
+    """失败后点「重新上传」，上次填的每一个字段都该在原位。
+
+    这条钉的是**全部**字段：少一个（比如版权或置顶评论）用户就得重填那一格，
+    而「大部分复用了」和「没复用」在他眼里是同一种沮丧。
+    """
+    harness = make_harness(tmp_path)
+    items = harness.seed_job("job1", "单视频任务", 1)
+    previous = harness.meta("上次写的标题")
+    await harness.manager.submit_single(
+        job_id="job1",
+        item_id=items[0]["id"],
+        meta=UploadMetadata(
+            title="上次写的标题",
+            desc="上次写的简介",
+            tags="上次,标签",
+            tid="207",
+            copyright="1",
+            source="",
+        ),
+        video_path=Path(items[0]["path"]),
+        make_cover=False,
+        comment="上次的置顶评论",
+    )
+    await harness.manager.stop()
+
+    with Session(harness.engine) as session:
+        prefill = build_prefill(session, session.get(Job, "job1"), items[0]["id"])
+    assert prefill.reused is True
+    assert prefill.metadata is not None
+    assert prefill.metadata.title == "上次写的标题"
+    assert prefill.metadata.desc == "上次写的简介"
+    assert prefill.metadata.tags == "上次,标签"
+    assert prefill.metadata.tid == "207"
+    # 版权**原样带回**：上次选了自制，重投不能悄悄变回转载（那等于替用户改一个声明）。
+    assert prefill.metadata.copyright == "1"
+    assert prefill.comment == "上次的置顶评论"
+    assert prefill.make_cover is False
+
+
+async def test_prefill_falls_back_to_defaults_when_nothing_was_submitted(tmp_path):
+    """没投过就必须是默认值，且 `reused` 说 `False` ——
+    否则界面会提示「已复用上次的内容」，而用户根本没投过，那句话就是假的。"""
+    harness = make_harness(tmp_path)
+    items = harness.seed_job("job1", "单视频任务", 1)
+    with Session(harness.engine) as session:
+        prefill = build_prefill(session, session.get(Job, "job1"), items[0]["id"])
+    assert prefill.reused is False
+    assert prefill.metadata is not None
+    assert prefill.metadata.title == "单视频任务 第 1 集"
+    assert prefill.make_cover is True
+
+
+async def test_prefill_reuse_survives_opening_the_dialog_from_the_other_entry(tmp_path):
+    """从条目行投过、从任务行打开（或反过来），上次填的也必须在。
+
+    两个入口传的 `item_id` 不同（任务行传条目 id，条目行也传条目 id，但老数据里
+    存在「整任务一条」的行），只认一种键就会出现「明明投过，表单却是空的」。
+    """
+    harness = make_harness(tmp_path)
+    items = harness.seed_job("job1", "单视频任务", 1)
+    await harness.manager.submit_single(
+        job_id="job1",
+        item_id=None,
+        meta=harness.meta("从任务行投的"),
+        video_path=Path(items[0]["path"]),
+        make_cover=True,
+        comment="",
+    )
+    await harness.manager.stop()
+
+    with Session(harness.engine) as session:
+        # 带着条目 id 来问，也要找得到那条 `item_id` 为空的行。
+        prefill = build_prefill(session, session.get(Job, "job1"), items[0]["id"])
+    assert prefill.reused is True
+    assert prefill.metadata is not None and prefill.metadata.title == "从任务行投的"
+
+
+async def test_prefill_reports_the_reused_values_when_they_break_a_limit(tmp_path):
+    """复用的值超限时**照实报错，不静默截断**。
+
+    与默认值那条路径同一条判据（服务端 `validate` 是唯一权威）：
+    用户上次填的标题可能刚好卡在平台上限变动之后的另一边。
+    """
+    harness = make_harness(tmp_path)
+    items = harness.seed_job("job1", "单视频任务", 1)
+    await harness.manager.submit_single(
+        job_id="job1",
+        item_id=items[0]["id"],
+        meta=UploadMetadata(title="超" * 90, desc="简介", tags="", tid="122"),
+        video_path=Path(items[0]["path"]),
+        make_cover=True,
+        comment="",
+    )
+    await harness.manager.stop()
+
+    with Session(harness.engine) as session:
+        prefill = build_prefill(session, session.get(Job, "job1"), items[0]["id"])
+    assert prefill.reused is True
+    assert any("标题超出" in problem for problem in prefill.problems)
+    # 报错的同时值还是完整的 90 个字：截断了用户就以为超限的只有这么多。
+    assert prefill.metadata is not None and len(prefill.metadata.title) == 90
+
+
+async def test_collection_prefill_reuses_the_stored_template_and_collection_name(tmp_path):
+    """合集重投：模板、合集名、置顶评论、封面开关都要回来。
+
+    模板是**存原文**而不是从 `bili_upload` 那些行反推的：那些行存的是渲染后的结果，
+    反推只能猜哪些字是占位符，猜错的后果是「重投一次，每条标题都变了」。
+    """
+    harness = make_harness(tmp_path)
+    items = harness.seed_job("job2", "合集任务", 2)
+    template = MetadataTemplate(
+        title_template="{job} · 第 {index}/{count} 集 · {title}",
+        desc_template="{title}\n原视频：{source}",
+        tags="合集,模板",
+        tid="207",
+        copyright="1",
+    )
+    targets = [
+        UploadTarget(index=1, title=items[0]["title"], video_path=Path(items[0]["path"]),
+                     source_url="https://youtu.be/a", item_id=items[0]["id"]),
+        UploadTarget(index=2, title=items[1]["title"], video_path=Path(items[1]["path"]),
+                     source_url="https://youtu.be/b", item_id=items[1]["id"]),
+    ]
+    await harness.manager.submit_collection(
+        job_id="job2",
+        template=template,
+        targets=targets,
+        paths=[Path(items[0]["path"]), Path(items[1]["path"])],
+        season_title="上次起的合集名",
+        season_desc="上次的合集简介",
+        make_cover=False,
+        comment="上次的置顶评论",
+    )
+    await drain(harness.manager)
+    await harness.manager.stop()
+
+    with Session(harness.engine) as session:
+        prefill = build_prefill(session, session.get(Job, "job2"))
+    assert prefill.reused is True
+    assert prefill.template is not None
+    assert prefill.template.title == "{job} · 第 {index}/{count} 集 · {title}"
+    assert prefill.template.tags == "合集,模板"
+    assert prefill.template.tid == "207"
+    assert prefill.template.copyright == "1"
+    assert prefill.season_title == "上次起的合集名"
+    assert prefill.season_desc == "上次的合集简介"
+    assert prefill.comment == "上次的置顶评论"
+    assert prefill.make_cover is False
+    # 逐条预览按**上次那个模板**重算，不是默认模板。
+    assert prefill.items[0].title.startswith("合集任务 · 第 01/2 集")
+
+
+async def test_collection_prefill_without_a_previous_submission_is_all_defaults(tmp_path):
+    harness = make_harness(tmp_path)
+    harness.seed_job("job2", "合集任务", 2)
+    with Session(harness.engine) as session:
+        prefill = build_prefill(session, session.get(Job, "job2"))
+    assert prefill.reused is False
+    assert prefill.template is not None and prefill.template.title == "{title}"
+    assert prefill.season_title == ""
+    assert prefill.make_cover is True
+
+
+async def test_collection_prefill_survives_a_corrupt_stored_template(tmp_path):
+    """模板那一列读不回来时**退回默认模板**，而不是把投稿表单整个挡掉。
+
+    用户此时正急着重投，最不该看到的是一个 500。坏数据只丢「复用」这一个便利，
+    不该再赔上一次「投不出去」。
+    """
+    harness = make_harness(tmp_path)
+    harness.seed_job("job2", "合集任务", 2)
+    with Session(harness.engine) as session:
+        session.add(BiliSeason(id="s1", job_id="job2", template_json="{不是 JSON"))
+        session.commit()
+
+    with Session(harness.engine) as session:
+        prefill = build_prefill(session, session.get(Job, "job2"))
+    assert prefill.template is not None and prefill.template.title == "{title}"
+    # 没有上次模板 ⇒ 不算复用（`reused` 说假话比没有提示更糟）。
+    assert prefill.reused is False
+    assert prefill.problems == []
+
+
+async def test_a_single_video_submission_does_not_wipe_the_stored_template(tmp_path):
+    """单视频投稿**不清空**合集那边存着的模板。
+
+    同一个任务的归集记录是共用的：单视频走「不归集」时也会写这条记录
+    （停掉上一轮的 `pending`），照合集那样无条件覆盖会把上次的模板抹成空。
+    """
+    harness = make_harness(tmp_path)
+    items = harness.seed_job("job2", "合集任务", 2)
+    template = MetadataTemplate(title_template="{title}", desc_template="{title}", tags="t", tid="122")
+    targets = [
+        UploadTarget(index=index, title=item["title"], video_path=Path(item["path"]),
+                     source_url="https://youtu.be/x", item_id=item["id"])
+        for index, item in enumerate(items, start=1)
+    ]
+    await harness.manager.submit_collection(
+        job_id="job2",
+        template=template,
+        targets=targets,
+        paths=[Path(item["path"]) for item in items],
+        season_title="合集名",
+        season_desc="简介",
+        make_cover=True,
+        comment="",
+    )
+    await drain(harness.manager)
+
+    # 同一条任务再用单视频路径投一次（走「不归集」，会停掉上一轮的 pending）。
+    await harness.manager.submit_single(
+        job_id="job2",
+        item_id=items[0]["id"],
+        meta=harness.meta(),
+        video_path=Path(items[0]["path"]),
+        make_cover=True,
+        comment="",
+        group_mode="none",
+    )
+    await drain(harness.manager)
+    await harness.manager.stop()
+
+    with Session(harness.engine) as session:
+        season = session.exec(select(BiliSeason).where(BiliSeason.job_id == "job2")).one()
+        assert season.template_json
+        prefill = build_prefill(session, session.get(Job, "job2"))
+    assert prefill.template is not None and prefill.template.title == "{title}"
+    assert prefill.template.tags == "t"
+
+
+async def test_resubmitting_updates_the_stored_template(tmp_path):
+    """改过的模板要覆盖旧的 —— 复用上一次不等于永远复用第一次。"""
+    harness = make_harness(tmp_path)
+    items = harness.seed_job("job2", "合集任务", 2)
+    paths = [Path(item["path"]) for item in items]
+
+    async def submit(title_template: str) -> None:
+        targets = [
+            UploadTarget(index=index, title=item["title"], video_path=paths[index - 1],
+                         source_url="https://youtu.be/x", item_id=item["id"])
+            for index, item in enumerate(items, start=1)
+        ]
+        await harness.manager.submit_collection(
+            job_id="job2",
+            template=MetadataTemplate(title_template=title_template, desc_template="{title}",
+                                      tags="t", tid="122"),
+            targets=targets,
+            paths=paths,
+            season_title="合集名",
+            season_desc="简介",
+            make_cover=True,
+            comment="",
+        )
+
+    await submit("{title}")
+    await drain(harness.manager)
+    await submit("{index} - {title}")
+    await drain(harness.manager)
+    await harness.manager.stop()
+
+    with Session(harness.engine) as session:
+        prefill = build_prefill(session, session.get(Job, "job2"))
+    assert prefill.template is not None and prefill.template.title == "{index} - {title}"
+
+
 # ================================================================ 事件与生命周期
 async def test_start_is_idempotent_and_stop_can_be_repeated(tmp_path):
     harness = make_harness(tmp_path)

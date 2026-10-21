@@ -190,6 +190,10 @@ class BiliSeason(SQLModel, table=True):
     job_id: str = Field(index=True)
     title: str = ""
     desc: str = ""
+    # 上一次提交用的**模板原文**（`bili_meta.template_to_json`）。重投时表单据此预填 ——
+    # `bili_upload` 每一行只存渲染后的结果，反推模板只能猜，而猜错的后果是
+    # 「重投一次，每条标题都变了」。老行补列时是空串，读出来是 `None`，表单退回默认模板。
+    template_json: str = ""
     cover_path: Optional[str] = None
     cover_url: Optional[str] = None
     season_id: Optional[int] = None

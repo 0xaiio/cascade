@@ -55,7 +55,7 @@
 
 - 所有查询通过 `session.exec(select(...))` 执行，使用 SQLModel 的声明式查询
 - [_ensure_columns](../backend/app/db.py#L43) 使用 f-string 构建 `ALTER TABLE` 语句，但表名和列名来自硬编码字典，非用户输入
-- [checkpoint_wal](../backend/app/db.py#L104) 的 `PRAGMA wal_checkpoint(...)` 同样由常量与函数默认参数构成
+- [checkpoint_wal](../backend/app/db.py#L109) 的 `PRAGMA wal_checkpoint(...)` 同样由常量与函数默认参数构成
 - 无原始 SQL 拼接
 
 ## 4. 跨站脚本攻击（XSS）

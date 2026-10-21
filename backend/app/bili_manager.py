@@ -72,6 +72,8 @@ from .bili_meta import (
     normalize_group_mode,
     normalize_season_option,
     partition_options,
+    template_from_json,
+    template_to_json,
     validate as validate_metadata,
     validate_comment,
     validate_group_choice,
@@ -224,6 +226,10 @@ def build_prefill(session: Session, job: Job, item_id: str | None = None) -> Bil
 
     逐条预览是**必需**的，不是锦上添花：模板渲染后可能超限，而超限必须在提交前告诉用户
     是**第几条**超了（design §7）。这里算出来的 problems 就是提交校验会给出的同一份。
+
+    **有上一次投稿就复用它**（`reused=True`）：失败后点「重新上传」时，用户上次填的
+    标题/简介/标签/分区/版权/封面/评论都还在，不该让他再填一遍。没有才退回按视频标题
+    现算的默认值。判据与边界见 `_previous_upload` 与 `_previous_template`。
     """
     items = list(
         session.exec(select(JobItem).where(JobItem.job_id == job.id).order_by(JobItem.index)).all()
@@ -234,8 +240,24 @@ def build_prefill(session: Session, job: Job, item_id: str | None = None) -> Bil
     if not is_collection and items:
         item = next((row for row in items if row.id == item_id), items[0])
         source_title = item.title
-        meta = default_single(job_title=job.title, item_title=source_title, source_url=item.source_url)
-        comment = default_comment(source_url=item.source_url)
+        previous = _previous_upload(session, job.id, item.id)
+        if previous is not None:
+            # 上一次提交的**原样**复用（含版权与来源）：那两列的语义是「这次稿件是不是转载」，
+            # 按视频现算一遍就会出现「上次明明选了自制，重投变成转载」。
+            meta = UploadMetadata(
+                title=previous.title,
+                desc=previous.desc,
+                tags=previous.tags,
+                tid=previous.tid,
+                copyright=normalize_copyright(previous.copyright),
+                source=effective_source(previous.copyright, previous.source),
+            )
+            comment = previous.comment
+            make_cover = previous.make_cover
+        else:
+            meta = default_single(job_title=job.title, item_title=source_title, source_url=item.source_url)
+            comment = default_comment(source_url=item.source_url)
+            make_cover = True
         return BiliPrefillRead(
             job_id=job.id,
             job_title=job.title,
@@ -246,11 +268,28 @@ def build_prefill(session: Session, job: Job, item_id: str | None = None) -> Bil
             problems=validate_metadata(meta) + validate_comment(comment),
             partitions=partition_options(),
             limits=bili_limits(),
+            make_cover=make_cover,
+            reused=previous is not None,
             # 单视频的「既有事实」是**不进任何合集**，所以默认停在「不归集」。
             default_group_mode=DEFAULT_SINGLE_GROUP_MODE,
         )
 
-    template = default_collection_template(job.title)
+    previous = _previous_batch_upload(session, job.id)
+    stored = latest_season(session, job.id)
+    stored_template = _previous_template(stored)
+    # `stored_template` 为 `None` 时退回默认模板 —— 但**这不叫复用**，
+    # 所以 `reused` 判的是「有没有拿到上次的那一份」，不是「模板是不是默认值」。
+    template = stored_template if stored_template is not None else default_collection_template(job.title)
+    season_title = stored.title if stored is not None else ""
+    season_desc = stored.desc if stored is not None else ""
+    if not season_desc:
+        season_desc = default_season_desc(job.title, len(items))
+    if previous is not None:
+        comment = previous.comment
+        make_cover = previous.make_cover
+    else:
+        comment = default_comment()
+        make_cover = True
     targets = [
         UploadTarget(
             index=item.index,
@@ -262,7 +301,6 @@ def build_prefill(session: Session, job: Job, item_id: str | None = None) -> Bil
         for item in items
     ]
     rendered = render_collection(template, targets, job_title=job.title) if targets else []
-    comment = default_comment()
     problems = validate_collection(template, targets, job_title=job.title) if targets else []
     problems += validate_comment(comment)
     return BiliPrefillRead(
@@ -279,10 +317,59 @@ def build_prefill(session: Session, job: Job, item_id: str | None = None) -> Bil
         problems=problems,
         partitions=partition_options(),
         limits=bili_limits(),
-        season_desc=default_season_desc(job.title, len(items)),
+        make_cover=make_cover,
+        season_desc=season_desc,
+        season_title=season_title,
+        reused=previous is not None or stored_template is not None,
         # 合集的「既有事实」是**每次新建一个**，所以默认保持「新建」。
         default_group_mode=DEFAULT_GROUP_MODE,
     )
+
+
+def _previous_upload(session: Session, job_id: str, item_id: str | None) -> BiliUpload | None:
+    """上一次投稿留下的那一行。`(job_id, item_id)` 是 upsert 的，所以最多一条。
+
+    先按条目 id 找，再按「整个任务一条」找（`item_id` 为 NULL 或空串）：
+    任务行与条目行两个入口都能打开同一张表单，而提交时带的 `item_id` 取决于用户点的是
+    哪一个。只认一种键会出现「从条目行投过、再从任务行打开，上次填的没了」。
+
+    合集传 `item_id=None`：那一批的封面开关与置顶评论是**整批共用**的，任一条都带得动。
+    """
+    for key in (item_id, None):
+        statement = select(BiliUpload).where(BiliUpload.job_id == job_id)
+        if key:
+            statement = statement.where(BiliUpload.item_id == key)
+        else:
+            statement = statement.where(
+                (BiliUpload.item_id.is_(None)) | (BiliUpload.item_id == "")
+            )
+        row = session.exec(statement.order_by(BiliUpload.updated_at.desc())).first()
+        if row is not None:
+            return row
+    return None
+
+
+def _previous_batch_upload(session: Session, job_id: str) -> BiliUpload | None:
+    """这一批里**任意一条**的上传记录（合集分支用）。
+
+    合集没有「整任务一条」的行（每条各有一行），而置顶评论与封面开关是**整批共用**的，
+    所以任一条都带得动这两项。取 `updated_at` 最新的那条：重投会把那一行整体改写，
+    于是「最新的一条」就是「上次那一批」。
+    """
+    return session.exec(
+        select(BiliUpload).where(BiliUpload.job_id == job_id).order_by(BiliUpload.updated_at.desc())
+    ).first()
+
+
+def _previous_template(season: BiliSeason | None) -> MetadataTemplate | None:
+    """上一次提交的合集模板；没有（或读不回来）就给 `None`。
+
+    `None` 与「默认模板」是两件事：调用方要能区分「复用了上次的」和「按默认值填的」，
+    所以这里不把坏数据修成默认值 —— 修了就让 `reused` 说不上真话。
+    """
+    if season is None or not season.template_json:
+        return None
+    return template_from_json(season.template_json)
 
 
 def _metadata_model(value: UploadMetadata | MetadataTemplate) -> BiliMetadata:
@@ -702,6 +789,10 @@ class BiliManager:
                 # 「不归集」：记录照建，但**直接落终态** `skipped`。
                 # 不建记录会让界面上什么都不显示，用户分不清是「没归集」还是「还没归集」。
                 skipped=mode == GROUP_MODE_NONE,
+                # 模板原文存下来，重投时表单才能填回用户上次写的那一份。
+                # **`existing` 也存**：合集名与简介那时取自平台，但模板是用户自己填的，
+                # 两件事不该一起被丢掉了。
+                template=template,
             )
             # 合集上传必建记录（下面的事件要用它的 id）—— 与单视频那边「不归集就不建」
             # 不同，因为合集本来就会有一条归集记录，留一条 `skipped` 是在说明它的去向。
@@ -788,6 +879,7 @@ class BiliManager:
         pin_season_id: int | None = None,
         skipped: bool = False,
         create_if_missing: bool = True,
+        template: MetadataTemplate | None = None,
     ) -> BiliSeason | None:
         """写归集记录。返回 `None` 表示「本来就没有记录，且这次也不需要建」。
 
@@ -809,6 +901,12 @@ class BiliManager:
         season.season_id = pin_season_id or season.season_id
         season.title = title or season.title
         season.desc = desc or season.desc
+        # 模板原文跟着这次提交走：重投时表单要能填回用户上次写的那一份
+        # （`bili_upload` 每行只存渲染后的结果，反推模板只能猜）。
+        # `None` = 这次没有模板可存（单视频投稿），**不清空**已有值 ——
+        # 单视频与合集共用同一个任务的归集记录时，清掉会让合集那边丢掉上次的模板。
+        if template is not None:
+            season.template_json = template_to_json(template)
         # 「不归集」落成**终态**而不是 `pending`：
         # `_maybe_group` 只自动归集 `pending`，所以这个状态的作用就是让那批稿件投完就停下；
         # 同时它给界面一个明确的「未归集」可显示 —— 什么都不落库会让用户看到空白，

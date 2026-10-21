@@ -12,7 +12,7 @@
 python -m compileall backend\app
 ```
 
-后端测试（当前基线：**1081 passed**，36 个 `test_*.py`）：
+后端测试（当前基线：**1092 passed**，36 个 `test_*.py`）：
 
 ```powershell
 python -m pytest backend\tests -q
@@ -39,7 +39,7 @@ python -m pytest backend\tests -q
 >
 > `--basetemp` 指向的目录**必须不存在**，否则 pytest 会先 `rmtree` 它、同样会触发守卫（`tmp_pytest\` 已在 `.gitignore` 里）。
 
-前端测试和构建（当前基线：**264 passed**，20 个文件；`tsc --noEmit` 与 `vite build` 通过）：
+前端测试和构建（当前基线：**268 passed**，20 个文件；`tsc --noEmit` 与 `vite build` 通过）：
 
 ```powershell
 cd frontend
@@ -119,7 +119,7 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 
 ## 后端测试范围
 
-后端测试位于 [backend/tests](../backend/tests/)（36 个 `test_*.py` + [fakes.py](../backend/tests/fakes.py) / [bili_fakes.py](../backend/tests/bili_fakes.py)，当前 **1081 passed**）：
+后端测试位于 [backend/tests](../backend/tests/)（36 个 `test_*.py` + [fakes.py](../backend/tests/fakes.py) / [bili_fakes.py](../backend/tests/bili_fakes.py)，当前 **1092 passed**）：
 
 > **数字必须自己数一遍**，不要只信 `-q` 的汇总行。逐文件规模用
 > `pytest backend/tests/<文件> -q -p no:cacheprovider --co` 取，各文件之和应**恰等于**全集
@@ -170,15 +170,15 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 | [test_bili_subtitle.py](../backend/tests/test_bili_subtitle.py) | **38 例**（本轮新增）。SRT/VTT → BCC：时间戳解析（失败返回 `None` 不猜 0）、WEBVTT/NOTE 跳过、`<c>` 内联标签剥离、**只合并相邻且完全相同**的字幕、BCC 的 `from`/`to` 是秒、`utf-8-sig`；**语言白名单参数化**（`zh-CN`/`en-US`/`zh-Hans`/`en-GB` 必须映射成平台接受的值）；端点断言（`oid == cid`、`sign == "false"`、`submit == "true"`）；**任何失败都落成结论、绝不抛异常**。 |
 | [test_subtitle_recording.py](../backend/tests/test_subtitle_recording.py) | **6 例**（本轮新增）。下载结论的落库：按**磁盘证据**而不是计划、自动模式只请求计划里那一条轨、没有可用轨时请求族名（**不是空列表也不是 `["all"]`**）、文件缺失落成 `none`、非中英语种不记录、**重跑清掉旧结论**。 |
 | [test_bili_read_model.py](../backend/tests/test_bili_read_model.py) | 「多条记录 → 一档徽标」的**19 行真值表**参数化：8 成功 2 在跑 → 上传中、归集算在途、归集失败不等于全成功、全部待核对不报成功、被拒算失败；外加「成功 / 失败 / 在途三组集合**恰好归类一次**」的不相交性（唯一允许落在三组之外的是 `unverified`）；连同任务级/条目级投影、孤儿记录排最后、汇总按 job 排序；`season_upload_ids` 对合集 `upload_ids` 列的**七种内容形态加 `null` 列**容错（合法列表、空列表、空串、坏 JSON、**JSON 对象** —— `{"a": 1}` 必须当成空而不是 `["a"]`、非字符串元素 `[1, 2]` 折成字符串、`[null]` 不吞条目）、`latest_season` 取最新一行、`list_seasons` 的定序保证选择稳定。 |
-| [test_bili_manager.py](../backend/tests/test_bili_manager.py) | 队列与编排：重投复用同一行并作废旧 `bvid`/`aid`、六种前置条件各自报错（含 **`missing_upload_token`**）、登录落盘时补令牌 / 交换失败仍留住 cookies、导入路径补令牌且**不重复换**、体检把缺令牌报成 blocker、重试三分支（已发布→什么都不做 / 在途→什么都不做 / 待核对→**只重新核对且不发命令** / 失败→重新投稿），以及**只补传字幕**的两条：审核中投稿第一次失败后可补、历史 `skipped` 行也能补，两者都断言**投稿命令不跑第二次**、重启收敛（`uploading` 与 `queued` 都折成可重试失败、幂等）、worker 崩溃可读且不带走 worker、体检（含 0 字节空壳与「没装」分开）、投稿间隔。 |
-| [test_api_bilibili.py](../backend/tests/test_api_bilibili.py) | 路由层：真 `BiliManager` + `TestClient` + 按数据库状态等完成（**不用队列空作完成信号**：worker 一 `get()` 走队列就空了，那时它还在跑）。覆盖体检 / 扫码（只有 `confirmed` 才落盘、`%2C` 解码）/ 导入清除 / 预填（单视频与合集、404、422）/ 读回 / 单视频与合集投稿（400 超限定位于第几条、409 列出未下载的、404）/ 重试与重试归集。 |
+| [test_bili_manager.py](../backend/tests/test_bili_manager.py) | 队列与编排：重投复用同一行并作废旧 `bvid`/`aid`、六种前置条件各自报错（含 **`missing_upload_token`**）、登录落盘时补令牌 / 交换失败仍留住 cookies、导入路径补令牌且**不重复换**、体检把缺令牌报成 blocker、重试三分支（已发布→什么都不做 / 在途→什么都不做 / 待核对→**只重新核对且不发命令** / 失败→重新投稿），以及**只补传字幕**的两条：审核中投稿第一次失败后可补、历史 `skipped` 行也能补，两者都断言**投稿命令不跑第二次**、重启收敛（`uploading` 与 `queued` 都折成可重试失败、幂等）、worker 崩溃可读且不带走 worker、体检（含 0 字节空壳与「没装」分开）、投稿间隔、**预填复用上一次投稿**（单视频逐字段复用、合集复用模板原文与合集名、坏模板降级不抛、单视频投稿不清空合集模板、改过的模板覆盖旧的）。 |
+| [test_api_bilibili.py](../backend/tests/test_api_bilibili.py) | 路由层：真 `BiliManager` + `TestClient` + 按数据库状态等完成（**不用队列空作完成信号**：worker 一 `get()` 走队列就空了，那时它还在跑）。覆盖体检 / 扫码（只有 `confirmed` 才落盘、`%2C` 解码）/ 导入清除 / 预填（单视频与合集、404、422、**复用上一次投稿走完整条 HTTP 链**）/ 读回 / 单视频与合集投稿（400 超限定位于第几条、409 列出未下载的、404）/ 重试与重试归集。 |
 | [bili_fakes.py](../backend/tests/bili_fakes.py) | B站 测试的共享替身：`FakeBiliTransport`（覆盖 14 个端点，含 TV 令牌交换那三个与 CC 字幕保存；记录 `calls`/`comments`/`topped`/`subtitles`、未知 URL 直接断言失败）、`StubTransport`、脚本化 runner/sleeper、`write_video()`。**`UNSET` 哨兵**是必须的：用 `None` 兼作「没传参数」时，`account=None`（未登录）与 `video=None`（查不到稿件）都会被当成「用默认值」，那两条用例根本测不到目标分支、只会绿着过去。字幕端点可用 `subtitle_code` / `subtitle_message` / `subtitle_error` 脚本化（`subtitle_code` 设为非 0 即模拟平台拒绝，用来验「字幕失败不翻稿件状态」）。 |
 
 默认自动测试不依赖真实 YouTube 下载，避免网络、地区、cookies 和 YouTube 风控导致不稳定。
 
 ## 前端测试范围
 
-前端组件测试是对 `App` 的**集成测试**，按功能面拆成 `frontend/src/*.test.tsx` 多个文件：解析链接与下载选项（`analyzer.test.tsx`，11）、cookies 导入与校验（7）、设置面板与代理检测（10）、任务中心（控制/删除/展开 11、本地文件操作与链接 13、进度与详情呈现 6）、清晰度降级（4）、自检信息（2）、帮助浮层（3）、**B站 上传（`bili-upload.test.tsx`，68 例）**、**CC 字幕结论的呈现（`bili-subtitle-line.test.tsx`，5 例）**、完成通知（19）、版面与文案不变式（3），以及只读样式源文的 `styles.test.ts`（4）。当前 **20 个文件 / 264 passed**（13 个 `.tsx` 组件测试 + 7 个 `.ts` 纯函数测试）；`biliStatus.test.ts` 另含字幕两档判据与「已上传点进去打开哪一页」「待核对/部分失败该补哪几条」的判据（24 例）。
+前端组件测试是对 `App` 的**集成测试**，按功能面拆成 `frontend/src/*.test.tsx` 多个文件：解析链接与下载选项（`analyzer.test.tsx`，11）、cookies 导入与校验（7）、设置面板与代理检测（10）、任务中心（控制/删除/展开 11、本地文件操作与链接 13、进度与详情呈现 6）、清晰度降级（4）、自检信息（2）、帮助浮层（3）、**B站 上传（`bili-upload.test.tsx`，72 例）**、**CC 字幕结论的呈现（`bili-subtitle-line.test.tsx`，5 例）**、完成通知（19）、版面与文案不变式（3），以及只读样式源文的 `styles.test.ts`（4）。当前 **20 个文件 / 268 passed**（13 个 `.tsx` 组件测试 + 7 个 `.ts` 纯函数测试）；`biliStatus.test.ts` 另含字幕两档判据与「已上传点进去打开哪一页」「待核对/部分失败该补哪几条」的判据（24 例）。
 
 另有五份**不挂载任何组件**的纯函数测试（`frontend/src/*.test.ts`，不经过 `App`）：B站 表单词汇表与本地预检 `biliForm.test.ts`（46 例）、B站 状态谓词 `biliStatus.test.ts`（24 例）、**上传进度的分段与聚合 `biliProgress.test.ts`（15 例）**、错误取值兜底 `errors.test.ts`（4 例）、**体检策略 `biliHealth.test.ts`（5 例）**。它们把原先内联在 `BiliUploadDialog.tsx` / `App.tsx` 里的判断抽成纯函数后再测，所以能在不渲染界面的前提下覆盖边界（例如「列表还在读」与「还没选合集」不能同时报出来，见 [ai/bug-fix/012](../ai/bug-fix/012-preflight-contradicts-itself-and-the-server.md)；`uploadedTargetUrl` 在两种空值下必须返回 `null`；合集的标题判据量的是**渲染后的每一条**而非模板，见 [ai/bug-fix/019](../ai/bug-fix/019-the-title-length-check-never-fires-for-collections.md)）。
 
@@ -211,6 +211,7 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 - B站 上传入口：视频没下载好时按钮**禁用并给出原因**（单视频与合集两种措辞）、点开后用该任务的 `job_id`/`item_id` 去预填（合集传 `item_id=null`）、徽标文案与配色完全照搬服务端给的值（前端不自己判「算不算已上传」）。**点下去做什么按档位分流**：`已上传` → 打开稿件页（tooltip 恰好「B 站已上传；点击进入 B 站」、只调一次 `window.open`、不弹表单、本地文件被删也不影响可点）；`待核对` → **只调重新核对**（不预填、不提交）；`部分失败` → **只碰没成功的那几条**（已发布的记录一次都不能被提交）；`上传中` → **禁用且提示里没有「点击」二字**；`失败` → 仍然打开投稿表单。条目行只打开/只重试这一条自己的记录。
 - B站 上传表单：字段、**硬限数字**与**回显时的截断长度**都来自 `prefill.limits`（前端不写死常量，否则会出现「界面说没超、提交回来 400」，或「短到能完整显示」那个分支永远走不到 —— 见 [ai/bug-fix/012](../ai/bug-fix/012-preflight-contradicts-itself-and-the-server.md)）；超限**只报错不截断**（输入框里仍是用户输入的完整内容）；提交的请求体就是用户在表单里填的；被拒（409）时表单**不关闭**、错误留在表单里；合集显示逐条预览且改模板即时重算、未就绪的条目按序号点名并挡住提交。
 - 标题长度**在标题框旁边就能看出超没超**：超限时追加「超出 N 个字」并加 `is-over` / `aria-invalid`；合集的判据量的是**渲染后的每一条**（`{title}` 这种 7 个字的模板永远「合规」，只量模板等于什么都没查），改模板后即时出现「渲染后最长 N/80（第 X 条，超出 M 个字）」并点名超出最多的那条，按钮随之禁用；模板自己超长但渲染后合规时**不拦**（服务端不校验模板）。真实浏览器另用探针 `tmp_acceptance/ui_bili_title_len.py` 量到红色 `rgb(180,35,24)` 与字重 700 真的生效（jsdom 不加载样式表，光有类名断言会漏掉「CSS 里没有这一档」）。见 [ai/bug-fix/019](../ai/bug-fix/019-the-title-length-check-never-fires-for-collections.md)。
+- **重投不重填**：这个任务/条目上次投过，再打开投稿表单就把上一次提交的那一份原样填回（标题、简介、标签、分区、自制/转载、封面开关、置顶评论；合集连模板原文与合集名一起），表单开头明说「已填入上一次投稿时写的内容」；没投过则按视频标题现算默认值且**不提示复用**。复用的值照样过校验（超限只报错、不截断），版权原样带回（上次选了自制，重投不悄悄变回转载）；模板那一列读不回来时退回默认模板而不是报错；单视频投稿不会清空合集那边存的模板；改过的模板会覆盖旧的。**归集方式与合集编号刻意不复用**（依赖账号此刻有哪些合集）。见 [FR-45](requirements.md#功能需求) 与 [ai/feature/bilibili-upload §15](../ai/feature/bilibili-upload/04-testing.md)。
 - B站 稿件明细：失败给「重试」、待核对给「**重新核对**」（措辞必须分开，否则用户会去重投一条已经投上去的稿件）、已发布的条目**不给重试按钮**只给「在 B 站查看」、合集归集失败单独给「重试归集」。页顶「跑完了」的提示**只在徽标真的变化且落到终态时**才播报（首次拉到状态与没变化时都不能播报）。
 - B站 投稿预览表的「字幕」列：每条渲染服务端给的 `item.subtitle`（`en · 人工` / `zh · 自动生成` / `无字幕`），没有值时显示占位符 —— **文案由服务端拼**（前端拼一遍就会出现两套说法，见 [ai/feature/subtitle-pipeline](../ai/feature/subtitle-pipeline/README.md)）。
 - B站 设置区：三项体检各自的措辞与下一步；**0 字节空壳**要显示成不通过并给出「修复」按钮（`found=true` 不等于能用）；登录文件只报数量、不显示值**也不列名字**；被 git 跟踪单独红字；半截登录文件报出缺哪几项；扫码二维码内联渲染、`confirmed` 之前不刷新体检、`scanned` 继续等待。
