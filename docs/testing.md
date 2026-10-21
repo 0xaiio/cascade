@@ -12,7 +12,7 @@
 python -m compileall backend\app
 ```
 
-后端测试（当前基线：**1071 passed**，36 个 `test_*.py`）：
+后端测试（当前基线：**1081 passed**，36 个 `test_*.py`）：
 
 ```powershell
 python -m pytest backend\tests -q
@@ -39,7 +39,7 @@ python -m pytest backend\tests -q
 >
 > `--basetemp` 指向的目录**必须不存在**，否则 pytest 会先 `rmtree` 它、同样会触发守卫（`tmp_pytest\` 已在 `.gitignore` 里）。
 
-前端测试和构建（当前基线：**241 passed**，19 个文件；`tsc --noEmit` 与 `vite build` 通过）：
+前端测试和构建（当前基线：**248 passed**，20 个文件；`tsc --noEmit` 与 `vite build` 通过）：
 
 ```powershell
 cd frontend
@@ -119,7 +119,7 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 
 ## 后端测试范围
 
-后端测试位于 [backend/tests](../backend/tests/)（36 个 `test_*.py` + [fakes.py](../backend/tests/fakes.py) / [bili_fakes.py](../backend/tests/bili_fakes.py)，当前 **1072 passed**）：
+后端测试位于 [backend/tests](../backend/tests/)（36 个 `test_*.py` + [fakes.py](../backend/tests/fakes.py) / [bili_fakes.py](../backend/tests/bili_fakes.py)，当前 **1081 passed**）：
 
 > **数字必须自己数一遍**，不要只信 `-q` 的汇总行。逐文件规模用
 > `pytest backend/tests/<文件> -q -p no:cacheprovider --co` 取，各文件之和应**恰等于**全集
@@ -178,9 +178,9 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 
 ## 前端测试范围
 
-前端组件测试是对 `App` 的**集成测试**，按功能面拆成 `frontend/src/*.test.tsx` 多个文件：解析链接与下载选项（`analyzer.test.tsx`，11）、cookies 导入与校验（7）、设置面板与代理检测（10）、任务中心（控制/删除/展开 11、本地文件操作与链接 13、进度与详情呈现 6）、清晰度降级（4）、自检信息（2）、帮助浮层（3）、**B站 上传（`bili-upload.test.tsx`，62 例）**、**CC 字幕结论的呈现（`bili-subtitle-line.test.tsx`，5 例）**、完成通知（19）、版面与文案不变式（3），以及只读样式源文的 `styles.test.ts`（3）。当前 **19 个文件 / 241 passed**（13 个 `.tsx` 组件测试 + 6 个 `.ts` 纯函数测试）；`biliStatus.test.ts` 另含字幕两档判据与「已上传点进去打开哪一页」「待核对/部分失败该补哪几条」的判据（24 例）。
+前端组件测试是对 `App` 的**集成测试**，按功能面拆成 `frontend/src/*.test.tsx` 多个文件：解析链接与下载选项（`analyzer.test.tsx`，11）、cookies 导入与校验（7）、设置面板与代理检测（10）、任务中心（控制/删除/展开 11、本地文件操作与链接 13、进度与详情呈现 6）、清晰度降级（4）、自检信息（2）、帮助浮层（3）、**B站 上传（`bili-upload.test.tsx`，64 例）**、**CC 字幕结论的呈现（`bili-subtitle-line.test.tsx`，5 例）**、完成通知（19）、版面与文案不变式（3），以及只读样式源文的 `styles.test.ts`（3）。当前 **20 个文件 / 248 passed**（13 个 `.tsx` 组件测试 + 7 个 `.ts` 纯函数测试）；`biliStatus.test.ts` 另含字幕两档判据与「已上传点进去打开哪一页」「待核对/部分失败该补哪几条」的判据（24 例）。
 
-另有四份**不挂载任何组件**的纯函数测试（`frontend/src/*.test.ts`，不经过 `App`）：B站 表单词汇表与本地预检 `biliForm.test.ts`（35 例）、B站 状态谓词 `biliStatus.test.ts`（24 例）、**上传进度的分段与聚合 `biliProgress.test.ts`（15 例）**、错误取值兜底 `errors.test.ts`（4 例）。它们把原先内联在 `BiliUploadDialog.tsx` / `App.tsx` 里的判断抽成纯函数后再测，所以能在不渲染界面的前提下覆盖边界（例如「列表还在读」与「还没选合集」不能同时报出来，见 [ai/bug-fix/012](../ai/bug-fix/012-preflight-contradicts-itself-and-the-server.md)；`uploadedTargetUrl` 在两种空值下必须返回 `null`）。
+另有五份**不挂载任何组件**的纯函数测试（`frontend/src/*.test.ts`，不经过 `App`）：B站 表单词汇表与本地预检 `biliForm.test.ts`（35 例）、B站 状态谓词 `biliStatus.test.ts`（24 例）、**上传进度的分段与聚合 `biliProgress.test.ts`（15 例）**、错误取值兜底 `errors.test.ts`（4 例）、**体检策略 `biliHealth.test.ts`（5 例）**。它们把原先内联在 `BiliUploadDialog.tsx` / `App.tsx` 里的判断抽成纯函数后再测，所以能在不渲染界面的前提下覆盖边界（例如「列表还在读」与「还没选合集」不能同时报出来，见 [ai/bug-fix/012](../ai/bug-fix/012-preflight-contradicts-itself-and-the-server.md)；`uploadedTargetUrl` 在两种空值下必须返回 `null`）。
 
 逐文件用例数可用 `npx vitest run --reporter=json --outputFile=<临时路径>` 复算（JSON 报告的 `testResults[].assertionResults` 长度即该文件用例数）。
 
@@ -205,6 +205,8 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 - cookies 校验：联网校验、离线体检、以及「域名不对，等于没配」与「google.com-only」两档结论的解释文案。
 - 辅助说明浮层：四个入口（获取方式 / 结论解读 / 常用端口 / 排查顺序）默认收起，悬停或点击可读，`Esc`、点击空白处、右上角 × 都能关闭，展开状态写入 `localStorage` 并在刷新后恢复。
 - 字幕语言标签：选中几种就**逐个列出**几种语言代码（不许改成「已选 N 项」式的 JS 侧截断 —— 标签太长时正确的解法是让它换行，见 [ai/ui/003](../ai/ui/003-language-trigger-label-overflows-the-page.md)）。
+- B站 投稿失败的**分类**：`21104 标题过长` 必须单独认出来，成功日志里的「通过cookie登录」不得把结论带回「登录已失效」；文件名 stem > 80 时上传走 `cascade-*.mp4` 硬链接（原文件不动、不复制、用完删除）。
+- 「重新体检」：点击后按钮禁用且写「体检中…」，结束后出现 `上次体检 HH:MM:SS`；账号探测超时退回离线结论（`biliHealth.test.ts` 用 20ms 时限覆盖三条分支）。
 - B站 上传进度：上传中时任务卡片里出现**四段轨迹**（排队/传输/提交/核对），当前段带 `is-active`、前序段 `is-done`；「已用」按秒推进且起点取服务端 `started_at`；合集显示「第 2/2 条」与「已有 1/2 条确认在平台上」；审核中四段全 `is-done` 且不再有 active；已发布/失败/待核对**不渲染**进度块。后端另有两条用例：`_store_progress` 只在值真的变大时发 `bili_upload_progress`（同值重放与倒退都不发），以及结论落账后迟到的回调既不写库也不发事件。
 - B站 上传入口：视频没下载好时按钮**禁用并给出原因**（单视频与合集两种措辞）、点开后用该任务的 `job_id`/`item_id` 去预填（合集传 `item_id=null`）、徽标文案与配色完全照搬服务端给的值（前端不自己判「算不算已上传」）。**点下去做什么按档位分流**：`已上传` → 打开稿件页（tooltip 恰好「B 站已上传；点击进入 B 站」、只调一次 `window.open`、不弹表单、本地文件被删也不影响可点）；`待核对` → **只调重新核对**（不预填、不提交）；`部分失败` → **只碰没成功的那几条**（已发布的记录一次都不能被提交）；`上传中` → **禁用且提示里没有「点击」二字**；`失败` → 仍然打开投稿表单。条目行只打开/只重试这一条自己的记录。
 - B站 上传表单：字段、**硬限数字**与**回显时的截断长度**都来自 `prefill.limits`（前端不写死常量，否则会出现「界面说没超、提交回来 400」，或「短到能完整显示」那个分支永远走不到 —— 见 [ai/bug-fix/012](../ai/bug-fix/012-preflight-contradicts-itself-and-the-server.md)）；超限**只报错不截断**（输入框里仍是用户输入的完整内容）；提交的请求体就是用户在表单里填的；被拒（409）时表单**不关闭**、错误留在表单里；合集显示逐条预览且改模板即时重算、未就绪的条目按序号点名并挡住提交。
@@ -247,7 +249,7 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 
 修改 B站 上传时，另需：
 
-27. 设置面板的「B站 上传」区先看一次体检：没装投稿工具时，条目必须显示**为什么不行 + 该怎么做**（要么一条 `winget install …` 命令，要么一个按钮），只报「没找到」不算通过。用 `where.exe biliup` 确认本机的那个 `biliup.exe` **不是 0 字节**（`Get-Item … | Select Length`）；若是 0 字节，界面应显示成**不通过**并给出「修复」按钮（`found=true` 不代表能用）。
+27. 设置面板的「B站 上传」区先看一次体检：**点一下右上角「重新体检」，按钮应变成「体检中…」并暂时不可点，结束后左边出现「上次体检 HH:MM:SS」**（结论没变时那是唯一能证明它跑过的痕迹）。再看：没装投稿工具时，条目必须显示**为什么不行 + 该怎么做**（要么一条 `winget install …` 命令，要么一个按钮），只报「没找到」不算通过。用 `where.exe biliup` 确认本机的那个 `biliup.exe` **不是 0 字节**（`Get-Item … | Select Length`）；若是 0 字节，界面应显示成**不通过**并给出「修复」按钮（`found=true` 不代表能用）。
 28. 点「扫码登录」：二维码应是**内联 SVG** 且大小正常（服务端返回的 SVG 单位是**毫米**，前端必须显式覆盖宽高，否则会跟着宿主字号变形）。用手机扫码后先只扫不确认，状态应停在「已扫码，请在手机上确认」且**不刷新**体检；在手机上确认后才变成已登录并显示账号名。
 29. 用「导入 cookies.json」导入一份有效的登录文件：界面应只显示「登录文件里有 N 项凭据（只显示数量，不显示内容）」与账号名 —— **不出现任何凭据值、掩码前缀或名字列表**。故意把该文件纳入 git（`git add -f`）后重新体检，应出现一条红字说明它与 `git rm --cached` 的处理方式。
 30. 下载完一个单视频后点「上传到 B站」：表单的标题/分区/标签/简介应已预填，「N/80」这类计数的上限来自服务端。把标题改到超过 80 字，应就地报「标题超出 N 个字」、提交按钮变灰，且**输入框里仍是完整内容**（不截断）。提交后页顶出现「已开始上传《…》，跑完这里会变成「已上传」。」，任务行的按钮变成「上传中」。

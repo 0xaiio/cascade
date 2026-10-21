@@ -259,3 +259,53 @@ def test_displayed_text_avoids_bare_words_that_upstream_misclassifies(banned):
 def test_displayed_text_never_asserts_published_for_a_non_published_status():
     for status in (BiliUploadStatus.submitted.value, BiliUploadStatus.reviewing.value, BiliUploadStatus.queued.value):
         assert "已发布" not in STATUS_TEXT[status], status
+
+
+# ---------------------------------------------------------------- 21104：被登录文案盖住的标题错误
+# 2026-10-21 真实投稿（C++ Weekly Ep 105）留下的那段输出，逐字抄下来当夹具。
+# 它的危险之处在于：**成功日志与失败原因混在一起** —— 前几行写着「验证cookie / 通过cookie登录」，
+# 最后一行才是真正的错误。用宽松的 needle 去分类，就会把一次标题/文件名超限报成「登录已失效」，
+# 而用户照那句话去重新扫码，扫多少次都不会好。
+REAL_21104_TAIL = """\
+ INFO biliup::uploader::credential: 验证cookie
+ INFO biliup::uploader::credential: 无需更新cookie
+ INFO biliup::uploader::credential: 通过cookie登录
+ INFO biliup::uploader: user: ant-hengxin
+ INFO biliup::uploader: Upload completed: Ep 105.mp4 => cost 12.26s, 1.16 MB/s.
+ WARN biliup::uploader::bilibili: 客户端接口已失效, 将使用APP接口
+ INFO biliup::uploader::bilibili: ResponseData { code: 21104, data: None, message: "第(1)个视频的标题过长,已经超过80个字符", ttl: Some(1) }
+Error: ResponseData { code: 21104, data: None, message: "第(1)个视频的标题过长,已经超过80个字符", ttl: Some(1) }
+"""
+
+
+def test_the_title_error_is_not_mistaken_for_a_login_failure():
+    """**本轮的核心回归**：成功日志里的「通过cookie登录」不能把 21104 盖成登录失效。
+
+    判据是「结论里必须出现 21104 或『文件名』」，而不是「不等于登录失效」——
+    后者在文案换个说法时依然可能绿着过去。
+    """
+    message, advice = classify_failure(REAL_21104_TAIL)
+    assert message != NOT_LOGGED_IN[0]
+    assert "21104" in message or "文件名" in message
+    # 下一步要指向真能解决它的动作：重试（会自动换短文件名）或改源文件名。
+    assert "重试" in advice or "改名" in advice
+
+
+def test_a_benign_login_line_alone_is_not_a_failure():
+    """只有成功日志、没有任何失败语句时不能凭空判成「登录已失效」。"""
+    message, _advice = classify_failure("验证cookie\n通过cookie登录\nuser: ant-hengxin")
+    assert message != NOT_LOGGED_IN[0]
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "error: not logged in",
+        '{"code":-101,"message":"账号未登录"}',
+        "登录信息已过期",
+        "账号未登录",
+    ],
+)
+def test_real_auth_failures_are_still_recognized(output):
+    """收紧 needle 之后，真的登录失效必须还能认出来（否则修一个 bug 换来一个静默）。"""
+    assert classify_failure(output)[0] == NOT_LOGGED_IN[0]

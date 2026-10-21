@@ -69,7 +69,7 @@
 ## 前端组件边界
 
 `App.tsx` 只负责状态编排（解析、建任务、设置回灌、SSE 订阅）与整体布局；展示职责全部在 `components/` 下，
-纯计算在 `formatting.ts` / `quality.ts` / `subtitles.ts` / `cookieLock.ts` / `biliForm.ts` / `biliStatus.ts` / `biliProgress.ts` / `errors.ts`。
+纯计算在 `formatting.ts` / `quality.ts` / `subtitles.ts` / `cookieLock.ts` / `biliForm.ts` / `biliStatus.ts` / `biliProgress.ts` / `biliHealth.ts` / `errors.ts`。
 判断新代码放哪：**需要 `useState` 或发请求吗？**
 需要就留在 `App.tsx`（或抽成 hook），只把 props 变成界面就进 `components/`，只看数据变换就进纯模块。
 
@@ -91,12 +91,13 @@
 | [BiliUploadProgress.tsx](../frontend/src/components/BiliUploadProgress.tsx#L15) | 任务卡片里的**上传进度**：四段轨迹（排队/传输/提交/核对）+ 当前段动效 + 每秒推进的「已用/已提交」。只在需要等的时候渲染（在跑或审核中）。 | 不判「算不算成功」（那是后端徽标）、不画百分比（`biliup` 没有字节进度，见下）；不请求。 |
 | [BiliUploadDialog.tsx](../frontend/src/components/BiliUploadDialog.tsx#L41) | 上传表单模态框，**单视频与合集共用**：单视频填的就是最终内容，合集填的是模板（`{index}` `{title}` `{count}` `{job}` 占位符）并带一张逐条预览表。硬限数字来自 `prefill.limits`，超限只报错不截断，未就绪的条目先标出来。预览表还有一列**字幕**，显示服务端算好的 `item.subtitle`。 | 不渲染模板（渲染在后端 `bili_meta`，前端只显示服务端给的结果），不校验硬限（只显示 `12/80`），不拼字幕文案（那句由后端 `subtitle_summary` 给），不发请求（`onSubmit` 归 `App`）。 |
 | [BiliJobStatus.tsx](../frontend/src/components/BiliJobStatus.tsx#L19) | 任务卡片里的上传明细与「下一步」：失败原因 + 服务端给的 advice、合集归集结论、重试入口。**只在有话说时渲染一行**。 | 不决定重试动作（后端按终态三选一），不给已成功的条目放重试按钮。 |
-| [BiliLoginSection.tsx](../frontend/src/components/BiliLoginSection.tsx#L29) | 设置面板里的 B站 区：环境体检、扫码登录（含轮询，1.5s）、导入登录文件、修复投稿工具。**凭据一个字符都不显示**（只给「已保存 N 项 / 缺 SESSDATA」的摘要与账号名）。 | 不显示 cookies 值或掩码前缀；「登录文件被 git 跟踪」单独红字，不由本组件自动修复。 |
+| [BiliLoginSection.tsx](../frontend/src/components/BiliLoginSection.tsx#L32) | 设置面板里的 B站 区：环境体检（**点「重新体检」会变「体检中…」并禁用，结束后写「上次体检 HH:MM:SS」**）、扫码登录（含轮询，1.5s）、导入登录文件、修复投稿工具。**凭据一个字符都不显示**（只给「已保存 N 项 / 缺 SESSDATA」的摘要与账号名）。 | 不显示 cookies 值或掩码前缀；「登录文件被 git 跟踪」单独红字，不由本组件自动修复；**超时/降级策略不在这里**（在 `biliHealth`），也不发请求（走 `api.ts`）。 |
 | [subtitles.ts](../frontend/src/subtitles.ts#L12) | 字幕文案与来源归一：`formatSubtitleInfo`（那行「字幕：来源 X · 格式 Y」）、`effectiveSubtitleSourceForAnalysis`（提交前把「两者都要」收敛成该视频真有的那一类）。 | 不做请求、不读存储。 |
 | [cookieLock.ts](../frontend/src/cookieLock.ts#L20) | 把后端 `browser_locked` 错误映射成界面状态（含 `pendingAnalyzeUrl`，用于「关闭 Edge 并导入」后自动补一次解析）。判据是 `detail.code`，不是文案。 | 不渲染界面（渲染在 `UrlAnalyzer`）。 |
 | [biliForm.ts](../frontend/src/biliForm.ts#L133) | 投稿表单的**词汇表与预检**：版权/归集方式的取值、标签计数与最长标签、三种说明与回执文案、提交前的本地预检。硬限数字一律取自 `prefill.limits`，**不写死**（含「报超长标签时回显多少个字」，那是 `limits.tag_preview`）。 | 不改 `input`（报错而不是修好再提交，与服务端 `bili_meta.validate` 同一条约定）；不渲染、不发请求。 |
 | [biliStatus.ts](../frontend/src/biliStatus.ts#L24) | 稿件/合集状态的**判定**：能不能重试、算不算出问题、哪一档徽标是「还没上传」，以及两件「点这一下该去哪儿」的事：`uploaded` 打开哪个页面（`uploadedTargetUrl`）、`unverified`/`partial` 该补哪几条记录（`retryableUploadIds`）。判据一律是「用户此刻该做什么」，取值本身在 [types.ts](../frontend/src/types.ts#L266)。 | 不造文案（徽标文案来自服务端 `badge_text`）；不决定重试动作（后端按终态三选一）；不拼 URL（`video_url` 由后端给）。 |
 | [biliProgress.ts](../frontend/src/biliProgress.ts#L23) | 上传进度的**判定**：一条记录处在哪一段、在等什么（`uploadStageView`）、一个任务该显示哪一条与多少条已确认（`jobUploadProgress`）、「已用 01:23」（`uploadElapsedLabel`）。四段是四个**步骤**，不代表四段时间。 | 不造文案之外的状态、不请求、不决定是否显示（由 `waiting` 决定）。 |
+| [biliHealth.ts](../frontend/src/biliHealth.ts#L48) | 「重新体检」的**策略**：先带 12 秒时限探账号，超时就退回**离线**体检（工具/登录文件存在性）并标记 `timedOut`；网络错误照旧抛出。 | 不渲染界面、不拼文案（文案在 `BiliLoginSection`）、不决定探什么（两个 loader 由调用方注入）。 |
 | [errors.ts](../frontend/src/errors.ts#L15) | 异常 → 一句可显示的话（`errorMessage`）。收口原先散在十几处的 `err instanceof Error ? err.message : fallback`——重写一遍的代价不是行数，而是**语义各自漂移**（有的在 `message` 为空时兜到 fallback，有的不兜）。 | 不看 `ApiError.detail`：把 `advice` 拼进文案只在 `App.biliMessage`，只有那条链路会带 `advice`。 |
 
 说明浮层的设计约束（这几条是界面改版时最容易破坏的，改之前先读）：
@@ -222,7 +223,7 @@ yt-dlp 自己按「人工先占、自动只补缺」的顺序挑 → 下载成�
 
 #### 挂在投稿末尾的 CC 字幕
 
-`run_single` 的最后一步是 [_attach_subtitle](../backend/app/bili_upload.py#L305)：稿件已在平台上、
+`run_single` 的最后一步是 [_attach_subtitle](../backend/app/bili_upload.py#L345)：稿件已在平台上、
 且拿到 `aid` + `cid` + `bvid` 之后，把下载阶段落下的字幕文件转成 BCC，提交到
 `POST /x/v2/dm/subtitle/draft/save`（`oid` = **cid**，不是 aid）。它是**字幕轨**而不是烧进画面的硬字幕，
 观众可以在播放器里关掉。

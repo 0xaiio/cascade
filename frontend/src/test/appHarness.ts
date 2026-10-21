@@ -72,6 +72,12 @@ export const mockState = {
   /* ---------------------------------------------------------------- B站 上传 */
   /** `GET /api/bilibili/status` 的结论。出厂是「工具在、没登录」。 */
   biliStatus: biliStatusPayload,
+  /** 每次体检的 `probe_account` 取值，按调用顺序记录（`true` = 真的问了 B站）。 */
+  biliStatusQueries: [] as boolean[],
+  /** 非 0 时状态接口延迟这么久才返回 —— 用来观察「体检中…」那一态。 */
+  biliStatusDelayMs: 0,
+  /** true 时**账号探测**（`probe_account=true`）永不返回，离线体检照常 —— 用来验 12 秒兜底。 */
+  biliProbeHangs: false,
   /** `GET /api/bilibili/uploads/summary` 的任务级徽标。**出厂为空** —— 任务卡片保持原样。 */
   biliUploads: [] as BiliJobUploads[],
   /** `GET /api/bilibili/prefill` 的返回值。 */
@@ -144,6 +150,9 @@ function resetMockState(): void {
   mockState.cookieVerifyBodies = [];
   mockState.runtimeRefreshCount = 0;
   mockState.biliStatus = biliStatusPayload;
+  mockState.biliStatusQueries = [];
+  mockState.biliStatusDelayMs = 0;
+  mockState.biliProbeHangs = false;
   mockState.biliUploads = [];
   mockState.biliPrefill = biliPrefillSinglePayload;
   mockState.biliSubmitResult = biliJobUploadsPayload;
@@ -326,6 +335,13 @@ export function installAppHarness(): void {
         // ---- B站 上传。**具体路径必须排在通配之前**，否则 `/uploads/summary` 会被
         // `/uploads` 吃掉 —— 那是一条只在运行时才暴露的错配，类型检查看不出来。
         if (url.includes("/api/bilibili/status")) {
+          const probe = new URL(url, "http://localhost").searchParams.get("probe_account") !== "false";
+          mockState.biliStatusQueries.push(probe);
+          // 卡住的只有**账号探测**：离线那一半必须还能答上来，否则验不出「超时后退回离线结论」。
+          if (probe && mockState.biliProbeHangs) return new Promise<Response>(() => {});
+          if (mockState.biliStatusDelayMs) {
+            await new Promise((resolve) => setTimeout(resolve, mockState.biliStatusDelayMs));
+          }
           return Response.json(mockState.biliStatus);
         }
         if (url.endsWith("/api/bilibili/tools/repair")) {

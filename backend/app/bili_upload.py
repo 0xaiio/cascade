@@ -20,8 +20,11 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
-from collections.abc import Callable, Sequence
+import uuid
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -47,6 +50,7 @@ from .bili_bin import (
 )
 from .bili_http import Transport
 from .bili_meta import (
+    VIDEO_NAME_MAX,
     MetadataTemplate,
     UploadMetadata,
     merge_item_tags,
@@ -220,6 +224,41 @@ def prepare_cover(context: UploadContext, *, key: str, video_path: Path) -> Path
     return extract_cover_frame(context.ffmpeg_path, video_path, cover, runner=context.runner)
 
 
+@contextmanager
+def _short_name_video(path: Path) -> Iterator[Path]:
+    """给 `biliup` 一个**文件名够短**的同源文件；文件名本来就短就原样用。
+
+    为什么需要这一步：B站 的 App 接口把**视频文件名**（去掉扩展名）也算进「标题」的 80 字符上限，
+    超了报 `21104 第(1)个视频的标题过长` —— 而下载器会在文件名后加 ` [YouTube ID]`，
+    于是「标题 71 字符、文件名 85 字符」这种完全合规的稿件被拒，报错还指向标题。
+    实测证据：stem=80 的稿件通过、stem=85 的报 21104（两者的标题分别只有 54 / 71 字符）。
+
+    做法是**硬链接**而不是复制：同一目录 → 同一卷 → 零字节开销，`biliup` 打开它等于打开原文件，
+    而原文件名（用户看得见的那份）一个字都不动。链接在 `finally` 里删掉，删不掉也只是多一个
+    指向同一份数据的名字，不会丢内容、不会多占空间。
+
+    **硬链接失败**（FAT/exFAT、跨卷挂载、权限）时退回原路径并记一条日志 —— 宁可让平台用
+    21104 拒掉（那条错误的下一步已经写清「把源文件改名短一点」），也不去复制一个几 GB 的文件。
+    """
+    if len(path.stem) <= VIDEO_NAME_MAX:
+        yield path
+        return
+    link = path.with_name(f"cascade-{uuid.uuid4().hex[:8]}{path.suffix}")
+    try:
+        os.link(path, link)
+    except OSError as exc:  # noqa: BLE001 - 硬链接失败不该让这次投稿直接失败
+        logger.warning("bili 短文件名不可用，按原名上传：path=%s error=%s", path, exc)
+        yield path
+        return
+    try:
+        yield link
+    finally:
+        try:
+            link.unlink()
+        except OSError as exc:  # noqa: BLE001 - 残留的只是同目录里一个硬链接
+            logger.warning("bili 临时硬链接没删掉：path=%s error=%s", link, exc)
+
+
 def _execute(
     context: UploadContext,
     target: UploadTarget,
@@ -242,16 +281,17 @@ def _execute(
             if context.on_progress is not None:
                 context.on_progress(value)
 
-    result = upload(
-        context.biliup_exe,
-        context.cookie_path,
-        target.video_path,
-        meta,
-        cover_path=cover_path,
-        timeout=context.timeout,
-        on_line=sink,
-        runner=context.runner,
-    )
+    with _short_name_video(target.video_path) as video_path:
+        result = upload(
+            context.biliup_exe,
+            context.cookie_path,
+            video_path,
+            meta,
+            cover_path=cover_path,
+            timeout=context.timeout,
+            on_line=sink,
+            runner=context.runner,
+        )
     return result, box[0]
 
 

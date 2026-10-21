@@ -564,3 +564,70 @@ APP接口投稿成功 (code 0)
 - 12 分钟以上的长传输下「已用」的显示（`formatClock` 过 1 小时后变 `1:05:03`）只在纯函数层测过。
 - 条目行（展开后的单条）没有各自的进度条：合集只显示「当前第几条」。若以后要逐条显示，
   `jobUploadProgress` 已经能按条算，缺的只是布局。
+
+## 13. 长文件名 / 失败分类 / 体检按钮（018、ui 004）
+
+### 13.1 用**真实日志**当夹具
+
+这两个缺陷的证据都来自本机真实数据，所以用例直接拿它们做夹具，而不是造一段「看起来像」的输出：
+
+- `test_bili_policy.py` 里的 `REAL_21104_TAIL` 是那条失败投稿的 `log_tail` 逐字抄本（含
+  「验证cookie / 通过cookie登录」这些**成功**行）—— 它同时验证了「21104 要认出来」与
+  「成功日志不能把结论带回登录失效」。
+- `test_bili_upload.py` 的文件名用例按库里那张对照表取 `stem=85`（Ep 105）与正常名。
+
+### 13.2 用例（后端 **1072 → 1081 passed**，+9；前端 241 → **248 passed / 20 文件**，+7）
+
+| 层 | 用例 | 钉住什么 |
+| --- | --- | --- |
+| 分类（+6） | `test_the_title_error_is_not_mistaken_for_a_login_failure` | 结论里必须出现 21104 或「文件名」，且不等于登录失效 |
+| 分类 | `test_a_benign_login_line_alone_is_not_a_failure` | 只有成功日志时不得判成登录失效 |
+| 分类 | `test_real_auth_failures_are_still_recognized`（4 例） | 收紧 needle 后真登录失效仍认得出 |
+| 上传（+3） | `test_a_long_file_name_is_uploaded_through_a_short_hard_link` | 传给 biliup 的是 `cascade-*.mp4`、`≤80`、内容大小与源一致、结束后删除、原文件仍在 |
+| 上传 | `test_a_normal_file_name_is_passed_through_untouched` | 正常文件名不造链接 |
+| 上传 | `test_a_failed_hard_link_falls_back_to_the_original_name` | 硬链接失败 ⇒ 退回原名 + warning，不复制 |
+| 前端（+2） | `重新体检真的会再查一次，并留下体检时间` | 再发一次 `probe_account=true`，页面出现 `上次体检 HH:MM:SS` |
+| 前端 | `体检进行中按钮不可点，并写明「体检中…」` | 加载态存在（用稳定句柄 + `waitFor`，不按名字抓瞬时元素） |
+| 前端（+5） | `biliHealth.test.ts` | 按时返回 / 超时退回离线 / 网络错误照旧抛 / 离线也失败时抛 / 时限是 12 秒 |
+
+### 13.3 真实账号验证（这一轮的判据不在测试里）
+
+**修复后对同一条失败记录执行一次真实重试**，结果：
+
+```
+action=reupload  message=已重新排队上传
+uploading 0.0 → 0.2 → 0.95 → reviewing
+FINAL: reviewing | bvid=BV1iunv61Eu4 | error=None
+```
+
+账号稿件列表里出现了这条稿件（标题仍是 71 字符，`state=-30` 已提交待审核）；
+`downloads/` 下没有残留 `cascade-*` 链接。
+
+**注意**：这条重试是我代执行的（用户原话是「多次失败…仍然失败」），它产生的稿件是公开的。
+
+### 13.4 「重新体检」的真实浏览器验证
+
+`tmp_acceptance/probe_recheck_button.py`（**11 条断言全过**）：
+
+```
+点之前   text=重新体检  disabled=False  stamp=上次体检 12:20:14
+点一下   text=体检中…   disabled=True   stamp=上次体检 12:20:14
+结束后   text=重新体检  disabled=False  stamp=上次体检 12:20:17   ← 换了
+```
+
+### 13.5 探针/测试自身的两个坑
+
+1. **按名字抓「体检中…」会抓到快照**。60ms 的窗口里元素会换回「重新体检」，断言拿到的已经是旧节点 ——
+   改成先取稳定句柄再 `waitFor`。这与「按标题子串找控件会撞上别的同类元素」是同一类错误。
+2. **界面测试里用假定时器会毒死同文件的其它用例**：`vi.useFakeTimers()` 之后 RTL 的 `waitFor` 不再推进，
+   后面 8 条用例全部 5 秒超时。修法不是加 `advanceTimers`，而是**把判定挪进纯模块**（`biliHealth`），
+   用 20ms 的真实时限测 —— 这也是更该有的分层。
+
+### 13.6 未覆盖 / 如实说明
+
+- **硬链接只在本机 NTFS 上验过**；exFAT / 网络盘 / 跨卷的退回路径只有单测（monkeypatch `os.link`）。
+- 平台侧「80 字符」是**实测归纳**（stem=80 通过、85 失败），没有逐个测 81..84；取 80 作界更保守。
+- `21104` 的另一种成因（**标题本身**真的超过 80）没有真实样本 —— 表单侧本来就会拦下，
+  所以这条分类在真机上只走过「文件名超限」这一支。
+- 「重新体检」的 12 秒超时路径在真实浏览器里没有稳定复现（后端通常 0.7~3 秒返回），只有单测覆盖。
+- 合集（多条）场景下的文件名超限没有实测；合集走同一个 `upload_one`，逻辑上同一条路径。

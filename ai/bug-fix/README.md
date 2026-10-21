@@ -45,6 +45,7 @@
 | [015](015-orphan-items-never-resume.md) | 进程重启后，没下完的任务永远停在「排队中」 | `ead7b81` | 队列是内存里的 `asyncio.Queue`，进程一退 id 就没了，而库里还留着 `queued`/`running` —— 没有任何代码在启动时把两者对上，于是它们既不在队列也不在终态（生产库曾 332 `queued` + 3 `running`）。启动时先改库、再起 worker；默认重新排队并断点续传，`paused` 与被取消的任务保持原样 |
 | [016](016-subtitle-lost-while-the-video-is-in-review.md) | 稿件审核期间，字幕被静默丢掉且再也补不上 | 本次 | 稿件进审核时 `x/web-interface/view` 拿不到分P编号 ⇒ `cid` 为空 ⇒ 字幕挂不上，却被记成 `skipped`；而重试只对 `failed` 开放「只补字幕」⇒ 有字幕的稿件字幕永久丢失（实测本机库 2 条）。改为记 `failed`，并把补传判据放宽到「有字幕文件且还没 `posted`」，历史 `skipped` 行也能救回 |
 | [017](017-subtitle-status-never-reached-the-ui.md) | 字幕结论从来没有在界面上出现过 | 本次 | 后端三档状态、文案、字段都齐了，但渲染代码（`BiliJobStatus.tsx` / `biliStatus.ts` / `types.ts`）与用例都漏在工作区、没进版本库 ⇒ 用户看不到「CC 字幕」那一行，也没有「重传字幕」入口。本轮补上渲染并新增 5 + 2 条用例；此前 `tsc` 也是红的（测试调用漏了新参数） |
+| [018](018-a-long-file-name-looks-like-a-login-failure.md) | 长文件名被报成「标题过长」，又被折成「登录已失效」 | 本次 | B站 的 App 接口把**视频文件名**也按 80 字符校验，报错却说「标题过长」；而失败分类里的 `登录`/`cookie` 是裸词，会命中 biliup 的**成功**日志（「通过cookie登录」）⇒ 真实原因被完全盖掉，用户照提示重扫登录 7 次都无用。实测：stem=80 通过、stem=85 报 21104（标题分别只有 54/71 字符）。修复后同一条记录真实重试成功（`BV1iunv61Eu4`） |
 
 ## 本轮（2026-10-01）背景
 

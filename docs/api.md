@@ -264,17 +264,17 @@ cookies 体检结果。字段分三层：
 | `copyright` | 只能取 `1`（自制）或 `2`（转载）。**默认 `2`** |
 | `source` | `copyright=2` 时**必填**；`copyright=1` 时**不提交** |
 
-`copyright` 与 `source` 不在上面这张「长度上限」表里，但同样是提交前的拦截项，判据在 [validate](../backend/app/bili_meta.py#L348)。三点值得调用方注意：
+`copyright` 与 `source` 不在上面这张「长度上限」表里，但同样是提交前的拦截项，判据在 [validate](../backend/app/bili_meta.py#L353)。三点值得调用方注意：
 
 - **读不出合法 `copyright` 时回退 `2`（转载）而不是 `1`**。标成自制是替用户声明一件他没说过的事；标成转载最多让他改一下。
-- **自制稿即便 `source` 带值也不会出现在命令行里**。判据只有一个函数 [effective_source](../backend/app/bili_meta.py#L199) —— 若在别处再写一遍「要不要带来源」，落库快照与实发参数迟早对不上。
+- **自制稿即便 `source` 带值也不会出现在命令行里**。判据只有一个函数 [effective_source](../backend/app/bili_meta.py#L204) —— 若在别处再写一遍「要不要带来源」，落库快照与实发参数迟早对不上。
 - **合集模板上 `source` 恒为空**，逐条来源由服务端渲染时各取该条自己的来源链接。模板里回填第一条的值会让人误以为「所有条目都用它」，所以刻意不回填。
 
 历史上已入库的稿件，`db._ensure_columns` 补的 `copyright` 是 `1`（那是改动之前的实际行为），与产品默认值 `2` 不同 —— 见 [BiliUpload](../backend/app/models.py#L132) 的注释。
 
 ### 归集方式（`group_mode` / `season_id` / `season_title`）
 
-**单视频与合集两条投稿路径共用同一组字段与同一份校验**（[validate_group_choice](../backend/app/bili_meta.py#L439)），
+**单视频与合集两条投稿路径共用同一组字段与同一份校验**（[validate_group_choice](../backend/app/bili_meta.py#L444)），
 区别只在默认值：
 
 | 字段 | 说明 |
@@ -290,9 +290,9 @@ cookies 体检结果。字段分三层：
 - `POST /api/bilibili/collections`（合集）默认 `new`。改动前就是每次投完自动新建，
   改成别的会让已有的合集投稿突然失去归集。
 
-两个常量分别在 [DEFAULT_GROUP_MODE](../backend/app/bili_meta.py#L91) 与
-[DEFAULT_SINGLE_GROUP_MODE](../backend/app/bili_meta.py#L92)，
-[normalize_group_mode](../backend/app/bili_meta.py#L96) 的回退值是**参数**而不是写死的 ——
+两个常量分别在 [DEFAULT_GROUP_MODE](../backend/app/bili_meta.py#L96) 与
+[DEFAULT_SINGLE_GROUP_MODE](../backend/app/bili_meta.py#L97)，
+[normalize_group_mode](../backend/app/bili_meta.py#L101) 的回退值是**参数**而不是写死的 ——
 传错的表现是「升级后一批投稿悄悄多出/失去合集」，不会有任何报错。
 
 三条调用方容易踩到的语义：

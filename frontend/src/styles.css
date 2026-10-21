@@ -1821,6 +1821,14 @@ th {
   border-top: 1px solid #e6ebf4;
 }
 
+/* 「重新体检」的落款。没有它，结论没变时点这个按钮**看不出任何变化** ——
+   用户合理地认为按钮没实现（实测反馈就是这样来的）。等宽数字避免秒数跳动时左右晃。 */
+.bili-checked-at {
+  color: #657187;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
 .bili-check-list {
   display: grid;
   gap: 6px;

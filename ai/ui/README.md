@@ -61,6 +61,7 @@ hash 只能在下一次触碰本目录时回填；查某条改动用
 | [001](001-cookie-buttons-not-on-the-same-baseline.md) | 「选择 cookies」与「清除 cookies」不在同一基线 | `7b62a8c` | 文件上传控件的**基类**里写着 `margin-top: 16px`，而同排 `align-items: center` → 整体下沉 8px；变体的 `margin-top: 0` 被同优先级、位置更靠后的基类规则静默吃掉 |
 | [002](002-side-column-overflow-breaks-the-page.md) | 右栏把整页撑出横向滚动条（≤1600px 时约 44px） | `a4d492c` | 右栏的轨道宽度写死 `390px`（内容区 352px），而自检回显的那条 Windows 路径**没有断行机会**（min-content 401.53px）→ 面板 min-content 465.53px 超过轨道，grid item 又不许被压窄 → 溢出被算进整页。修法是让这条轨道里的文本可断行（`overflow-wrap: anywhere`，**不能**是 `break-word`） |
 | [003](003-language-trigger-label-overflows-the-page.md) | 语言选择器的标签把整页撑出横向滚动条 | `3643e76` | `.select-trigger span` 的 `white-space: nowrap` 把标签锁成一行，span 的 min-content 就等于整段文字 → flex item 的 `min-width: auto` 不许按钮被压窄 → 右栏轨道被顶宽（12 种语言实测 84px，390px 窗口 141px）。**`text-overflow: ellipsis` 从未生效过**（标签全程没被裁过一次）。修法是撤掉 nowrap 让标签换行 |
+| [004](004-the-recheck-button-looks-dead.md) | 「重新体检」点下去没有任何可见效果 | 本次 | `refresh()` 只做一次静默 `setStatus`：结论不变时 DOM 一个节点都不变，也没有加载态、没有落款时间、没有超时 —— 「跑了」与「没实现」在界面上无法区分（实测点击前后 `outerHTML` 全等）。补「体检中…」+「上次体检 11:58:03」+ 12 秒超时退回离线结论 |
 
 ## 已知但**未处理**的界面问题（下一轮候选）
 

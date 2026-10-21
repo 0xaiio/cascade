@@ -1220,6 +1220,38 @@ describe("App · B站 稿件明细与重试", () => {
 });
 
 describe("App · B站 设置里的体检与登录", () => {
+  test("重新体检真的会再查一次，并留下体检时间", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByText("biliup 0.2.4");
+    // 首次挂载体检一次（带账号探测）。
+    expect(mockState.biliStatusQueries).toEqual([true]);
+
+    await user.click(screen.getByRole("button", { name: "重新体检" }));
+
+    await waitFor(() => expect(mockState.biliStatusQueries).toEqual([true, true]));
+    // 结论没变时，「上次体检 11:58:03」是唯一能看出这一下真的跑了的证据 ——
+    // 原先这个按钮没有它、也没有加载态，界面一个像素都不动，用户以为它没实现。
+    expect(await screen.findByText(/上次体检 \d{2}:\d{2}:\d{2}/)).toBeInTheDocument();
+  });
+
+  test("体检进行中按钮不可点，并写明「体检中…」", async () => {
+    mockState.biliStatusDelayMs = 60;
+    render(<App />);
+
+    // 先拿到**稳定的元素句柄**再断言状态：按名字查会把「体检中…」那一刻的元素抓成快照，
+    // 等断言跑到时它已经换回「重新体检」了（60 毫秒的窗口，跑整包时尤其容易踩）。
+    const button = await screen.findByRole("button", { name: "重新体检" });
+    expect(button).toBeEnabled();
+    await userEvent.setup().click(button);
+
+    await waitFor(() => expect(button).toBeDisabled());
+    expect(button).toHaveTextContent("体检中…");
+    // 结束之后回到可点状态，落款出现。
+    await waitFor(() => expect(button).toBeEnabled());
+    expect(screen.getByText(/上次体检/)).toBeInTheDocument();
+  });
+
   test("lists every prerequisite with the next step attached", async () => {
     render(<App />);
 

@@ -24,6 +24,7 @@ from app.bili_bin import CommandResult
 from app.bili_http import HttpError
 from app.bili_meta import (
     COPYRIGHT_SELF,
+    VIDEO_NAME_MAX,
     MetadataTemplate,
     UploadMetadata,
     default_collection_template,
@@ -1086,3 +1087,81 @@ def test_season_outcome_defaults_to_pending():
     """`CollectionResult` 的默认赛季是「等待归集」，不是「已归集」。"""
     assert CollectionResult().season.status == BiliSeasonStatus.pending.value
     assert SeasonOutcome(status=BiliSeasonStatus.failed.value).season_id is None
+
+
+# ================================================================ 文件名长度
+def _long_video(tmp_path: Path, stem_length: int) -> Path:
+    """造一个**文件名很长**的视频：B站 的 80 字符上限也会算到它头上。"""
+    return write_video(tmp_path / (("a" * stem_length) + ".mp4"))
+
+
+class _LinkProbeRunner(RecordingCommandRunner):
+    """跑上传时顺手看一眼「这一瞬间那个路径存不存在、多大」。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.seen: list[tuple[str, bool, int]] = []
+
+    def __call__(self, argv, timeout, on_line):
+        if argv[0] != self.ffmpeg:
+            path = Path(next(item for item in argv if str(item).endswith(".mp4")))
+            self.seen.append((path.name, path.exists(), path.stat().st_size if path.exists() else 0))
+        return super().__call__(argv, timeout, on_line)
+
+
+def test_a_long_file_name_is_uploaded_through_a_short_hard_link(tmp_path):
+    """B站 把**视频文件名**也算进「标题」的 80 字符上限（`21104 标题过长`）。
+
+    实测：stem=80 的稿件通过、stem=85 的报 21104，而两者的**标题**分别只有 54 / 71 字符 ——
+    所以这条错误与标题无关，真正超限的是下载器加过 ` [YouTube ID]` 的文件名。
+    修法是上传时换一个短的**硬链接**名字，原文件一个字不动、也不复制字节。
+    """
+    transport = FakeBiliTransport(archives=[archive()])
+    video = _long_video(tmp_path, 85)
+    runner = _LinkProbeRunner()
+
+    result = run_single(make_context(transport, runner=runner, tmp_path=tmp_path), UploadTarget(1, TITLE, video), single_meta())
+
+    assert result.status == BiliUploadStatus.published.value
+    name, exists, size = runner.seen[0]
+    assert name.startswith("cascade-") and name.endswith(".mp4")
+    # 平台看到的是短名字：这才是 21104 的成因被真正消掉的地方。
+    assert len(Path(name).stem) <= VIDEO_NAME_MAX
+    # 上传那一刻链接必须真的指向同一份内容（硬链接，不是空壳）。
+    assert exists and size == video.stat().st_size
+    # 收尾：临时名字删掉，原文件还在。
+    assert not (video.parent / name).exists()
+    assert video.exists()
+
+
+def test_a_normal_file_name_is_passed_through_untouched(tmp_path):
+    """文件名本来就合规时不该多造一个链接：用户目录里少一个来路不明的文件。"""
+    transport = FakeBiliTransport(archives=[archive()])
+    video = write_video(tmp_path / "a.mp4")
+    runner = _LinkProbeRunner()
+
+    run_single(make_context(transport, runner=runner, tmp_path=tmp_path), UploadTarget(1, TITLE, video), single_meta())
+
+    assert runner.seen[0][0] == "a.mp4"
+    assert [path.name for path in tmp_path.glob("cascade-*")] == []
+
+
+def test_a_failed_hard_link_falls_back_to_the_original_name(tmp_path, monkeypatch, caplog):
+    """硬链接失败（FAT / 跨卷 / 权限）时退回原名，**不去复制一个几 GB 的文件**。
+
+    退回后平台仍可能用 21104 拒掉，但那句话已经写明「把源文件改名短一点」——
+    拿一次可能的失败换「绝不偷偷复制大文件」，这笔账是划得来的。
+    """
+    def boom(*_args, **_kwargs):
+        raise OSError("hard link not supported")
+
+    monkeypatch.setattr("app.bili_upload.os.link", boom)
+    transport = FakeBiliTransport(archives=[archive()])
+    video = _long_video(tmp_path, 85)
+    runner = _LinkProbeRunner()
+
+    with caplog.at_level(logging.WARNING):
+        run_single(make_context(transport, runner=runner, tmp_path=tmp_path), UploadTarget(1, TITLE, video), single_meta())
+
+    assert runner.seen[0][0] == video.name
+    assert any("短文件名不可用" in record.message for record in caplog.records)

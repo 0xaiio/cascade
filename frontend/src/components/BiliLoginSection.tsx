@@ -9,6 +9,7 @@ import {
   uploadBiliCookies
 } from "../api";
 import { errorMessage } from "../errors";
+import { runHealthCheck } from "../biliHealth";
 import type { BiliQrcode, BiliStatus } from "../types";
 
 /** 轮询间隔。B站 的扫码状态没有推送，只能轮询；1.5 秒在「反应够快」与「不打扰服务端」之间。 */
@@ -17,7 +18,7 @@ const POLL_INTERVAL_MS = 1500;
 /**
  * 设置面板里的 B站 区：环境体检 + 扫码登录 + 导入登录文件。
  *
- * 三条刻意的做法：
+ * 四条刻意的做法：
  *
  * 1. **体检结论永远显示「下一步」**。只显示「没找到投稿工具」等于把问题丢回给用户；
  *    每条提示都要带上要么一条命令、要么一个按钮。这是本功能的验收口径。
@@ -25,12 +26,17 @@ const POLL_INTERVAL_MS = 1500;
  *    连掩码前缀都不给（掩码前缀截图一贴就是凭据的一部分）。要看登录的是谁，走账号名。
  * 3. **「登录文件被 git 跟踪」单独一条红字**：那等于把账号密码提交进了仓库，
  *    比「没登录」严重得多，且用户通常完全不知道。
+ * 4. **「重新体检」必须看得出它跑了**：点下去立刻变「体检中…」，结束后写上「上次体检 11:58:03」。
+ *    原先这个按钮只做一次静默请求 —— 结论没变时界面**一个像素都不动**，用户合理地认为它没实现。
  */
 export function BiliLoginSection({ onError }: { onError: (message: string) => void }) {
   const [status, setStatus] = useState<BiliStatus | null>(null);
   const [qrcode, setQrcode] = useState<BiliQrcode | null>(null);
   const [pollMessage, setPollMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [checkedAt, setCheckedAt] = useState("");
+  const [checkNote, setCheckNote] = useState("");
   const pollTimer = useRef<number | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -49,10 +55,23 @@ export function BiliLoginSection({ onError }: { onError: (message: string) => vo
   }
 
   async function refresh() {
+    setChecking(true);
+    setCheckNote("");
     try {
-      setStatus(await getBiliStatus());
+      // 超时不是失败：离线体检（不请求 B站）仍然能回答「工具装没装、登录文件在不在」。
+      // 停在原来的界面上什么都不说，才是真正的失败 —— 策略本身在 `biliHealth` 里，可单测。
+      const result = await runHealthCheck(() => getBiliStatus(true), () => getBiliStatus(false));
+      setStatus(result.status);
+      if (result.timedOut) {
+        setCheckNote(
+          "账号探测 12 秒还没回来（本机直连 B站 时域名解析可能卡住），下面是离线结论：投稿工具与登录文件的存在性。"
+        );
+      }
+      setCheckedAt(new Date().toLocaleTimeString("zh-CN", { hour12: false }));
     } catch (err) {
       onError(errorMessage(err, "读取 B 站 状态失败"));
+    } finally {
+      setChecking(false);
     }
   }
 
@@ -142,11 +161,14 @@ export function BiliLoginSection({ onError }: { onError: (message: string) => vo
     <div className="field bili-login-section">
       <div className="field-label-row">
         <span className="field-label">B站 上传</span>
-        <button className="bili-link" type="button" onClick={() => void refresh()} disabled={busy}>
+        {checkedAt && <span className="bili-checked-at">上次体检 {checkedAt}</span>}
+        <button className="bili-link" type="button" onClick={() => void refresh()} disabled={checking}>
           <RefreshCw size={14} />
-          重新体检
+          {checking ? "体检中…" : "重新体检"}
         </button>
       </div>
+
+      {checkNote && <p className="hint bili-check-note">{checkNote}</p>}
 
       <ul className="bili-check-list">
         <li className={biliupOk ? "is-ok" : "is-bad"}>
