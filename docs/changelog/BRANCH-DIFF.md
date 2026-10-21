@@ -21,13 +21,13 @@
 
 | 分支 | `main..<branch>`（独有） | `<branch>..main`（main 领先） | merge-base | 关系判定 |
 | --- | --- | --- | --- | --- |
-| `bilibili`（本地） | **0** | 25 | `cbc7732` | 已并入 main，落后 21 提交 |
-| `origin/bilibili` | 0 | 25 | `cbc7732` | 同上（远程跟踪） |
-| `fix/item-level-concurrency`（本地） | **0** | 98 | `0d4d921` | 已并入 main，落后 94 提交 |
-| `origin/fix/item-level-concurrency` | 0 | 98 | `0d4d921` | 同上（远程跟踪） |
-| `fix/progress-percent-stuck`（本地） | **0** | 99 | `f974ee5` | 已并入 main，落后 95 提交 |
-| `origin/fix/progress-percent-stuck` | 0 | 99 | `f974ee5` | 同上（远程跟踪） |
-| `origin/feature/audit-format-metadata` | **0** | 171 | `9eebbc1` | 已并入 main，落后 167 提交（该分支无本地跟踪） |
+| `bilibili`（本地） | **0** | 27 | `cbc7732` | 已并入 main，落后 21 提交 |
+| `origin/bilibili` | 0 | 27 | `cbc7732` | 同上（远程跟踪） |
+| `fix/item-level-concurrency`（本地） | **0** | 100 | `0d4d921` | 已并入 main，落后 94 提交 |
+| `origin/fix/item-level-concurrency` | 0 | 100 | `0d4d921` | 同上（远程跟踪） |
+| `fix/progress-percent-stuck`（本地） | **0** | 101 | `f974ee5` | 已并入 main，落后 95 提交 |
+| `origin/fix/progress-percent-stuck` | 0 | 101 | `f974ee5` | 同上（远程跟踪） |
+| `origin/feature/audit-format-metadata` | **0** | 173 | `9eebbc1` | 已并入 main，落后 167 提交（该分支无本地跟踪） |
 
 > 注：`fix/item-level-concurrency` 与 `fix/progress-percent-stuck` 的 merge-base 都在
 > `0dd4b5d`（视频基准提交）之前，说明这两个 fix 分支在视频制作前就已合入；它们与本次
@@ -38,21 +38,22 @@
 | 对比 | 本地领先远程 | 远程领先本地 |
 | --- | --- | --- |
 | `main` vs 远端 `refs/heads/main`（`ls-remote`） | **0**（本轮推送后） | 0 |
-| `main` vs 本地 `origin/main`（跟踪引用，**不可信**） | 10 | 0 |
+| `main` vs 本地 `origin/main`（跟踪引用，**不可信**） | 13（本轮生成时） | 0 |
 
-本轮（2026-10-21）推送前，远端 `refs/heads/main` 停在上一个提交 `f3f0ed7`，本地领先
-**1 个修复提交**（`1cdd6e6`，传输层断线的失败分类）+ 本文所在提交；本轮已推送，现两端一致
+本轮（2026-10-21）推送前，远端 `refs/heads/main` 停在上一轮的文档提交 `90154df`，本地领先
+**1 个修复提交**（`5ed7266`，字幕段数与文案）+ 本文所在提交；本轮已推送，现两端一致
 （核对方式见下）。其余四个远程分支均**完全落后于** main（0 领先）。
 
-> **核对方式有一条坑**：以 `git ls-remote <url> refs/heads/main` 为准，**不要**用本地的
-> `origin/main` 跟踪引用 —— 它停在最后一次 fetch/push 的位置。本轮就撞上了：本地 `origin/main`
-> 比远端落后 **10** 个提交，照它算「未推送」会得出完全相反的结论（实测：`git rev-list --count
-> origin/main..HEAD` = 10，而 `ls-remote` 显示远端已与本地同步）。
+> **核对方式有一条坑（连续两轮都撞上）**：以 `git ls-remote <url> refs/heads/main` 为准，
+> **不要**用本地的 `origin/main` 跟踪引用 —— 它停在最后一次 fetch/push 的位置，而 `git push`
+> 走显式 URL 时**不会**更新它。本轮生成时它落后 **13** 个提交，照它算「未推送」会得出完全相反的
+> 结论。这个数每提交一次就 +1，写死它没有意义（上一轮文中记的「10」是复述了一个旧读数，
+> 那一轮的真实值已经是 11）；要断言「是否已同步」只认 `ls-remote`。
 
 ## 四、自视频基准 `0dd4b5d` 以来的提交分布
 
-- `main` 自 `0dd4b5d` 以来新增提交：**21 个**（即本次 changelog 记录的全部内容，2026-10-21 实测）。
-- 这 21 个提交均落在 `main` 上；其它分支因已并入 main，自然也包含这些提交（作为 main 历史的一部分）。
+- `main` 自 `0dd4b5d` 以来新增提交：**23 个**（即本次 changelog 记录的全部内容；`rev-list --count` 为 24，扣除写下本文的那个提交）。
+- 这 23 个提交均落在 `main` 上；其它分支因已并入 main，自然也包含这些提交（作为 main 历史的一部分）。
 
 ## 五、建议
 
