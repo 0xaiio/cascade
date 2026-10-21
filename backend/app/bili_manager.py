@@ -79,6 +79,7 @@ from .bili_meta import (
     validate_group_choice,
 )
 from .bili_policy import (
+    ACCEPTED_STATUSES,
     COOKIE_TRACKED_BY_GIT,
     MISSING_BILIUP,
     MISSING_COOKIE,
@@ -87,6 +88,7 @@ from .bili_policy import (
     MISSING_UPLOAD_TOKEN,
     MISSING_VIDEO,
     NOT_LOGGED_IN,
+    REJECTED_STATUSES,
 )
 from .bili_subtitle import SUBTITLE_FAILED, SUBTITLE_POSTED
 from .subtitle_plan import subtitle_summary
@@ -105,6 +107,7 @@ from .bili_upload import (
     UploadResult,
     UploadTarget,
     group_into_season,
+    refresh_episode,
     render_collection,
     reverify,
     run_single,
@@ -1104,14 +1107,25 @@ class BiliManager:
         return BiliRetryRead(action="reupload", message="已重新排队上传", upload=read)
 
     async def retry_season(self, season_record_id: str) -> BiliSeasonRetryRead:
+        """重试一次归集。**先去平台回读，再看能不能归集。**
+
+        「重试」必须真的做点什么。旧实现在这里读的是**库里那几行**：稿件还在审核时
+        `cid` 是空的，于是这次「重试」连一个请求都不会发（实测 22 毫秒返回同一句话），
+        而它仍然回一句「已重新尝试归集」—— 用户看到的就是「点了没反应」。
+        见 `bili_upload.refresh_episode`。
+
+        三种结论对应三种措辞（`action` 一并给前端，让它决定配色）：
+        `grouped` 归集成功 / `failed` 这次又失败了 / `waiting` **这次没有发起归集**（前提还不满足）。
+        """
         with Session(self.engine) as session:
             season = session.get(BiliSeason, season_record_id)
             if season is None:
                 raise KeyError(season_record_id)
             job_id = season.job_id
-        read = await asyncio.to_thread(self._group_work, job_id, season_record_id)
+        read = await asyncio.to_thread(self._group_work, job_id, season_record_id, refresh=True)
         return BiliSeasonRetryRead(
-            message="已重新尝试归集" if read.status != BiliSeasonStatus.failed.value else "归集还是没有成功",
+            action=_season_retry_action(read.status),
+            message=_season_retry_message(read),
             season=read,
         )
 
@@ -1407,7 +1421,86 @@ class BiliManager:
                 return season
         return None
 
-    def _group_work(self, job_id: str, season_record_id: str) -> BiliSeasonRead:
+    def _refresh_episodes(self, season_record_id: str) -> None:
+        """回读平台，给「已经在平台上、但当初没拿到分P编号」的稿件补上 `cid`。
+
+        判据是 `cid is None` 且状态属于 `ACCEPTED_STATUSES` —— 这条组合的含义是
+        「投上去了，但平台当时还没给编号」，不是「失败了」。反过来说：
+        `failed`/`rejected` 的稿件回读**不会**让它变得能归集，只会白打一次请求。
+
+        读不到就保持原样（`refresh_episode` 返回 `None`）：把 `reviewing` 降级成
+        「待核对」是本功能最贵的一种误判 —— 用户会去重投一条已经投上去的稿件。
+        """
+        with Session(self.engine) as session:
+            season = session.get(BiliSeason, season_record_id)
+            if season is None:
+                return
+            rows = [session.get(BiliUpload, item) for item in season_upload_ids(season)]
+            # 目标在会话内取成纯数据：`_context()` 与回读都会跨出这个 `with`。
+            targets = [
+                (row.id, row.title, row.bvid, row.item_id)
+                for row in rows
+                if row is not None
+                and row.cid is None
+                and row.status in ACCEPTED_STATUSES
+            ]
+        if not targets:
+            return
+        context = self._context()
+        for upload_id, title, bvid, item_id in targets:
+            refreshed = refresh_episode(context, title=title, bvid=bvid, item_id=item_id)
+            if refreshed is None:
+                continue
+            self._merge_refresh(upload_id, refreshed)
+
+    def _merge_refresh(self, upload_id: str, result: UploadResult) -> None:
+        """把回读到的事实并进那一行。**只补不删。**
+
+        三条规矩，每条都对应一种会静默出错的情形：
+
+        1. 读回来是空的值不覆盖已有的值 —— 平台偶尔会漏字段，抹掉本地已有的编号
+           只会让「本来能归集」变成「不能」；
+        2. 状态只在**读到了 `state`** 时才改：没读到 `state` 时折出来的是
+           `unverified`，那不是新事实，是我们不知道；
+        3. 有变化才发事件 —— 每次点击都推一条「没变化」的事件，只会让界面白重拉一遍。
+        """
+        with self._progress_lock, Session(self.engine) as session:
+            row = session.get(BiliUpload, upload_id)
+            if row is None:
+                return
+            before = (row.status, row.aid, row.bvid, row.cid, row.verified_state)
+            row.aid = result.aid or row.aid
+            row.bvid = result.bvid or row.bvid
+            row.cid = result.cid or row.cid
+            row.cover_url = result.cover_url or row.cover_url
+            if result.verified_state is not None and result.status in (
+                ACCEPTED_STATUSES | REJECTED_STATUSES
+            ):
+                row.verified_state = result.verified_state
+                row.verified_note = result.verified_note
+                row.status = result.status
+            row.updated_at = utc_now()
+            session.add(row)
+            session.commit()
+            job_id = row.job_id
+            after = (row.status, row.aid, row.bvid, row.cid, row.verified_state)
+        if before == after:
+            return
+        logger.info("bili 回读到新事实：upload=%s %s → %s", upload_id, before, after)
+        self._publish_threadsafe(
+            {"type": "bili_upload_refreshed", "job_id": job_id, "upload_id": upload_id}
+        )
+
+    def _group_work(self, job_id: str, season_record_id: str, *, refresh: bool = False) -> BiliSeasonRead:
+        """把这一批稿件归进合集。
+
+        `refresh=True` 只在**用户显式点「重试归集」**时传：那一下先去平台回读
+        「有 aid 但没 cid」的稿件（`_refresh_episodes`），再决定能不能归集。
+        自动归集（`_maybe_group`）不这么做 —— 它发生在刚对账完的那一刻，
+        那时 cid 缺失的含义是「平台还没给」，立刻再问一次平台没有意义。
+        """
+        if refresh:
+            self._refresh_episodes(season_record_id)
         with Session(self.engine) as session:
             season = session.get(BiliSeason, season_record_id)
             if season is None:
@@ -1513,3 +1606,30 @@ def _season_outcome_from_error(exc: BiliPreconditionError) -> SeasonOutcome:
         error=exc.message,
         advice=exc.advice,
     )
+
+
+def _season_retry_action(status: str) -> str:
+    """一次「重试归集」的实际结果 → 前端配色用的那一档。
+
+    `waiting` 与 `failed` 必须分开：前者是「**这次连请求都没发**，因为前提还不满足」，
+    把它说成失败会让人以为合集那一步坏了；反过来把 `failed` 说成 waiting 会让人一直等。
+    """
+    if status == BiliSeasonStatus.grouped.value:
+        return "grouped"
+    if status == BiliSeasonStatus.failed.value:
+        return "failed"
+    return "waiting"
+
+
+def _season_retry_message(read: BiliSeasonRead) -> str:
+    """回执那句话。**只说这一次真的发生了什么。**
+
+    旧实现在这里只有两种措辞，判据是 `status != failed`：于是「前提还不满足、一个请求都没发」
+    也被说成「已重新尝试归集」。用户点一次、行里那句「等几分钟后点重试」纹丝不动，
+    回执却说成功了 —— 两句话互相矛盾，而矛盾的那个方向正好让人不再点第二次。
+    """
+    if read.status == BiliSeasonStatus.grouped.value:
+        return "已重新尝试归集"
+    if read.status == BiliSeasonStatus.failed.value:
+        return "归集还是没有成功"
+    return f"这次没有发起归集：{read.error or '还没有可以加进合集的稿件'}"

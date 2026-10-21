@@ -47,6 +47,7 @@ from app.bili_upload import (
     UploadTarget,
     group_into_season,
     prepare_cover,
+    refresh_episode,
     render_collection,
     reverify,
     run_collection,
@@ -668,6 +669,73 @@ def test_reverify_does_not_send_a_comment(tmp_path):
     transport = FakeBiliTransport(archives=[archive()])
     reverify(make_context(transport, runner=ScriptedRunner([]), tmp_path=tmp_path), title=TITLE)
     assert transport.called("/x/v2/reply/add") == 0
+
+
+# ================================================================ 事后回读
+def test_refresh_episode_fills_the_cid_the_upload_moment_could_not_get(tmp_path):
+    """投稿那一刻在审核中 ⇒ `view` 回 -404 ⇒ `cid` 为空。审核通过后回读必须补上它。
+
+    没有这条路，归集永远拿不到 `cid`：`retry_upload` 对已成功的稿件直接回
+    「没有重复投稿」，而归集读的是**库里那几行**（ai/bug-fix/024）。
+    """
+    transport = FakeBiliTransport(archives=[archive(aid=9, bvid="BV9", state=0)])
+    result = refresh_episode(
+        make_context(transport, runner=ScriptedRunner([]), tmp_path=tmp_path),
+        title=TITLE,
+        bvid="BV9",
+    )
+    assert result is not None
+    assert (result.aid, result.bvid, result.cid) == (9, "BV9", 7001)
+    assert result.status == BiliUploadStatus.published.value
+    assert result.episode_ready is True
+    # 只读：一条投稿命令都不该跑。
+    assert transport.called("/x/web-interface/view") == 1
+
+
+def test_refresh_episode_prefers_the_bvid_over_the_title(tmp_path):
+    """bvid 是平台给的强身份。标题被平台改写/截断时，按标题比对会认不出来。"""
+    transport = FakeBiliTransport(
+        archives=[
+            archive(aid=1, bvid="BV-old", title=f"{TITLE}（另一条）", state=0),
+            archive(aid=2, bvid="BV-mine", title="平台把标题改成了别的样子", state=0),
+        ]
+    )
+    result = refresh_episode(
+        make_context(transport, runner=ScriptedRunner([]), tmp_path=tmp_path),
+        title=TITLE,
+        bvid="BV-mine",
+    )
+    assert result is not None
+    assert result.bvid == "BV-mine"
+    assert result.aid == 2
+
+
+def test_refresh_episode_returns_none_instead_of_guessing(tmp_path):
+    """**读不到 ≠ 它不在平台上。** 列表里没有这一条时只能返回 `None`，
+    调用方据此保持原记录不变 —— 把 `reviewing` 降级成「待核对」会让人去重投。"""
+    transport = FakeBiliTransport(archives=[])
+    assert (
+        refresh_episode(
+            make_context(transport, runner=ScriptedRunner([]), tmp_path=tmp_path),
+            title=TITLE,
+            bvid="BV9",
+        )
+        is None
+    )
+
+
+def test_refresh_episode_survives_a_broken_archives_read(tmp_path):
+    """列表读挂了也只是「这次没读到」，不该把异常抛到归集那一步。"""
+    transport = FakeBiliTransport(archives=[], archives_error=HttpError("连接被重置"))
+    assert (
+        refresh_episode(
+            make_context(transport, runner=ScriptedRunner([]), tmp_path=tmp_path),
+            title=TITLE,
+            bvid="BV9",
+        )
+        is None
+    )
+
 
 
 # ================================================================ 归集

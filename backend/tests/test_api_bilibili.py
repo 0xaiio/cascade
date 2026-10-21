@@ -816,3 +816,5 @@ def test_retry_season_returns_the_season_view(client):
     response = client.client.post(f"/api/bilibili/collections/{season_id}/group")
     assert response.status_code == 200
     assert response.json()["season"]["id"] == season_id
+    # `action` 是「这一次到底做了什么」，界面按它选配色（waiting 与 failed 必须分得开）。
+    assert response.json()["action"] in {"grouped", "failed", "waiting"}

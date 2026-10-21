@@ -867,6 +867,99 @@ async def test_retry_season_of_an_unknown_record_raises_key_error(tmp_path):
         await harness.manager.retry_season("nope")
 
 
+async def _pending_collection(tmp_path: Path, transport: FakeBiliTransport):
+    """造出 Ep 125 那种形状：稿件**投稿那一刻正在审核**，所以 `cid` 没拿到、合集停在 `pending`。
+
+    这不是人手捏的状态，是真实流程自己走出来的：`x/web-interface/view` 对审核中的稿件
+    回 `-404 啥都木有`，`_attach_subtitle` 那条注释里写着同一件事。
+    """
+    harness = make_harness(tmp_path, transport=transport)
+    items = harness.seed_job("job2", "合集任务", 1)
+    target = UploadTarget(index=1, title=items[0]["title"], video_path=Path(items[0]["path"]), item_id=items[0]["id"])
+    await harness.manager.submit_collection(
+        job_id="job2",
+        template=MetadataTemplate(title_template="{title}", desc_template="{title}", tags="标签", tid="122"),
+        targets=[target],
+        paths=[Path(items[0]["path"])],
+        season_title="合集任务",
+        season_desc="说明",
+        make_cover=False,
+        comment="",
+    )
+    await drain(harness.manager)
+    return harness
+
+
+IN_REVIEW_ARCHIVE = {"aid": 1, "bvid": "BV1", "title": "合集任务 第 1 集", "state": -30}
+PUBLISHED_ARCHIVE = {"aid": 1, "bvid": "BV1", "title": "合集任务 第 1 集", "state": 0}
+
+
+async def test_retry_season_asks_the_platform_again_and_groups_once_it_can(tmp_path):
+    """**「重试归集」必须真的去问平台。** 旧实现读的是库里那几行，`cid` 是空的，
+    于是它一个请求都不发就回「已重新尝试归集」—— 视频审核通过之后也不会自愈，
+    归集永远停在「等待归集」（实测 Ep 125：平台上 `cid=42927065206`，本机仍为空）。
+    """
+    # `video=None` ⇒ `x/web-interface/view` 回 -404，正是「还在审核」时平台的样子。
+    transport = FakeBiliTransport(archives=[dict(IN_REVIEW_ARCHIVE)], video=None)
+    harness = await _pending_collection(tmp_path, transport)
+    season = harness.season("job2")
+    upload = harness.uploads("job2")[0]
+    assert season.status == BiliSeasonStatus.pending.value
+    assert (upload.status, upload.cid) == (BiliUploadStatus.reviewing.value, None)
+
+    # 平台侧：审核通过了，分P编号有了。本机还不知道。
+    transport.archives = [dict(PUBLISHED_ARCHIVE)]
+    transport.video = {"cid": 7001, "pic": "https://i0.hdslb.com/bfs/archive/pic.jpg"}
+
+    again = await harness.manager.retry_season(season.id)
+    assert again.action == "grouped"
+    assert again.season.status == BiliSeasonStatus.grouped.value
+    assert harness.transport.called("/x/web-interface/view") == 2  # 投稿时一次 + 这次回读一次
+    assert harness.transport.called("/season/section/episodes/add") == 1
+    row = harness.upload(upload.id)
+    assert (row.status, row.cid) == (BiliUploadStatus.published.value, 7001)
+    await harness.manager.stop()
+
+
+async def test_retry_season_says_it_did_not_even_start_while_the_video_is_in_review(tmp_path):
+    """前提还不满足时，回执必须说「这次没有发起归集」而不是「已重新尝试归集」。
+
+    旧实现只有两种措辞，判据是 `status != failed` —— 于是「一个请求都没发」也被说成成功，
+    而行里那句「等审核通过后再点重试」纹丝不动：两句话互相矛盾，矛盾的方向正好让人不再点第二次。
+    """
+    transport = FakeBiliTransport(archives=[dict(IN_REVIEW_ARCHIVE)], video=None)
+    harness = await _pending_collection(tmp_path, transport)
+    season = harness.season("job2")
+
+    again = await harness.manager.retry_season(season.id)
+    assert again.action == "waiting"
+    assert "这次没有发起归集" in again.message
+    assert "排队审核" in again.message
+    assert again.season.status == BiliSeasonStatus.pending.value
+    # 归集请求**没有**发出去（发了也只会被平台拒）。
+    assert harness.transport.called("/season/section/episodes/add") == 0
+    row = harness.uploads("job2")[0]
+    assert (row.status, row.cid) == (BiliUploadStatus.reviewing.value, None)
+    await harness.manager.stop()
+
+
+async def test_retry_season_does_not_downgrade_a_row_when_the_platform_cannot_be_read(tmp_path):
+    """列表读挂了 ⇒ 回读返回 `None` ⇒ **这一行必须原样不动**。
+
+    把它降级成「待核对」是本功能最贵的误判：用户会去重投一条已经投上去的稿件。
+    """
+    transport = FakeBiliTransport(archives=[dict(IN_REVIEW_ARCHIVE)], video=None)
+    harness = await _pending_collection(tmp_path, transport)
+    season = harness.season("job2")
+    transport.archives_error = HttpError("连接被重置")
+
+    again = await harness.manager.retry_season(season.id)
+    assert again.action == "waiting"
+    row = harness.uploads("job2")[0]
+    assert (row.status, row.verified_state) == (BiliUploadStatus.reviewing.value, "-30")
+    await harness.manager.stop()
+
+
 async def test_retry_season_on_a_grouped_season_stays_grouped(tmp_path):
     """已经归集成功后再点「重试归集」，只会补加、不会重开一个合集。"""
     harness = make_harness(tmp_path, transport=FakeBiliTransport(archives=[{"aid": 1, "bvid": "BV1", "title": TITLE, "state": 0}]))

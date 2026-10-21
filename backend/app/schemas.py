@@ -612,5 +612,13 @@ class BiliRetryRead(BaseModel):
 
 
 class BiliSeasonRetryRead(BaseModel):
+    """一次「重试归集」的结果。**`action` 是「这一次到底做了什么」，不是合集状态。**
+
+    `waiting` 表示**连归集请求都没发**（前提还不满足，例如视频还在审核、平台没给分P编号）。
+    界面必须能把它和「发了请求但又失败」分开：前者该说「等审核」，后者该说「又没成」。
+    """
+
+    # grouped（这次归集成了）/ failed（发了请求又失败）/ waiting（没发起，前提还不满足）
+    action: Literal["grouped", "failed", "waiting"]
     message: str
     season: BiliSeasonRead

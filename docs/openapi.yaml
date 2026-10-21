@@ -1886,10 +1886,20 @@ paths:
       description: |
         Re-runs the season step for a collection whose grouping did not finish.
 
+        **It reads the platform before deciding.** Episodes that are already on
+        the platform but were recorded without a `cid` (they were still under
+        review when the upload finished, so `x/web-interface/view` answered
+        `-404`) are re-read first; that is what makes the same click succeed
+        once review clears instead of repeating a stale "still under review"
+        forever.
+
         **It never creates a second season.** When the record already carries a
         `season_id`, only the missing episodes are appended - which is the
         common case, because the failure usually happens after the season itself
         was created.
+
+        The response `action` says what this call actually did; `waiting` means
+        nothing was sent because a precondition is still unmet.
       parameters:
         - name: season_record_id
           in: path
@@ -1905,6 +1915,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/BiliSeasonRetryRead"
               example:
+                action: grouped
                 message: 已重新尝试归集
                 season:
                   id: 8a2f5c31-77e0-4d9b-b1a4-2c6f0e93d548
@@ -3540,10 +3551,28 @@ components:
 
     BiliSeasonRetryRead:
       type: object
-      required: [message, season]
+      required: [action, message, season]
       properties:
+        action:
+          type: string
+          enum: [grouped, failed, waiting]
+          description: >
+            What this retry actually did - not what the season looks like.
+
+            `waiting` means **no grouping request was sent at all**: a
+            precondition is still unmet (typically the video is still under
+            review, so the platform has not handed out the per-part `cid` the
+            season API needs). The retry first re-reads those episodes from the
+            platform, so the same click does group them once review clears.
+
+            The UI uses this to pick a tone: `grouped` is a success, while
+            `waiting` / `failed` must not look like one.
+          example: waiting
         message:
           type: string
-          example: 已重新尝试归集
+          description: >
+            Human-readable summary of this very click. For `waiting` it starts
+            with 这次没有发起归集 and carries the reason.
+          example: 这次没有发起归集：视频还在 B站 排队审核，暂时没法加进合集
         season:
           $ref: "#/components/schemas/BiliSeasonRead"

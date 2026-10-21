@@ -73,7 +73,7 @@
 | POST | `/api/bilibili/uploads` | 启动单视频上传，返回**整个任务**的视图 |
 | POST | `/api/bilibili/collections` | 启动合集上传（逐条投稿 + 全部结束后自动归集） |
 | POST | `/api/bilibili/uploads/{id}/retry` | 重试一条稿件（三种终态三种动作） |
-| POST | `/api/bilibili/collections/{id}/group` | 重试归集（**不会重复建合集**） |
+| POST | `/api/bilibili/collections/{id}/group` | 重试归集（**先去平台补 `cid`，再决定能不能归**；回包 `action` = `grouped`/`failed`/`waiting`，**不会重复建合集**） |
 
 契约漂移由 `scripts/check_api_contract.py` 卡住：`types.ts` 按 `SCHEMA_PAIRS` 逐接口比对字段名集合，
 `docs/openapi.yaml` 比对「路径 × 方法」集合。

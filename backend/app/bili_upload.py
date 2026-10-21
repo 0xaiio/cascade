@@ -32,11 +32,13 @@ from typing import Any
 from .bili_api import (
     DEFAULT_VERIFY_ATTEMPTS,
     DEFAULT_VERIFY_DELAY_SECONDS,
+    BiliApiError,
     add_episodes,
     create_season,
     fetch_video,
     find_archive,
     find_season_section,
+    list_recent_archives,
     send_and_top_comment,
 )
 from .bili_bin import (
@@ -48,7 +50,7 @@ from .bili_bin import (
     parse_progress,
     upload,
 )
-from .bili_http import Transport
+from .bili_http import HttpError, Transport
 from .bili_meta import (
     VIDEO_NAME_MAX,
     MetadataTemplate,
@@ -318,7 +320,16 @@ def _verify(
         result.advice = UPLOAD_UNVERIFIED[1]
         result.verified_note = UNVERIFIED_NOTE
         return
+    _apply_archive(context, result, archive)
 
+
+def _apply_archive(context: UploadContext, result: UploadResult, archive: dict[str, Any]) -> None:
+    """平台稿件对象 → `result` 里那些字段。**就地写，不判断「要不要写」。**
+
+    单拆出来是因为有两个入口要写同一组字段：`_verify`（刚投完的对账）与
+    `refresh_episode`（事后回读，补当初拿不到的 `cid`）。两份拷贝一起漂移时，
+    症状是「对账能拿到 cid、回读拿不到」，而两条路都只在真实账号上才跑得到。
+    """
     result.aid = _as_int(archive.get("aid"))
     bvid = archive.get("bvid")
     result.bvid = str(bvid) if bvid else None
@@ -340,6 +351,65 @@ def _verify(
             pic = detail.get("pic")
             if pic:
                 result.cover_url = str(pic)
+
+
+def _archive_of(context: UploadContext, *, title: str, bvid: str | None) -> dict[str, Any] | None:
+    """在近期稿件里认出「就是这一条」。**先按 bvid，认不出来再退回按标题前缀。**
+
+    bvid 是平台自己给的强身份，比标题可靠（标题可能被平台改写、截断或加后缀）；
+    而老记录里可能没有 bvid，那就只能退回 `find_archive` 那套标题前缀比对。
+    """
+    if bvid:
+        try:
+            for archive in list_recent_archives(context.transport, context.jar):
+                if str(archive.get("bvid") or "") == bvid:
+                    return archive
+        except (BiliApiError, HttpError):
+            # 列表读不到就退回标题比对 —— 那条路自己带着「查不到就是 None」的语义。
+            pass
+    return find_archive(context.transport, context.jar, title, attempts=1, sleeper=context.sleeper)
+
+
+def refresh_episode(
+    context: UploadContext,
+    *,
+    title: str,
+    bvid: str | None,
+    index: int = 1,
+    item_id: str | None = None,
+) -> UploadResult | None:
+    """**只读平台**，补齐这条稿件「当初没拿到、而合集会需要」的编号。
+
+    为什么必须有一条这样的路：稿件刚投上去时往往正在审核/转码，
+    `x/web-interface/view` 对审核中的稿件返回 `-404 啥都木有`，于是 `cid` 为空
+    （见 `_attach_subtitle` 里同一件事）。而**归集要 `cid`**，这个空洞当初不会写下来，
+    之后也没有任何路径再去问平台一次：
+
+    - `retry_upload` 对已成功的稿件直接回「没有重复投稿」，不回读；
+    - 归集读的是**库里那几行**，不是平台。
+
+    结果是归集永远停在「视频还在 B站 排队审核」，**哪怕它早就通过了**。
+    实测 Ep 125：平台上 `state=0`、`cid=42927065206`，本机记录里 `cid` 仍是空，
+    界面一直说「等待归集」，点「重试归集」22 毫秒返回同一句话。
+
+    返回 `None` 表示**这一次什么都没读到**（未登录 / 网络失败 / 列表里没有这条）。
+    调用方必须保持原记录不变：**「查不到」不等于「它不在平台上」**，
+    把一条 `reviewing` 的记录降级成「待核对」是这一条最贵的误判。
+    """
+    archive = _archive_of(context, title=title, bvid=bvid)
+    if archive is None:
+        return None
+    result = UploadResult(
+        index=index,
+        item_id=item_id,
+        # 平台没给 state 时 `_apply_archive` 会把它折成 `unverified`；
+        # 这里给一个中性初值，避免在读不到 state 时凭空说出「待核对」以外的结论。
+        status=BiliUploadStatus.unverified.value,
+        title=title,
+    )
+    _apply_archive(context, result, archive)
+    return result
+
 
 
 def _attach_subtitle(context: UploadContext, target: UploadTarget, result: UploadResult) -> None:
