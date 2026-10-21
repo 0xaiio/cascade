@@ -18,12 +18,33 @@ class LocalOpenError(RuntimeError):
 # 抛的就是 `OSError(WinError 1155)` —— 它不是打开失败，只是「还没人认领」。
 ERROR_NO_ASSOCIATION = 1155
 
-# 自带选择对话框的窗口特征（tkinter 顶层窗口；标题与 `_CHOOSER_TITLE` 一致才认领）。
+# 自带选择对话框的窗口特征（tkinter 顶层窗口；标题与 `CHOOSER_TITLE` 一致才认领）。
 CHOOSER_WINDOW_CLASS = "TkTopLevel"
 CHOOSER_TITLE = "打开方式"
 
-# 等对话框出现的时间。实测 0.1~0.4s；超过这个数还没窗口，就当作「弹不出来」。
-OPEN_WITH_APPEAR_TIMEOUT_SECONDS = 3.0
+# 系统 `SHOpenWithDialog` 的窗口类名。**降级提示框用的是同一个类名**，所以只认类名会把
+# 「若要更改默认应用…」那个提示框当成选择器 —— 高度才是判据（见下）。
+SHELL_DIALOG_CLASS = "Shell_Dialog"
+# 实测：降级提示框恒为 118px；真正的选择器在 500px 以上。用 300 留足 DPI 缩放的余量。
+SHELL_NOTICE_MAX_HEIGHT = 300
+
+# 系统「选取应用」弹层的宿主（`OpenAs_RunDLL` 拉起的那一个）。标题随系统语言变化。
+OPEN_WITH_HOST_EXE = "openwith.exe"
+OPEN_WITH_HOST_TITLES = ("选取应用", "Open With")
+
+# `SHOpenWithDialog` 的三个开关（shlobj.h）：允许登记、隐藏注册提示、挑完直接执行。
+OAIF_ALLOW_REGISTRATION = 0x00000001
+OAIF_EXEC = 0x00000002
+OAIF_HIDE_REGISTRATION = 0x00000020
+
+# 等「选取应用」弹层出现的时间。实测健康时 <1s；超时就往下走一级。
+OPEN_WITH_HOST_WAIT_SECONDS = 1.6
+# 第一级已经弹出「若要更改默认应用…」提示框时，只给它一半时间：两条路走的是**同一套**系统 UI，
+# 那套 UI 降级时这条路也不会起来（实测 0/6 次）。留给它一个短窗口，是怕万一两者会分叉。
+OPEN_WITH_HOST_WAIT_AFTER_NOTICE_SECONDS = 0.8
+
+# 整条链等窗口出现的总时限（系统两路 + 自带对话框），超过就当失败。
+OPEN_WITH_APPEAR_TIMEOUT_SECONDS = 6.0
 
 
 @dataclass(frozen=True)
@@ -43,11 +64,16 @@ class ProgramCandidate:
 
 @dataclass
 class ChooserOutcome:
-    """选择对话框的结局：`cancelled` = 用户点了取消；`error` = 对话框/打开动作本身出错。"""
+    """「挑程序」这条链的结局。
+
+    `cancelled` = 用户点了取消；`error` = 对话框/启动动作本身出错；
+    `launched` = 最终启动的可执行文件；`shell_degraded` = 系统对话框退化成了提示框（已被关掉）。
+    """
 
     cancelled: bool = False
     error: str | None = None
     launched: str | None = None
+    shell_degraded: bool = False
 
 
 def open_path_with_default_app(path: Path) -> None:
@@ -69,22 +95,21 @@ def open_path_with_default_app(path: Path) -> None:
 
 
 def open_path_with_chooser(path: Path) -> None:
-    """弹一个「打开方式」对话框，由用户挑一个程序来打开这个文件。
+    """弹一个「打开方式」，由用户挑一个程序来打开这个文件。
 
-    **为什么不再用系统的那个窗口。** 系统本来有这个 UI，但它不是稳定的依赖：本机实测
-    Win11 的「选取应用」弹层（`OpenAs_RunDLL` 那条路）调用返回 0 却什么窗口都没有；改用文档化的
-    `SHOpenWithDialog` 之后，无论标志位怎么给、文件是什么类型（`.txt` / `.mp4` / `.vtt`），
-    弹出来的都是一个 680x118 的提示框 ——「若要更改默认应用，请转到"设置">"应用">"默认应用"。」，
-    里面**没有可选程序列表**。也就是说这套系统 UI 在这台机器上整体降级了，任何"请它出来"的
-    做法都拿不到选择器。
+    **优先交给系统**，因为它给的清单比我们全（含 Store 应用、以及「始终使用此应用」），
+    这是用户唯一认可的形态。系统的两条入口都试，都不可用才退回自带对话框：
 
-    所以这里自己画一个对话框（tkinter，与目录选择器同一套依赖），但**不自己编程序清单**：
-    候选来自系统注册表里为这个后缀登记过的处理器（见 `_program_candidates`），列表为空时
-    （`.vtt` / `.srt` 通常就是空的）由用户「浏览…」挑一个可执行文件。选择与启动都在本进程内
-    完成，**不接受前端传入的程序路径**。
+    1. `SHOpenWithDialog`（文档化 API，在本进程内画 `Shell_Dialog`）；
+    2. 系统「选取应用」弹层（`OpenAs_RunDLL`，窗口归 `OpenWith.exe`）—— 它在这台机器上曾经可用，
+       后来整机降级；两条路的失效方式不同，所以都要试。
 
-    对话框是模态的，跑在自己的线程里；接口这边等到「窗口真的出现」就返回，**窗口没出现就当
-    失败**抛 `LocalOpenError`，绝不 204 空转。
+    判据不是「有没有窗口」，而是**窗口里有没有东西可选**：降级后的提示框也是 `Shell_Dialog`，
+    只是高度只有 118px（真正的选择器在 500px 以上）。见 `SHELL_NOTICE_MAX_HEIGHT`。
+
+    三级都不成时用自带对话框，清单同样不硬编码：系统为该后缀登记的处理程序 + 本机真实存在的
+    常见编辑器（见 `_editor_candidates`），外加「浏览…」。选择与启动都在本进程内完成，
+    **不接受前端传入的程序路径**。
 
     其它平台没有等价入口（macOS 的 `open -a` 要的是应用名，Linux 的 `xdg-open` 只有默认），
     于是退化成「用默认程序打开」。见 `docs/technical.md#打开字幕文件`。
@@ -96,15 +121,15 @@ def open_path_with_chooser(path: Path) -> None:
 
 
 def _open_windows_chooser(path: Path) -> None:
-    """Windows 上的「挑程序」：起自带对话框，并**确认它真的出来了**。
+    """起「挑程序」这条链，并**确认真的有一个可选东西的窗口出来了**。
 
-    四条都是踩出来的：
+    这里只做四件事：
     1. 已经有一个窗口在等用户时不再叠一个 —— 连点几下会得到一摞一模一样的模态窗口；
-    2. 对话框跑在自己的线程里，这里只等到「窗口出现」为止（否则接口会挂到用户点完）；
-    3. 窗口始终没出现 = 失败；**静默 204 是最糟的结果**（界面看起来点过了，其实什么都没发生）；
-    4. 用户点「取消」不是失败，也不该弹错误。
+    2. 开一个线程跑整条链（每个入口都是模态的，不能占用请求线程）；
+    3. 在本线程盯窗口：系统提示框（高度不足）就地关掉、让链继续往下走；
+    4. 超时仍没有任何窗口 = 失败；用户点「取消」不算失败。
     """
-    if _chooser_window():
+    if _chooser_window() or _shell_dialog_window() or _open_with_host_window():
         raise LocalOpenError(
             "已经有一个「打开方式」窗口在等你选择：先在那个窗口里选完（或取消），再点一次。"
         )
@@ -119,11 +144,27 @@ def _open_windows_chooser(path: Path) -> None:
     worker.start()
 
     deadline = time.monotonic() + OPEN_WITH_APPEAR_TIMEOUT_SECONDS
+    closed_shell: set[int] = set()
     while time.monotonic() < deadline:
-        window = _chooser_window()
-        if window:
-            _ensure_dialog_foreground(window)
+        ours = _chooser_window()
+        if ours:
+            _ensure_dialog_foreground(ours)
             return
+        host = _open_with_host_window()
+        if host:
+            _ensure_dialog_foreground(host)
+            return
+        shell = _shell_dialog_window()
+        if shell and shell not in closed_shell:
+            if _window_height(shell) >= SHELL_NOTICE_MAX_HEIGHT:
+                _ensure_dialog_foreground(shell)
+                return
+            # 降级成「若要更改默认应用…」的提示框：关掉它，让链走下一级。
+            # 关掉后窗口还会停留一小会儿（关闭动画），所以把它记下来，别反复关、反复 sleep。
+            outcome.shell_degraded = True
+            closed_shell.add(shell)
+            _close_window(shell)
+            continue
         if not worker.is_alive():
             break
         time.sleep(0.03)
@@ -139,10 +180,19 @@ def _open_windows_chooser(path: Path) -> None:
 
 
 def _run_chooser(path: Path, outcome: ChooserOutcome) -> None:
-    """对话框 + 启动被选中的程序。整段异常都要落到 `outcome.error`，线程不许静默结束。"""
+    """整条链：系统的两条入口 → 自带对话框。异常一律落进 `outcome.error`，线程不许静默结束。"""
     try:
+        if _show_shell_chooser(path, outcome):
+            return
+        wait = (
+            OPEN_WITH_HOST_WAIT_AFTER_NOTICE_SECONDS
+            if outcome.shell_degraded
+            else OPEN_WITH_HOST_WAIT_SECONDS
+        )
+        if _show_host_chooser(path, wait):
+            return
         executable = _ask_program(path)
-    except Exception as exc:  # 例如环境里没有 tkinter
+    except Exception as exc:  # 例如环境里没有 tkinter、或 shell32 导出缺失
         outcome.error = f"{type(exc).__name__}: {exc}"
         return
     if executable is None:
@@ -155,8 +205,50 @@ def _run_chooser(path: Path, outcome: ChooserOutcome) -> None:
         outcome.error = f"{type(exc).__name__}: {exc}"
 
 
+def _show_shell_chooser(path: Path, outcome: ChooserOutcome) -> bool:
+    """第一级：`SHOpenWithDialog`。窗口健康（有程序列表）时返回 True。
+
+    它**返回即代表窗口已经关掉**（用户选完、取消，或者被我们判定降级后关掉）；所以这里只能靠
+    `outcome.shell_degraded` 区分「用户处理完了」与「那只是个提示框」。
+    """
+    try:
+        info = _OpenAsInfo(
+            str(path),
+            None,
+            OAIF_ALLOW_REGISTRATION | OAIF_HIDE_REGISTRATION | OAIF_EXEC,
+        )
+        ctypes.windll.shell32.SHOpenWithDialog(None, ctypes.byref(info))  # type: ignore[attr-defined]
+    except Exception:
+        return False
+    return not outcome.shell_degraded
+
+
+def _show_host_chooser(path: Path, wait_seconds: float) -> bool:
+    """第二级：系统「选取应用」弹层（`OpenAs_RunDLL`）。窗口在 `wait_seconds` 内出现即成功。
+
+    这条路请的是 explorer 托管的现代弹层，窗口不归我们 Popen 到的进程 —— 所以按**宿主 exe 名**认领
+    （`OPEN_WITH_HOST_EXE`），再自己把它置前。
+    """
+    before = set(_visible_windows())
+    # 直接 Popen：`_open_process` 还会按 pid/标题再轮询 1s 找窗口，而这条路要找的是**别人**的
+    # 窗口（宿主 exe 不是我们起的那个进程），那段轮询必然空转 —— 白等 1 秒。
+    subprocess.Popen(
+        ["rundll32.exe", "shell32.dll,OpenAs_RunDLL", str(path)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    deadline = time.monotonic() + wait_seconds
+    while time.monotonic() < deadline:
+        hwnd = _open_with_host_window(exclude=before)
+        if hwnd:
+            _ensure_dialog_foreground(hwnd)
+            return True
+        time.sleep(0.05)
+    return False
+
+
 def _ask_program(path: Path) -> Path | None:
-    """画「打开方式」对话框并等用户选择；返回选中的可执行文件，取消则返回 `None`。"""
+    """第三级：自带「打开方式」对话框。返回选中的可执行文件，取消则返回 `None`。"""
     try:
         import tkinter as tk
         from tkinter import filedialog, ttk
@@ -169,23 +261,23 @@ def _ask_program(path: Path) -> Path | None:
     candidates = _program_candidates(path.suffix)
     root = tk.Tk()
     root.title(CHOOSER_TITLE)
-    root.geometry("620x360")
-    root.minsize(480, 260)
+    root.geometry("680x420")
+    root.minsize(520, 300)
     root.attributes("-topmost", True)
 
     chosen: dict[str, Path | None] = {"exe": None}
 
     tk.Label(
         root,
-        text=f"用哪个程序打开「{_shorten(path.name, 64)}」？",
+        text=f"用哪个程序打开「{_shorten(path.name, 72)}」？",
         anchor="w",
         justify="left",
-        wraplength=580,
+        wraplength=640,
     ).pack(fill="x", padx=14, pady=(14, 6))
 
     body = tk.Frame(root)
     body.pack(fill="both", expand=True, padx=14)
-    listbox = tk.Listbox(body, activestyle="none", exportselection=False)
+    listbox = tk.Listbox(body, activestyle="none", exportselection=False, width=1)
     scrollbar = ttk.Scrollbar(body, orient="vertical", command=listbox.yview)
     listbox.configure(yscrollcommand=scrollbar.set)
     listbox.pack(side="left", fill="both", expand=True)
@@ -194,13 +286,14 @@ def _ask_program(path: Path) -> Path | None:
         listbox.insert("end", f"{candidate.name}    —    {candidate.executable}")
     if candidates:
         listbox.selection_set(0)
+        listbox.activate(0)
 
     hint = (
-        "这些是系统为这个后缀登记过的程序。"
+        "列表里是系统为这个后缀登记的程序，以及本机能找到的常用编辑器。"
         if candidates
-        else "系统还没有为这个后缀登记任何程序，点「浏览…」挑一个（记事本、VS Code、VLC 都行）。"
+        else "没找到能直接打开它的程序，点「浏览…」自己挑一个 exe。"
     )
-    tk.Label(root, text=hint, anchor="w", justify="left", wraplength=580, fg="#4a5a70").pack(
+    tk.Label(root, text=hint, anchor="w", justify="left", wraplength=640, fg="#4a5a70").pack(
         fill="x", padx=14, pady=(8, 0)
     )
     tk.Label(
@@ -208,7 +301,7 @@ def _ask_program(path: Path) -> Path | None:
         text="想让它以后默认用某个程序打开，请到「设置 > 应用 > 默认应用」。",
         anchor="w",
         justify="left",
-        wraplength=580,
+        wraplength=640,
         fg="#6b7a8f",
     ).pack(fill="x", padx=14)
 
@@ -227,9 +320,12 @@ def _ask_program(path: Path) -> Path | None:
     tk.Button(buttons, text="取消", width=10, command=root.destroy).pack(side="right", padx=6)
 
     def browse() -> None:
+        # 普通用户不知道程序装在哪：从 Program Files 起，并且默认只看 exe。
+        start = _program_files_dir()
         picked = filedialog.askopenfilename(
             parent=root,
-            title="选择用来打开它的程序",
+            title="选择用来打开它的程序（.exe）",
+            initialdir=str(start) if start else None,
             filetypes=[("程序", "*.exe"), ("所有文件", "*.*")],
         )
         if picked:
@@ -274,8 +370,47 @@ def _shorten(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
+def _program_files_dir() -> Path | None:
+    for variable in ("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"):
+        raw = os.environ.get(variable)
+        if raw and Path(raw).is_dir():
+            return Path(raw)
+    return None
+
+
 def _program_candidates(ext: str) -> list[ProgramCandidate]:
-    """系统为这个后缀登记过的处理器（读注册表），去重、只留真实存在的可执行文件。
+    """对话框里的候选：**系统为该后缀登记的处理程序**在前，**本机常见编辑器**在后。
+
+    两组都只保留真实存在的可执行文件，按路径去重（同一程序命中多个路径时保留先出现的那个）。
+    """
+    entries: list[ProgramCandidate] = []
+    seen_paths: set[str] = set()
+    seen_names: set[str] = set()
+
+    def add(name: str, executable: str | Path, *, collapse_by_name: bool = False) -> None:
+        exe = Path(os.path.expandvars(str(executable).strip().strip('"')))
+        if not exe.is_file():
+            return
+        key = str(exe).lower()
+        if key in seen_paths:
+            return
+        if collapse_by_name and name.lower() in seen_names:
+            return  # 比如记事本同时命中 System32 与 WindowsApps 的别名
+        seen_paths.add(key)
+        seen_names.add(name.lower())
+        # `AppX4ztfk9wxr86nxmzzq47px0nh0e58b8fw` 这种是包标识，不是给人看的名字。
+        label = exe.stem if not name or name.startswith("AppX") else name
+        entries.append(ProgramCandidate(label, exe))
+
+    for name, executable in _registered_handlers(ext):
+        add(name, executable, collapse_by_name=True)
+    for name, executable in _editor_candidates():
+        add(name, executable, collapse_by_name=True)
+    return entries
+
+
+def _registered_handlers(ext: str) -> list[tuple[str, str]]:
+    """系统注册表里为这个后缀登记过的处理器，返回 `[(显示名, 可执行文件路径)]`。
 
     三个来源都是**系统自己的登记**，不是我们编的清单：
       - `HKCU\\...\\FileExts\\<ext>\\OpenWithList`（用户用过的，带 MRU 顺序）；
@@ -290,20 +425,7 @@ def _program_candidates(ext: str) -> list[ProgramCandidate]:
         return []
 
     extension = ext if ext.startswith(".") else f".{ext}"
-    entries: list[ProgramCandidate] = []
-    seen: set[str] = set()
-
-    def add(name: str, executable: str | Path) -> None:
-        exe = Path(os.path.expandvars(str(executable).strip().strip('"')))
-        if not exe.is_file():
-            return
-        key = str(exe).lower()
-        if key in seen:
-            return
-        seen.add(key)
-        # `AppX4ztfk9wxr86nxmzzq47px0nh0e58b8fw` 这种是包标识，不是给人看的名字。
-        label = exe.stem if not name or name.startswith("AppX") else name
-        entries.append(ProgramCandidate(label, exe))
+    found: list[tuple[str, str]] = []
 
     def read_exe_names(root_key: int, sub_key: str) -> None:
         try:
@@ -316,7 +438,7 @@ def _program_candidates(ext: str) -> list[ProgramCandidate]:
                         break
                     index += 1
                     if name.isdigit():  # `a` / `b` / `MRUList` 这些不是程序项
-                        add(Path(str(value)).stem, str(value))
+                        found.append((Path(str(value)).stem, str(value)))
         except OSError:
             pass
 
@@ -346,9 +468,167 @@ def _program_candidates(ext: str) -> list[ProgramCandidate]:
                 command = str(winreg.QueryValue(key, None) or "")
         except OSError:
             continue
-        add(_progid_label(winreg, progid), _command_executable(command))
+        found.append((_progid_label(winreg, progid), _command_executable(command)))
 
-    return entries
+    return found
+
+
+# 本机常见编辑器：品牌名 → 可能的安装位置（支持 `*` 通配）。
+# 只列**真实存在**的那些，所以这张表是「候选来源」而不是「界面清单」——
+# 用户没装的自然不出现，装了但这里没登记的仍可「浏览…」。
+_EDITOR_LOCATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("记事本", (r"%SystemRoot%\System32\notepad.exe", r"%LOCALAPPDATA%\Microsoft\WindowsApps\notepad.exe")),
+    ("写字板", (r"%ProgramFiles%\Windows NT\Accessories\wordpad.exe", r"%SystemRoot%\System32\write.exe")),
+    (
+        "Visual Studio Code",
+        (
+            r"%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe",
+            r"%ProgramFiles%\Microsoft VS Code\Code.exe",
+        ),
+    ),
+    (
+        "CLion",
+        (
+            r"%ProgramFiles%\JetBrains\CLion*\bin\clion64.exe",
+            r"%LOCALAPPDATA%\Programs\CLion\bin\clion64.exe",
+            r"%LOCALAPPDATA%\JetBrains\Toolbox\apps\CLion\**\bin\clion64.exe",
+        ),
+    ),
+    (
+        "IntelliJ IDEA",
+        (
+            r"%ProgramFiles%\JetBrains\IntelliJ IDEA*\bin\idea64.exe",
+            r"%LOCALAPPDATA%\Programs\IntelliJ IDEA\bin\idea64.exe",
+        ),
+    ),
+    (
+        "PyCharm",
+        (
+            r"%ProgramFiles%\JetBrains\PyCharm*\bin\pycharm64.exe",
+            r"%LOCALAPPDATA%\Programs\PyCharm\bin\pycharm64.exe",
+        ),
+    ),
+    ("Visual Studio", (r"%ProgramFiles%\Microsoft Visual Studio\*\*\Common7\IDE\devenv.exe",)),
+    (
+        "Notepad++",
+        (r"%ProgramFiles%\Notepad++\notepad++.exe", r"%ProgramFiles(x86)%\Notepad++\notepad++.exe"),
+    ),
+    (
+        "Sublime Text",
+        (
+            r"%ProgramFiles%\Sublime Text\sublime_text.exe",
+            r"%ProgramFiles%\Sublime Text 3\sublime_text.exe",
+            r"%LOCALAPPDATA%\Programs\Sublime Text\sublime_text.exe",
+        ),
+    ),
+    ("gVim", (r"%ProgramFiles%\Vim\vim*\gvim.exe", r"%ProgramFiles(x86)%\Vim\vim*\gvim.exe")),
+    (
+        "Emacs",
+        (r"%LOCALAPPDATA%\Programs\Emacs\*\bin\runemacs.exe", r"%ProgramFiles%\Emacs\*\bin\runemacs.exe"),
+    ),
+    (
+        "Pulsar / Atom",
+        (r"%LOCALAPPDATA%\Programs\Pulsar\Pulsar.exe", r"%LOCALAPPDATA%\Programs\atom\atom.exe"),
+    ),
+    ("Geany", (r"%ProgramFiles%\Geany\bin\geany.exe",)),
+    ("SciTE", (r"%ProgramFiles%\SciTE\SciTE.exe",)),
+    ("Kate", (r"%ProgramFiles%\Kate\bin\kate.exe",)),
+    ("TextPad", (r"%ProgramFiles%\TextPad*\TextPad.exe",)),
+    ("UltraEdit", (r"%ProgramFiles%\UltraEdit\uedit64.exe", r"%ProgramFiles%\IDM Computer Solutions\UltraEdit\uedit64.exe")),
+)
+
+# `App Paths` 里只认这几个可执行文件名：那里的条目动辄上百，全列出来是噪音。
+_EDITOR_EXE_NAMES = {
+    "notepad.exe": "记事本",
+    "wordpad.exe": "写字板",
+    "write.exe": "写字板",
+    "code.exe": "Visual Studio Code",
+    "clion64.exe": "CLion",
+    "clion.exe": "CLion",
+    "idea64.exe": "IntelliJ IDEA",
+    "pycharm64.exe": "PyCharm",
+    "devenv.exe": "Visual Studio",
+    "notepad++.exe": "Notepad++",
+    "sublime_text.exe": "Sublime Text",
+    "gvim.exe": "gVim",
+    "emacs.exe": "Emacs",
+    "runemacs.exe": "Emacs",
+    "pulsar.exe": "Pulsar / Atom",
+    "atom.exe": "Pulsar / Atom",
+    "geany.exe": "Geany",
+    "scite.exe": "SciTE",
+    "kate.exe": "Kate",
+    "textpad.exe": "TextPad",
+    "uedit64.exe": "UltraEdit",
+}
+
+_APP_PATHS_ROOTS = (
+    (r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths", "HKEY_LOCAL_MACHINE"),
+    (r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths", "HKEY_LOCAL_MACHINE"),
+    (r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths", "HKEY_CURRENT_USER"),
+)
+
+
+def _editor_candidates() -> list[tuple[str, str]]:
+    """本机上真实存在的常见文本编辑器，返回 `[(品牌名, 可执行文件路径)]`。
+
+    两个来源：按品牌列的安装位置（`_EDITOR_LOCATIONS`，支持通配），以及 `App Paths` 里
+    命中 `_EDITOR_EXE_NAMES` 的条目。两处都只做只读查询，且**只保留存在的文件**。
+    """
+    if os.name != "nt":
+        return []
+    found: list[tuple[str, str]] = []
+
+    for name, patterns in _EDITOR_LOCATIONS:
+        for pattern in patterns:
+            hits = _expand_pattern(pattern)
+            if hits:
+                found.append((name, str(hits[0])))
+                break
+
+    try:
+        import winreg
+    except Exception:
+        return found
+
+    for sub_key, root_name in _APP_PATHS_ROOTS:
+        root = getattr(winreg, root_name)
+        try:
+            with winreg.OpenKey(root, sub_key) as key:
+                index = 0
+                while True:
+                    try:
+                        exe_name = winreg.EnumKey(key, index)
+                    except OSError:
+                        break
+                    index += 1
+                    label = _EDITOR_EXE_NAMES.get(exe_name.lower())
+                    if not label:
+                        continue
+                    try:
+                        with winreg.OpenKey(key, exe_name) as entry:
+                            value = str(winreg.QueryValue(entry, None) or "")
+                    except OSError:
+                        continue
+                    if value:
+                        found.append((label, value))
+        except OSError:
+            continue
+    return found
+
+
+def _expand_pattern(pattern: str) -> list[Path]:
+    """展开 `%VAR%` 与 `*` 通配，只返回真实存在的文件（通配按名字排序，保证结果稳定）。"""
+    text = os.path.expandvars(pattern)
+    if "*" in text or "?" in text:
+        try:
+            import glob
+
+            return [Path(item) for item in sorted(glob.glob(text, recursive=True)) if Path(item).is_file()]
+        except Exception:
+            return []
+    path = Path(text)
+    return [path] if path.is_file() else []
 
 
 def _command_executable(command: str) -> str:
@@ -372,35 +652,34 @@ def _progid_label(winreg: object, progid: str) -> str:
     return progid
 
 
-def _chooser_window() -> int | None:
-    """本进程里已经画出来的选择对话框（按类名 + 标题认领；没有就 `None`）。"""
+def _visible_windows() -> dict[int, tuple[int, str, str, int]]:
+    """当前可见的顶层窗口：`{hwnd: (pid, 标题, 类名, 高度)}`。
+
+    **不在这里取 exe 名**：那要对每个窗口 `OpenProcess` 一次（本机约 600 个窗口、几十毫秒），
+    而调用方每 30ms 轮询一次。要 exe 名的地方用 `_process_exe_name` 惰性查 + 按 pid 缓存。
+    """
     if os.name != "nt":
-        return None
+        return {}
     try:
         user32 = ctypes.windll.user32  # type: ignore[attr-defined]
     except Exception:
-        return None
+        return {}
 
-    found: list[int] = []
-    process_id = os.getpid()
+    rows: dict[int, tuple[int, str, str, int]] = {}
 
     def enum_handler(hwnd: int, _lparam: int) -> bool:
         try:
             if not user32.IsWindowVisible(hwnd):
                 return True
-            owner = ctypes.c_ulong()
-            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
-            if owner.value != process_id:
-                return True
-            name = ctypes.create_unicode_buffer(256)
-            user32.GetClassNameW(hwnd, name, 256)
-            if name.value != CHOOSER_WINDOW_CLASS:
-                return True
-            title = ctypes.create_unicode_buffer(256)
-            user32.GetWindowTextW(hwnd, title, 256)
-            if title.value == CHOOSER_TITLE:
-                found.append(hwnd)
-                return False
+            pid = ctypes.c_ulong()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            title = ctypes.create_unicode_buffer(300)
+            user32.GetWindowTextW(hwnd, title, 300)
+            cls = ctypes.create_unicode_buffer(256)
+            user32.GetClassNameW(hwnd, cls, 256)
+            rect = wintypes.RECT()
+            user32.GetWindowRect(hwnd, ctypes.byref(rect))
+            rows[hwnd] = (pid.value, title.value, cls.value, rect.bottom - rect.top)
         except Exception:
             return True
         return True
@@ -409,8 +688,90 @@ def _chooser_window() -> int | None:
     try:
         user32.EnumWindows(callback, 0)
     except Exception:
-        return None
-    return found[0] if found else None
+        return {}
+    return rows
+
+
+def _process_exe_name(process_id: int, cache: dict[int, str] | None = None) -> str:
+    """进程可执行文件名（小写、去目录）。取不到返回空串；传 `cache` 时按 pid 复用。"""
+    if cache is not None and process_id in cache:
+        return cache[process_id]
+    name = ""
+    try:
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        handle = kernel32.OpenProcess(0x1000, False, process_id)
+        if handle:
+            try:
+                buf = ctypes.create_unicode_buffer(512)
+                size = ctypes.c_ulong(512)
+                if kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+                    name = os.path.basename(buf.value).lower()
+            finally:
+                kernel32.CloseHandle(handle)
+    except Exception:
+        name = ""
+    if cache is not None:
+        cache[process_id] = name
+    return name
+
+
+def _chooser_window() -> int | None:
+    """本进程里已经画出来的自带对话框（按类名 + 标题 + pid 认领；没有就 `None`）。"""
+    for hwnd, (pid, title, cls, _height) in _visible_windows().items():
+        if pid == os.getpid() and cls == CHOOSER_WINDOW_CLASS and title == CHOOSER_TITLE:
+            return hwnd
+    return None
+
+
+def _shell_dialog_window() -> int | None:
+    """本进程里由 shell32 画出来的对话框（`SHOpenWithDialog` 的产物，含降级提示框）。"""
+    for hwnd, (pid, _title, cls, _height) in _visible_windows().items():
+        if pid == os.getpid() and cls == SHELL_DIALOG_CLASS:
+            return hwnd
+    return None
+
+
+def _open_with_host_window(exclude: set[int] | None = None) -> int | None:
+    """系统「选取应用」弹层的窗口：宿主 exe 是 `OpenWith.exe`（标题因语言而异）。
+
+    先按标题/类名这**不含系统调用**的特征快筛，再用（带缓存的）exe 名确认 —— 免得为几百个窗口
+    各开一次进程句柄。
+    """
+    cache: dict[int, str] = {}
+    for hwnd, (pid, title, cls, _height) in _visible_windows().items():
+        if exclude and hwnd in exclude:
+            continue
+        if cls.startswith("Open With") or title in OPEN_WITH_HOST_TITLES:
+            return hwnd
+        if cls == "Shell_Dialog":
+            continue
+        if pid and _process_exe_name(pid, cache) == OPEN_WITH_HOST_EXE:
+            return hwnd
+    return None
+
+
+def _window_height(hwnd: int) -> int:
+    rect = wintypes.RECT()
+    try:
+        ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect))  # type: ignore[attr-defined]
+    except Exception:
+        return 0
+    return rect.bottom - rect.top
+
+
+def _close_window(hwnd: int) -> None:
+    try:
+        ctypes.windll.user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE
+    except Exception:
+        pass
+
+
+class _OpenAsInfo(ctypes.Structure):
+    _fields_ = [
+        ("pcszFile", wintypes.LPCWSTR),
+        ("pcszClass", wintypes.LPCWSTR),
+        ("oaifInFlags", ctypes.c_int),
+    ]
 
 
 def _ensure_dialog_foreground(hwnd: int, timeout: float = 1.2) -> bool:

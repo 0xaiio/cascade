@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 import App from "./App";
@@ -252,6 +252,26 @@ describe("App · 任务中心：本地文件操作与链接", () => {
     expect(jobSubtitle).toBeDisabled();
     expect(jobSubtitle).toHaveAttribute("title", "字幕文件尚不可用");
     expect(screen.getByRole("button", { name: "打开字幕文件 Part one" })).toBeDisabled();
+  });
+
+  test("shows a pending hint while the open-with chain is working", async () => {
+    mockState.jobs = [
+      {
+        ...jobPayload,
+        items: [{ ...jobPayload.items[0], output_path: "D:////Videos////running.mp4", subtitle_path: "D:////Videos////running.en.vtt" }]
+      }
+    ];
+    // 打开字幕要先试两种系统入口，可能要 1~2 秒；这段时间界面必须有反馈。
+    mockState.localFileDelayMs = 150;
+    const user = userEvent.setup();
+    render(<App />);
+
+    expect(await screen.findByText("Running video")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "打开字幕文件 Running video" }));
+
+    const jobCard = screen.getByText("Running video").closest(".job-card") as HTMLElement;
+    expect(within(jobCard).getByRole("status")).toHaveTextContent("正在打开…");
+    await waitFor(() => expect(within(jobCard).queryByRole("status")).not.toBeInTheDocument());
   });
 
   test("shows subtitle failures beside the affected task", async () => {

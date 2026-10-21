@@ -70,11 +70,11 @@
 | `POST` | `/api/jobs/{job_id}/restart` | 重启任务，可覆盖清晰度。 | [`RestartJobRequest`](../backend/app/schemas.py#L106) |
 | `POST` | `/api/jobs/{job_id}/play` | 播放单视频任务已下载的视频文件。 | `204 No Content` |
 | `POST` | `/api/jobs/{job_id}/open-folder` | 打开单视频任务已下载视频所在文件夹，或打开 playlist 任务文件夹。 | `204 No Content` |
-| `POST` | `/api/jobs/{job_id}/open-subtitle` | 用本机程序打开单视频任务下载到的字幕文件；缺省弹应用自带的「打开方式」对话框（候选读系统注册表），`?mode=default` 才走文件关联。 | 查询参数 `mode`（`chooser` 缺省 / `default`） |
+| `POST` | `/api/jobs/{job_id}/open-subtitle` | 用本机程序打开单视频任务下载到的字幕文件；缺省先请系统的「打开方式」（不可用时自动退回应用自带的对话框），`?mode=default` 才走文件关联。 | 查询参数 `mode`（`chooser` 缺省 / `default`） |
 | `POST` | `/api/jobs/{job_id}/items/{item_id}/restart` | 重启 playlist 中单个子视频，可覆盖清晰度。 | `RestartJobRequest` |
 | `POST` | `/api/jobs/{job_id}/items/{item_id}/play` | 播放 playlist 子视频已下载的视频文件。 | `204 No Content` |
 | `POST` | `/api/jobs/{job_id}/items/{item_id}/open-folder` | 打开 playlist 子视频已下载视频所在文件夹。 | `204 No Content` |
-| `POST` | `/api/jobs/{job_id}/items/{item_id}/open-subtitle` | 用本机程序打开 playlist 子视频下载到的字幕文件；缺省弹应用自带的「打开方式」对话框（候选读系统注册表），`?mode=default` 才走文件关联。 | 查询参数 `mode` |
+| `POST` | `/api/jobs/{job_id}/items/{item_id}/open-subtitle` | 用本机程序打开 playlist 子视频下载到的字幕文件；缺省先请系统的「打开方式」（不可用时自动退回应用自带的对话框），`?mode=default` 才走文件关联。 | 查询参数 `mode` |
 | `POST` | `/api/jobs/{job_id}/items/delete` | 删除 playlist 中一个或多个子视频任务，可选删除输出和 sidecar 文件。 | `DeleteJobItemsRequest`、`DeleteJobItemsResponse` |
 | `DELETE` | `/api/jobs/{job_id}` | 删除任务，可选删除输出视频及字幕、metadata、缩略图、description 等相关文件。 | 查询参数 `delete_files` |
 | `GET` | `/api/events` | SSE 任务事件流。 | `text/event-stream` |
@@ -177,7 +177,7 @@
 
 | `mode` | 实际动作 | 谁决定程序 |
 | --- | --- | --- |
-| `chooser`（**默认**，任务中心按钮唯一动作） | 弹**应用自带**的「打开方式」对话框：列出系统为该后缀登记的程序，可用「浏览…」另指一个 exe | 用户当场挑；想固定默认请到系统「默认应用」里设 |
+| `chooser`（**默认**，任务中心按钮唯一动作） | 先弹系统的「打开方式」（`SHOpenWithDialog` → `OpenAs_RunDLL`）；系统那套界面降级成一个提示框时，自动改用**应用自带**的对话框（列出系统登记的处理器 + 本机常见编辑器 + 「浏览…」） | 用户当场挑；想固定默认请到系统「默认应用」里设 |
 | `default`（仅接口调用方，界面不再提供） | 走该后缀的**文件关联**；Windows 上若还没有关联程序，自动改弹上面那个对话框（不是报错） | 系统记录的那个程序 |
 
 界面调用这两个接口时**不带 `mode`**：缺省就是「弹选择器」，那个缺省只写在服务端一处，前端不跟它各写一遍（曾经前端写 `?mode=…`、两处各记一份，改一处就会与另一处不一致）。后端**不接收、也不解析「用哪个程序」**：没有编辑器清单，也不存「上次用的查看器」。理由见 [technical.md](technical.md#打开字幕文件)。没有字幕文件时 `409`；`mode` 取别的值一律 `422`（多一个取值就是一条没人实现过的分支）。

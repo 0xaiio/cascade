@@ -52,6 +52,8 @@ export const mockState = {
   analyzeLockedByEdgeCookies: false,
   /** 本地文件操作（播放 / 打开文件夹）的失败文案；`null` 表示成功。 */
   localFileActionFailure: null as string | null,
+  /** 本地文件动作的人为延迟（毫秒），用来观察「正在打开…」这一态。 */
+  localFileDelayMs: 0,
   /** `PUT /api/settings` 的人为延迟（毫秒），用来观察「保存中...」这一态。 */
   settingsUpdateDelayMs: 0,
   /** `PUT /api/settings` 是否返回 500。 */
@@ -141,6 +143,7 @@ function resetMockState(): void {
   mockState.browserCookieImportLocked = false;
   mockState.analyzeLockedByEdgeCookies = false;
   mockState.localFileActionFailure = null;
+  mockState.localFileDelayMs = 0;
   mockState.settingsUpdateDelayMs = 0;
   mockState.settingsUpdateShouldFail = false;
   mockState.diagnostics = diagnosticsPayload;
@@ -278,6 +281,9 @@ export function installAppHarness(): void {
         }
         if (url.includes("/open-subtitle") && init?.method === "POST") {
           // 打开字幕与播放/打开文件夹共用同一条失败通道（界面把它们都当「本机文件操作」）。
+          if (mockState.localFileDelayMs) {
+            await new Promise((resolve) => setTimeout(resolve, mockState.localFileDelayMs));
+          }
           if (mockState.localFileActionFailure) {
             return Response.json({ detail: mockState.localFileActionFailure }, { status: 409 });
           }
@@ -291,6 +297,9 @@ export function installAppHarness(): void {
             url.endsWith("/api/jobs/job-playlist/items/item-playlist-1/play")) &&
           init?.method === "POST"
         ) {
+          if (mockState.localFileDelayMs) {
+            await new Promise((resolve) => setTimeout(resolve, mockState.localFileDelayMs));
+          }
           if (mockState.localFileActionFailure) {
             return Response.json({ detail: mockState.localFileActionFailure }, { status: 409 });
           }

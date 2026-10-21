@@ -83,6 +83,9 @@ export function JobQueue({
   const [selectedItemIdsByJob, setSelectedItemIdsByJob] = useState<Record<string, Set<string>>>({});
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [localActionError, setLocalActionError] = useState<{ key: string; message: string } | null>(null);
+  // 哪个本地动作还在路上。打开字幕要先试两种系统入口再退回自带对话框，可能要 1~2 秒 ——
+  // 这期间界面必须有反馈，否则又回到「点了没反应」。
+  const [pendingLocalActionKey, setPendingLocalActionKey] = useState<string | null>(null);
 
   useEffect(() => {
     setExpandedJobIds((current) => {
@@ -131,12 +134,17 @@ export function JobQueue({
 
   function runLocalFileAction(key: string, action: () => MaybePromise) {
     setLocalActionError(null);
+    setPendingLocalActionKey(key);
+    const done = () => setPendingLocalActionKey((current) => (current === key ? null : current));
     try {
-      Promise.resolve(action()).catch((error) => {
-        setLocalActionError({ key, message: localActionErrorMessage(error) });
-      });
+      Promise.resolve(action())
+        .catch((error) => {
+          setLocalActionError({ key, message: localActionErrorMessage(error) });
+        })
+        .finally(done);
     } catch (error) {
       setLocalActionError({ key, message: localActionErrorMessage(error) });
+      done();
     }
   }
 
@@ -342,6 +350,11 @@ export function JobQueue({
                 </button>
               </div>
             </div>
+            {pendingLocalActionKey === jobLocalActionKey && (
+              <div className="local-action-hint" role="status">
+                正在打开…
+              </div>
+            )}
             {localActionError?.key === jobLocalActionKey && (
               <div className="local-action-error" role="alert">
                 {localActionError.message}
@@ -527,6 +540,11 @@ export function JobQueue({
                         </button>
                       </div>
                     </div>
+                    {pendingLocalActionKey === itemLocalActionKey && (
+                      <div className="local-action-hint" role="status">
+                        正在打开…
+                      </div>
+                    )}
                     {localActionError?.key === itemLocalActionKey && (
                       <div className="local-action-error" role="alert">
                         {localActionError.message}

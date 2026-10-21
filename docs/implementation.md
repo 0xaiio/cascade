@@ -135,7 +135,7 @@ yt-dlp 对字幕、缩略图、HTTP chunk 和分离视频/音频流会多次发�
 
 视频大小复用 `JobItem.total_bytes`：下载前由 `prepare_download()` 从所选格式的 `filesize/filesize_approx` 写入，下载中由 progress payload 校准，下载完成后继续保留，前端在任务行和 playlist 子视频行展示。
 
-视频时长走的是另一条路，因为它**不需要等选出格式**：`POST /api/jobs` 建任务时就把解析结果里每个条目的 `duration` 写进 `JobItem.duration`（[routers/jobs.py](../backend/app/routers/jobs.py#L57)），任务一进队列就能显示。`duration` 这一列是后补的，补列之前建的旧任务重启时由 [_apply_download_preparation](../backend/app/job_manager.py#L1032) 从预检的同一份 `info` 里补上（预检反正要取一次元数据，不为时长多发一次请求）。前端格式化见 [formatMediaDuration](../frontend/src/formatting.ts#L15)：固定 `时:分:秒`，与「已用/剩余」用的 `formatClock` 刻意不同 —— 后者不到一小时时省掉时位，而时长是视频的固有属性，三段位数固定更好扫读。任务行的时长由 [formatJobDuration](../frontend/src/components/JobQueue.tsx#L587) 按子视频求和，与「大小」同一套折法（有子视频未知时前缀「已知」）。
+视频时长走的是另一条路，因为它**不需要等选出格式**：`POST /api/jobs` 建任务时就把解析结果里每个条目的 `duration` 写进 `JobItem.duration`（[routers/jobs.py](../backend/app/routers/jobs.py#L57)），任务一进队列就能显示。`duration` 这一列是后补的，补列之前建的旧任务重启时由 [_apply_download_preparation](../backend/app/job_manager.py#L1032) 从预检的同一份 `info` 里补上（预检反正要取一次元数据，不为时长多发一次请求）。前端格式化见 [formatMediaDuration](../frontend/src/formatting.ts#L15)：固定 `时:分:秒`，与「已用/剩余」用的 `formatClock` 刻意不同 —— 后者不到一小时时省掉时位，而时长是视频的固有属性，三段位数固定更好扫读。任务行的时长由 [formatJobDuration](../frontend/src/components/JobQueue.tsx#L605) 按子视频求和，与「大小」同一套折法（有子视频未知时前缀「已知」）。
 
 平均速度由 [TransferStats](../backend/app/transfer_stats.py#L5) 根据聚合下载字节和时间计算。运行中 `speed` 是 yt-dlp 当前瞬时速度，终态 `speed` 是平均速度，终态聚合见 [_terminal_job_speed](../backend/app/job_manager.py#L925)。
 
@@ -238,10 +238,10 @@ B站 上传的界面由四个组件加一个图标组成：[BiliIcon](../fronten
 本机打开器位于 [system_open.py](../backend/app/system_open.py)。打开目录时显式调用 `explorer.exe /n, <folder>` 并尽量把窗口置前，减少已有窗口只在任务栏闪烁但没有前置的情况。播放视频不再盲目使用默认文件关联，而是优先选择 VLC、mpv、PotPlayer、MPC、IINA 等可确认解码能力更强的播放器；常见 MP4 可回退到 Windows Media Player。找不到合适播放器时返回 `409`，错误内容包含当前格式和建议安装的播放器。
 
 **打开字幕不挑程序**：`POST /api/jobs/{job_id}/open-subtitle` 与条目级同名接口把
-`JobItem.subtitle_path` 交给系统 —— 缺省（界面走的就是这条）弹**应用自带的「打开方式」对话框**，候选读系统注册表为该后缀登记的处理器（见 [open_path_with_chooser](../backend/app/system_open.py#L71)）；
-`?mode=default` 才走文件关联，Windows 上该后缀还没有关联程序时**自动改弹这个对话框**而不是把 `WinError 1155` 抛给用户。
-三个坑按顺序处理：**系统那套「打开方式」界面不可依赖**（`OpenAs_RunDLL` 什么窗口都没有；`SHOpenWithDialog`
-在 5 种标志位 × 3 种后缀下都只给一个 680×118 的提示框，没有程序列表）；
+`JobItem.subtitle_path` 交给系统 —— 缺省（界面走的就是这条）弹**应用自带的「打开方式」对话框**，候选读系统注册表为该后缀登记的处理器（见 [open_path_with_chooser](../backend/app/system_open.py#L97)）；
+`?mode=default` 才走文件关联，Windows 上该后缀还没有关联程序时**自动改弹对话框**而不是把 `WinError 1155` 抛给用户。
+三级链按顺序处理：**系统两条入口先试**（`SHOpenWithDialog` → `OpenAs_RunDLL`），**判据是窗口高度不是窗口存在**
+（降级提示框 680×118、选择器约 700×500），都不成才用**自带对话框**（候选 = 系统登记的处理程序 + 本机真实存在的常见编辑器 + 「浏览…」）；
 **弹不出来必须报错**（等 3s 仍没有 `TkTopLevel` 就 400，绝不 204 空转；用户点取消则静默返回）；
 **前台只能等、不能抢**（提前 `SetForegroundWindow` 会被前台锁拒绝，而且被拒后对话框不再自行激活）。
 实测与细节见 [technical.md](technical.md#打开字幕文件) 第二~四节。

@@ -769,6 +769,22 @@ th {
   line-height: 1.4;
 }
 
+/* 本地动作在路上（打开字幕要依次试两种系统入口，可能要 1~2 秒）。
+   声明自己的边框与底色，不继承 `.local-action-error` 那套红色 ——「正在做」不是错误。 */
+.local-action-hint {
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid #d5ddeb;
+  border-radius: 8px;
+  background: #f5f8fc;
+  color: #31506f;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
 .resolution-fallback-note {
   display: flex;
   flex-wrap: wrap;

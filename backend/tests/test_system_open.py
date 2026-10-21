@@ -172,6 +172,9 @@ def test_chooser_launches_the_program_the_user_picked(monkeypatch: pytest.Monkey
     program.write_text("MZ", encoding="utf-8")
 
     monkeypatch.setattr(system_open.os, "name", "nt")
+    # 前两级（系统对话框）在单测里必须短路：它们会真的在你桌面上弹窗。
+    monkeypatch.setattr(system_open, "_show_shell_chooser", lambda _path, _outcome: False)
+    monkeypatch.setattr(system_open, "_show_host_chooser", lambda _path, _wait: False)
     monkeypatch.setattr(system_open, "_ask_program", lambda _path: program)
     monkeypatch.setattr(
         system_open,
@@ -222,7 +225,9 @@ def test_program_candidates_skip_dead_entries_and_duplicates(
         return [row for row in rows if row.executable.is_file()]
 
     monkeypatch.setattr(system_open, "_program_candidates", fake_candidates)
-    # 只验证「对话框只列真实存在的程序」，不真的开窗口。
+    # 只验证「对话框只列真实存在的程序」，不真的开窗口（三级链的前两级也要短路）。
+    monkeypatch.setattr(system_open, "_show_shell_chooser", lambda _p, _o: False)
+    monkeypatch.setattr(system_open, "_show_host_chooser", lambda _p, _w: False)
     monkeypatch.setattr(system_open, "_ask_program", lambda _path: None)
     monkeypatch.setattr(system_open.os, "name", "nt")
 
@@ -302,3 +307,91 @@ def test_open_video_reports_missing_capable_player(tmp_path: Path, monkeypatch: 
     assert "当前视频格式：webm 路 vp9 + opus" in message
     assert "VLC media player" in message
     assert "mpv" in message
+
+def test_healthier_system_dialog_wins_over_the_builtin_one(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[str] = []
+    subtitle = tmp_path / "video.en.vtt"
+    subtitle.write_text("subs", encoding="utf-8")
+
+    monkeypatch.setattr(system_open, "_show_shell_chooser", lambda _p, _o: calls.append("shell") or True)
+    monkeypatch.setattr(system_open, "_show_host_chooser", lambda _p, _w: calls.append("host") or True)
+    monkeypatch.setattr(system_open, "_ask_program", lambda _p: calls.append("builtin"))
+
+    outcome = system_open.ChooserOutcome()
+    system_open._run_chooser(subtitle, outcome)
+
+    # 系统的选择器清单更全（含 Store 应用、「始终使用」），能用就别抢它的活。
+    assert calls == ["shell"]
+
+
+def test_degraded_notice_shortens_the_wait_for_the_second_route(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    waits: list[float] = []
+    subtitle = tmp_path / "video.en.vtt"
+    subtitle.write_text("subs", encoding="utf-8")
+
+    def shell(_path: Path, outcome: system_open.ChooserOutcome) -> bool:
+        outcome.shell_degraded = True  # 系统只弹了「若要更改默认应用…」的提示框
+        return False
+
+    monkeypatch.setattr(system_open, "_show_shell_chooser", shell)
+    monkeypatch.setattr(
+        system_open,
+        "_show_host_chooser",
+        lambda _p, wait: waits.append(wait) or False,
+    )
+    monkeypatch.setattr(system_open, "_ask_program", lambda _p: None)
+
+    system_open._run_chooser(subtitle, system_open.ChooserOutcome())
+
+    assert waits == [system_open.OPEN_WITH_HOST_WAIT_AFTER_NOTICE_SECONDS]
+    assert waits[0] < system_open.OPEN_WITH_HOST_WAIT_SECONDS
+
+
+def test_degraded_shell_notice_is_closed_instead_of_treated_as_a_chooser(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    subtitle = tmp_path / "video.en.vtt"
+    subtitle.write_text("subs", encoding="utf-8")
+
+    closed: list[int] = []
+    monkeypatch.setattr(system_open.os, "name", "nt")
+    monkeypatch.setattr(system_open, "_chooser_window", lambda: None)
+    monkeypatch.setattr(system_open, "_open_with_host_window", lambda: None)
+    # 第一次是开窗前的守卫检查（这时还没有窗口），之后才是「看到了提示框」。
+    shell_windows = iter([None])
+    monkeypatch.setattr(system_open, "_shell_dialog_window", lambda: next(shell_windows, 777))
+    monkeypatch.setattr(system_open, "_window_height", lambda _hwnd: 118)  # 降级提示框的高度
+    monkeypatch.setattr(system_open, "_close_window", closed.append)
+    monkeypatch.setattr(system_open, "_run_chooser", lambda _p, outcome: setattr(outcome, "error", "stop"))
+    monkeypatch.setattr(system_open, "OPEN_WITH_APPEAR_TIMEOUT_SECONDS", 0.3)
+
+    with pytest.raises(system_open.LocalOpenError):
+        system_open.open_path_with_chooser(subtitle)
+
+    # 关键：提示框必须被关掉（否则它会挂在桌面上，用户还得手动点「确定」）。
+    assert closed == [777]
+
+
+def test_builtin_candidates_mix_registered_handlers_with_local_editors(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    notepad = tmp_path / "notepad.exe"
+    notepad.write_text("MZ", encoding="utf-8")
+    code = tmp_path / "Code.exe"
+    code.write_text("MZ", encoding="utf-8")
+
+    monkeypatch.setattr(system_open, "_registered_handlers", lambda _ext: [("记事本", str(notepad))])
+    monkeypatch.setattr(
+        system_open,
+        "_editor_candidates",
+        lambda: [("记事本", str(notepad)), ("Visual Studio Code", str(code))],
+    )
+
+    names = [item.name for item in system_open._program_candidates(".vtt")]
+
+    # 系统登记的处理程序在前，本机编辑器在后；同一个程序只出现一次。
+    assert names == ["记事本", "Visual Studio Code"]
