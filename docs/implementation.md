@@ -239,10 +239,12 @@ B站 上传的界面由四个组件加一个图标组成：[BiliIcon](../fronten
 
 **打开字幕不挑程序**：`POST /api/jobs/{job_id}/open-subtitle` 与条目级同名接口把
 `JobItem.subtitle_path` 交给系统 —— 缺省（界面走的就是这条）用
-`rundll32.exe shell32.dll,OpenAs_RunDLL` 弹系统自己的「打开方式」窗口（见 [open_path_with_chooser](../backend/app/system_open.py#L46)）；
+`shell32.SHOpenWithDialog` 在本进程内画出系统的「打开方式」对话框（见 [open_path_with_chooser](../backend/app/system_open.py#L61)）；
 `?mode=default` 才走文件关联，Windows 上该后缀还没有关联程序时**自动改弹选择器**而不是把 `WinError 1155` 抛给用户。
-弹出来的窗口**不归 rundll32**（是 `OpenWith.exe` 的「选取应用」），所以置前必须按进程名认领，
-只按 pid 或标题找会让窗口留在浏览器后面 —— 见 [technical.md](technical.md#打开字幕文件) 第二节的实测数字。
+这条路的坑有三个，都要按顺序处理：**不要请 explorer 托管的现代弹层**（那个宿主失效时调用照样返回 0、窗口一个也没有）；
+**弹不出来必须报错**（等 2.5s 仍没有 `Shell_Dialog` 就 400，绝不 204 空转）；
+**前台只能等、不能抢**（提前 `SetForegroundWindow` 会被前台锁拒绝，而且被拒后对话框不再自行激活）。
+实测与细节见 [technical.md](technical.md#打开字幕文件) 第二~四节。
 字幕位置由 [existing_subtitle_file](../backend/app/output_paths.py#L184) 算：库里的 `subtitle_path` 优先（只验存在），
 否则看视频旁边的同名 `.srt`/`.vtt`（补这一列之前下载的历史任务就是这么找到的）。没有字幕时返回 `409`；
 `mode` 取其它值一律 `422`。为什么没有编辑器清单、也没有应用侧「上次用的查看器」，见

@@ -431,7 +431,7 @@ BCC 的 `body` 一段就是一条 cue。YouTube 的自动字幕是**滚动**的�
 
 ## 打开字幕文件
 
-任务中心的「打开字幕」只是把**文件**交给操作系统，程序的选择权也一起交给它。这条路上有四件事容易做歪：
+任务中心的「打开字幕」只是把**文件**交给操作系统，程序的选择权也一起交给它。这条路上有六件事容易做歪：
 
 **一、不要自建编辑器清单。** 系统已经有一份完整的处理器注册表（`.srt` / `.vtt` → 谁），自己再列一份
 notepad / VS Code / Sublime 只能是它的子集：用户装了别的我们不知道，各平台的清单还得各维护一份。
@@ -439,32 +439,44 @@ notepad / VS Code / Sublime 只能是它的子集：用户装了别的我们不�
 
 | 动作 | Windows 实现 | 谁决定程序 |
 | --- | --- | --- |
-| 弹「打开方式」（界面唯一动作，接口缺省 `mode=chooser`） | `rundll32.exe shell32.dll,OpenAs_RunDLL <path>` | 用户当场在系统窗口里挑 |
+| 弹「打开方式」（界面唯一动作，接口缺省 `mode=chooser`） | `shell32.SHOpenWithDialog` —— 对话框在本进程内绘制 | 用户当场在系统窗口里挑 |
 | 默认打开（仅接口调用方 `?mode=default`，界面不再提供） | `os.startfile(path)` | 该后缀的关联程序（`HKCU\...\FileExts\<ext>\UserChoice`） |
 
-**二、置前要按「谁真的持有窗口」认领，不是按「谁被 Popen 起来」。** 这是「点了没反应」的真因：
-`OpenAs_RunDLL` 拉起的不是 rundll32 自己的窗口，而是 `OpenWith.exe` 的「选取应用」（英文系统是
-「Open With」）—— pid 对不上，标题里也没有文件名，于是旧的两条判据（pid / 标题）双双落空，
-`SetForegroundWindow` 一次都没被调用过，窗口留在浏览器后面、只在任务栏闪一下；调用方还白等 1 秒轮询
-才返回。现在 [_open_process](../backend/app/system_open.py#L109) 多一条 `process_name` 判据
-（由 [_process_image_name](../backend/app/system_open.py#L280) 取进程可执行文件名），chooser 传
-`OpenWith.exe`。实测同一台机器：**旧判据 1.04s 且前台窗口没变；新判据 0.60s 且前台就是那个对话框**
-（`tmp_acceptance/probe_chooser.py` 与 `probe_chooser_control.py`）。
+**二、别请别人的宿主来画这个窗口。** 曾经的实现是 `rundll32.exe shell32.dll,OpenAs_RunDLL <path>` ——
+它只是请 explorer 托管的现代弹层（`OpenWith.exe` 的「选取应用」）出来。那个宿主失效时，调用照样
+**返回 0**：`OpenWith.exe` 进程起来了、窗口一个也没有，接口于是回 204、界面什么都不弹。本机实测过这个
+状态：同一时刻 `OpenAs_RunDLL` 无窗口，而 `SHOpenWithDialog` 立刻画出 `Shell_Dialog` 并成为前台。
+所以现在用**文档化 API**：窗口（类名 `Shell_Dialog`）由 shell32 在我们自己的进程里画，
+不经过那个宿主。它是模态的，放在自己的线程里跑，接口只等到「窗口真的出现」为止
+（见 [_open_windows_chooser](../backend/app/system_open.py#L90)）。
 
-**三、「记住上次用的程序」由系统负责，应用侧不存第二份。** 用户在窗口里勾「始终使用此应用」，系统就改了
+**三、窗口出现了就算成功，没出现必须报错。** 旧实现在这类失败上只能「204 空转」：界面看起来点过了，
+其实什么都没发生 —— 这是最糟的结果。现在等 [_open_with_dialog_window](../backend/app/system_open.py#L178)
+超时（2.5s）仍没有 `Shell_Dialog`，就抛 `LocalOpenError`，接口回 400，前端把原因写在**那一行**
+（「系统没能弹出「打开方式」窗口……可以先点「打开视频所在文件夹」……」）。另外，已有窗口时再点
+**不再叠一个**，而是直接提示「先在那个窗口里选完」——连点几下会得到一摞一模一样的模态窗口。
+
+**四、前台不能让，只能等。** 用户点的是浏览器，窗口是我们的后台进程画的，Windows 的前台锁默认拒绝
+后台进程 `SetForegroundWindow`。但**提前抢更糟**：窗口刚创建时它自己在激活，这时去抢会被拒，
+而且被拒之后它就不再自行激活 —— 实测「提前抢 → 前台始终是浏览器；不碰它 → 对话框自己上来」。
+所以现在的顺序是：先给它 1.2s 自己上来（[_ensure_dialog_foreground](../backend/app/system_open.py#L215)），
+确实没上来才用 `AttachThreadInput` 接管前台线程的输入队列再抢。真机连续三次点击的前台时间线：
+`DIALOG` / `Chrome_WidgetWin_1 → DIALOG` / `Chrome_WidgetWin_1 → DIALOG` —— 第 2、3 次正是兜底那一步在起作用。
+
+**五、「记住上次用的程序」由系统负责，应用侧不存第二份。** 用户在窗口里勾「始终使用此应用」，系统就改了
 这个后缀的关联，资源管理器双击、以及接口的 `?mode=default` 都会用那个程序。界面上的按钮每次都弹选择器
 （这是刻意的：一次点击就要看得见结果），但列表里默认选中的就是系统记住的那个。看起来像「没实现记忆」，
 实际上是**记忆只有一个所有者**：应用再存一份「上次用的查看器」，它迟早会和系统的关联结论打架，而用户
 根本无法判断该信谁。
 
-**四、没有关联不是错误。** 在干净的 Windows 上对一个 `.srt` 调 `os.startfile`，抛的是
+**六、没有关联不是错误。** 在干净的 Windows 上对一个 `.srt` 调 `os.startfile`，抛的是
 `OSError [WinError 1155] 没有应用程序与此操作的指定文件有关联`。这不是「打不开」，是「还没人认领这个
-后缀」—— 正确反应是像资源管理器那样**弹「打开方式」**（[open_path_with_default_app](../backend/app/system_open.py#L28)
+后缀」—— 正确反应是像资源管理器那样**弹「打开方式」**（[open_path_with_default_app](../backend/app/system_open.py#L43)
 里只对这一种 `winerror` 降级，其它错误照原样抛：把「拒绝访问」也悄悄变成弹窗，就是把真问题藏起来）。
 这条路现在只有接口的 `?mode=default` 会走到。
 
 其它平台没有等价的「选择器」（macOS 的 `open -a` 要的是应用名，Linux 的 `xdg-open` 只有默认），
-`mode=chooser` 在那里退化成默认打开，见 [open_path_with_chooser](../backend/app/system_open.py#L46)。
+`mode=chooser` 在那里退化成默认打开，见 [open_path_with_chooser](../backend/app/system_open.py#L61)。
 
 前端因此是**一颗**按钮（[SubtitleOpenButton](../frontend/src/components/SubtitleOpenButton.tsx#L19)），
 `title="打开字幕文件；可选择打开方式"`，点下去就是选择器。它曾经是**组合控件**（主段 + 右侧 20px 箭头）：
