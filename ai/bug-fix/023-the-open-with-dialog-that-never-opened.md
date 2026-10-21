@@ -195,9 +195,12 @@ RESULT: 调用后 6 秒内没有出现任何新的可见窗口 —— 系统那�
 | 项 | 结果 |
 | --- | --- |
 | 真机浏览器（`ui_open_subtitle_real.py`，CDP 点击） | **7/7**：`TkTopLevel` 出现、成为前台、第一次无错误、重复点击行内红字 |
-| 对话框截图（`PrintWindow`） | `tmp_acceptance/open-subtitle-dialog.png`：标题「用哪个程序打开「…」？」+ 空列表 + 「浏览…」提示 + 方向说明 + 浏览/取消/打开（打开在无候选时置灰） |
-| 后端 | **14 条** `system_open` 用例全绿（含取消、启动选中程序、候选去重、命令解析）；全量见提交信息 |
+| 对话框截图（`PrintWindow`） | 见下图：标题「用哪个程序打开「…」？」+ 空列表 + 「浏览…」提示 + 方向说明 + 浏览/取消/打开（无候选时「打开」置灰） |
+| 后端 | **14 条** `system_open` 用例全绿（含取消、启动选中程序、候选去重、命令解析）；全量 1127 通过 |
 | 真实数据副本 | 真实任务 `27b66d8b` 的字幕：204 / 0.14s / `TkTopLevel` 出现 |
+| 端到端（`probe_chooser_opens_selected.py`） | 用 `.txt`（有候选）走真实入口：对话框在前台 → 回车确认 → `Notepad.exe` 打开了那个文件（窗口标题 `cascade-chooser-probe.txt - Notepad`） |
+
+![自带的「打开方式」对话框（.vtt 没有已登记的程序，所以列表为空、以「浏览…」为主）](assets/023-chooser-dialog.png)
 
 ### 这一轮没覆盖的
 
