@@ -157,6 +157,10 @@ API 返回不直接暴露 SQLModel，而由 [read_job](../backend/app/job_read_m
 - 投影字幕结论（`subtitle_language` / `subtitle_source`）。**不在这里拼展示文案**：投稿表单里那句
   `en · 人工` 由 [`subtitle_summary`](../backend/app/subtitle_plan.py#L92) 在服务端的预填阶段算好
   （`BiliPrefillItem.subtitle`），前端原样显示 —— 两处各拼一遍就会出现「界面写自动生成、后端写 ASR」。
+- 把逐任务的「完成后通知」开关从 `options_json` 抬进读模型（[_notify_on_complete](../backend/app/job_read_model.py#L44)）。
+  它只存在于 `options_json` 里，而 SSE 的每个事件只是让前端重拉 `/api/jobs` —— 不抬出来的话，
+  「这次会话里提交的任务会提醒、重开页面后同一个任务就不提醒」。提醒本身在浏览器里做，
+  后端只存偏好（`completion_notification`）与这个逐任务开关，见 [FR-48](requirements.md#功能需求)。
 
 ## B站 投稿
 
@@ -215,6 +219,12 @@ B站 上传的界面由四个组件加一个图标组成：[BiliIcon](../fronten
 
 - [formatting.ts](../frontend/src/formatting.ts)：时长、百分比、日期、文件大小、分辨率和速度格式化。
 - [quality.ts](../frontend/src/quality.ts)：清晰度选项、可用高度、降级按钮标签和选中清晰度显示。
+
+任务完成提醒同样分成**判定**与**呈现**两层：[notifications.ts](../frontend/src/notifications.ts) 是纯逻辑（哪些状态算终态、一条提醒写成什么话、浮层队列的 `useCompletionToasts` hook），[CompletionToasts.tsx](../frontend/src/components/CompletionToasts.tsx#L21) 只渲染队列，并用 Web Audio **现场合成**提示音（C6→G6 两个正弦音，第二个轻一点晚一点；仓库里没有任何音频文件）。三条实现约束值得单独记住：
+
+- **触发条件是状态跃迁，不是「当前状态」**：必须比对上一次状态，否则一进来就已跑完的历史任务会被反复播报；`cancelled` 不算终态（取消是用户自己点的）。
+- **标签页在后台时浮层不倒计时**：只记「还剩多久」，等 `visibilitychange` 说可见了再接着走 —— 否则「右下角弹窗」这种方式在后台等于没选。
+- **判定抽成纯函数才测得到**：jsdom 里没有 `AudioContext`、也不做布局，所以「谁该被提醒、提醒什么」在 `notifications.ts` 里可注入、可单测（`completion-notification.test.tsx`，19 例）。
 
 前端不负责构造 yt-dlp selector，只提交 `DownloadOptions`，由后端决定实际格式。下载选项面板会根据解析结果展示字幕来源和字幕格式；当用户指定的字幕来源在当前视频中缺失但另一种来源存在时，前端提交前会 fallback 到可用来源。
 

@@ -12,6 +12,7 @@
 | 架构评审者 | 先读 [4+1 架构视图](4-plus-1-view.md)，再进入 [架构设计](architecture.md) 和 [设计文档](design.md)。 |
 | 安全评审者 | 直接读 [安全审计报告](safety-review.md)，再对照 [需求分析](requirements.md#约束与边界) 的范围边界。 |
 | 文档维护者 | 先初始化 [文档写作与生成环境](documentation-workflow.md)，再按 [维护文档](maintenance.md) 更新文档和图。 |
+| 视频制作方 | 从 [更新日志](changelog/CHANGELOG.md) 开始：它逐条列出宣传视频基准提交 `0dd4b5d` 之后可拍摄的新功能，并给出镜头建议；分支现状见 [BRANCH-DIFF](changelog/BRANCH-DIFF.md)。 |
 | 维护者 | 先读 [维护文档](maintenance.md)，再根据变更类型更新相关文档、4+1 视图和图。 |
 | 测试者 | 直接读 [测试文档](testing.md)，再对照 [需求分析](requirements.md) 验证范围。 |
 
@@ -31,6 +32,7 @@
 - [测试文档](testing.md)：记录自动测试、手动验收和高风险回归场景。
 - [维护文档](maintenance.md)：规定文档同步、变更审查和排障流程。
 - [安全审计报告](safety-review.md)：按风险类别记录当前基线的安全审查结论、检查清单与建议。
+- [更新日志](changelog/CHANGELOG.md)：按「视频基准提交之后的提交」记录新增功能与缺陷修复（每条附关键 commit 与可拍摄镜头），是制作推广视频与对外说明版本差异时的素材清单；[BRANCH-DIFF](changelog/BRANCH-DIFF.md) 记录它与各分支的关系。
 
 ## 界面截图
 

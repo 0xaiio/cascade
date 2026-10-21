@@ -53,6 +53,8 @@ init 脚本底层调用的就是 `python -m app`，其进阶参数（`--port` / 
 
 6 分钟演示（真实解析、下载、任务中心与 B站 投稿全流程）：[B站 · BV1JQJY6LExf](https://www.bilibili.com/video/BV1JQJY6LExf)。文稿、字幕与制作说明见 [ai/promotion](ai/promotion/README.md)。
 
+视频基于提交 `0dd4b5d`（2026-10-17 投稿）制作；该提交之后 `main` 上的全部新功能与修复（字幕流水线、任务完成提醒、进程重启恢复、时长显示、B站 上传体验大修）逐条记录在 [更新日志](docs/changelog/CHANGELOG.md)，可作为下一支推广视频的素材清单；分支对比见 [BRANCH-DIFF](docs/changelog/BRANCH-DIFF.md)。
+
 ## 文档导航
 
 | 文档 | 用途 |
@@ -72,6 +74,7 @@ init 脚本底层调用的就是 `python -m app`，其进阶参数（`--port` / 
 | [测试文档](docs/testing.md) | 自动测试、手动验收和回归重点。 |
 | [维护文档](docs/maintenance.md) | 文档同步规则、变更 checklist 和排障流程。 |
 | [安全审计报告](docs/safety-review.md) | 安全审查结论、检查清单与待复核项。 |
+| [更新日志](docs/changelog/CHANGELOG.md) | 宣传视频基准提交 `0dd4b5d` 之后的新功能与缺陷修复清单；[分支对比](docs/changelog/BRANCH-DIFF.md) 说明为什么下一支视频应以 `main` HEAD 为基准。 |
 
 ## 测试摘要
 

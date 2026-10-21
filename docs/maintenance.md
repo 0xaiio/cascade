@@ -18,7 +18,7 @@
 | 修改配置或依赖 | [开发文档](development.md)、[技术文档](technical.md)、[README 快速启动](../README.md#快速启动)（`init/` 一键启动脚本） |
 | 修改数据库模型或补列 | [实现文档](implementation.md)、[架构设计](architecture.md)、[data-model.puml](diagrams/data-model.puml) |
 | 修改测试命令或测试策略 | [测试文档](testing.md)、README 测试摘要入口 |
-| 重构模块边界或调整依赖方向 | [设计文档](design.md)、[架构设计](architecture.md)、[4+1 架构视图](4-plus-1-view.md)、[实现文档](implementation.md)、组件图、模块依赖图、4+1 逻辑视图和开发视图 |
+| 重构模块边界、**新增模块**或调整依赖方向 | [设计文档](design.md)、[架构设计](architecture.md)、[4+1 架构视图](4-plus-1-view.md)、[实现文档](implementation.md)、组件图、模块依赖图、4+1 逻辑视图和开发视图 |
 | 修改任务队列、SSE、运行时设置、进度、暂停/重启/删除流程 | [设计文档](design.md#运行时并发模型)、[4+1 架构视图](4-plus-1-view.md)、[技术文档](technical.md)、[实现文档](implementation.md)、4+1 进程视图、运行时并发图、下载数据流图 |
 | 修改端口、部署模式、外部工具、文件位置或本机打开方式 | [4+1 架构视图](4-plus-1-view.md)、[开发文档](development.md)、4+1 物理视图 |
 | 修改代理、网络自检、cookies 校验或运行环境自检 | [用户手册](user-manual.md)、[排障手册](troubleshooting.md)、[API 文档](api.md)、[openapi.yaml](openapi.yaml)、[技术文档](technical.md) |
@@ -26,6 +26,7 @@
 | 修改界面布局、样式或控件排布 | [界面缺陷记录](../ai/ui/README.md)（一个问题一条记录）、[测试文档](testing.md) 的手动验收、受影响的 `docs/assets/screenshots/*` 截图重拍 |
 | 新增或删除用户关键操作 | [用户手册](user-manual.md)、[需求分析](requirements.md)、[4+1 架构视图](4-plus-1-view.md)、4+1 场景视图 |
 | 修改安全相关的文件操作、CORS、日志清洗、环境变量或依赖 | [安全审计报告](safety-review.md)（更新基线 commit 与审查日期；新增的网络/文件/环境访问面要登记进「待复核项」） |
+| 发布宣传视频、更新其基准提交，或需要对外说明「新版比旧版多了什么」 | [更新日志](changelog/CHANGELOG.md)（逐条记录基准提交之后的功能与修复，附关键 commit 与镜头建议）、[README 视频介绍](../README.md#视频介绍)、[ai/promotion](../ai/promotion/README.md) |
 
 ## 排障流程
 

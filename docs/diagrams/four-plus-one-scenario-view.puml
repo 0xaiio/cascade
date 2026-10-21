@@ -16,9 +16,12 @@ rectangle "YouTube Downloader" {
   usecase "Retry with suggested\nresolution" as RetryResolution
   usecase "Play downloaded video" as Play
   usecase "Open output folder" as OpenFolder
+  usecase "Open subtitle file" as OpenSubtitle
   usecase "Delete task only" as DeleteTask
   usecase "Delete task and\nrelated files" as DeleteFiles
   usecase "Inspect diagnostics" as Diagnostics
+  usecase "Choose completion\nnotification" as NotifySetting
+  usecase "Resume interrupted\ndownloads" as ResumeOrphans
   usecase "Upload one video\nto Bilibili" as UploadSingle
   usecase "Upload a collection\nto Bilibili" as UploadCollection
   usecase "Log in / import\nBilibili cookies" as BiliLogin
@@ -35,9 +38,12 @@ User --> ImportCookies
 User --> RetryResolution
 User --> Play
 User --> OpenFolder
+User --> OpenSubtitle
 User --> DeleteTask
 User --> DeleteFiles
 User --> Diagnostics
+User --> NotifySetting
+User --> ResumeOrphans
 User --> UploadSingle
 User --> UploadCollection
 User --> BiliLogin
@@ -51,8 +57,11 @@ Monitor ..> RuntimeSettings : reflects changes
 RetryResolution ..> Monitor : triggered by fallback
 Play ..> Monitor : requires output path
 OpenFolder ..> Monitor : requires output directory
+OpenSubtitle ..> Monitor : requires a subtitle file
 DeleteFiles ..> DeleteTask : includes
 Diagnostics ..> ImportCookies : guides troubleshooting
+NotifySetting ..> Monitor : fires on terminal state
+ResumeOrphans ..> Monitor : requeued at startup
 UploadSingle ..> Play : requires a downloaded file
 UploadCollection ..> Monitor : needs every item finished
 UploadCollection ..> UploadSingle : uploads each, then groups

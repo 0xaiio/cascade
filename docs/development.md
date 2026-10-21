@@ -117,13 +117,16 @@ Linux/macOS：bash init/start.sh dev
 | `frontend/src` | React UI、API 客户端、类型、展示组件和测试夹具。 |
 | `data` | 本地 SQLite、cookies，已被 Git 忽略。 |
 | `downloads` | 默认下载产物目录，已被 Git 忽略。 |
-| `docs` | 工程文档、PlantUML 源和渲染图。 |
+| `docs` | 工程文档、PlantUML 源和渲染图；`docs/changelog/` 另存宣传视频基准提交之后的更新日志与分支对比。 |
 | `scripts` | 可复现的工程辅助脚本：文档工具入口 [docs.py](../scripts/docs.py) 与锚点检查 [check_doc_anchors.py](../scripts/check_doc_anchors.py)；离线基准 [bench_concurrency.py](../scripts/bench_concurrency.py)、[bench_throttle_guard.py](../scripts/bench_throttle_guard.py)；cookies 导出 [export_cookies_via_cdp.py](../scripts/export_cookies_via_cdp.py)；需真实网络的验收 [acceptance_network.py](../scripts/acceptance_network.py)、[acceptance_real.py](../scripts/acceptance_real.py)。 |
 | `.tools` | 文档工具自动下载的本机缓存，已被 Git 忽略。 |
 | `ai` | 任务计划、重构日志和文档生成 prompt。 |
 | `ai/perf/PLAN.md` | 下载性能与稳定性修复计划：根因分析、修复项、验证与回滚，是引用性能结论时的权威来源。 |
-| `ai/bug-fix/` | 逐条修复记录（001~010）与「已知但未处理」清单；写限制与遗留风险时以此为准。 |
+| `ai/bug-fix/` | 逐条修复记录（001~019）与「已知但未处理」清单；写限制与遗留风险时以此为准。 |
 | `ai/ui/` | 逐条界面缺陷记录与约定：能跑、不报错但呈现错位的问题记在这里，每条必须带可测量的像素证据；布局类缺陷的自动化覆盖边界（jsdom 不做布局）也在该目录说明。 |
+| `ai/feature/` | 按功能组织的四件套记录（需求/设计/实现/测试），现有 `bilibili-upload/` 与 `subtitle-pipeline/`。 |
+| `ai/plan/` | 功能候选池 `brainstorming.md`（进度用复选框，`grep '^- \[ \]'` 即待办清单）与计划/任务清单。 |
+| `ai/promotion/` | 宣传视频成片、文稿、字幕与发布记录（含投稿结果与保真度说明）。 |
 | `ai/docs/` | 文档任务的原始需求与可重复执行的撰写 prompt。 |
 
 ## 环境变量

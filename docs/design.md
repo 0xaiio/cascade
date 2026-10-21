@@ -69,7 +69,7 @@
 ## 前端组件边界
 
 `App.tsx` 只负责状态编排（解析、建任务、设置回灌、SSE 订阅）与整体布局；展示职责全部在 `components/` 下，
-纯计算在 `formatting.ts` / `quality.ts` / `subtitles.ts` / `cookieLock.ts` / `biliForm.ts` / `biliStatus.ts` / `biliProgress.ts` / `biliHealth.ts` / `errors.ts`。
+纯计算在 `formatting.ts` / `quality.ts` / `subtitles.ts` / `cookieLock.ts` / `biliForm.ts` / `biliStatus.ts` / `biliProgress.ts` / `biliHealth.ts` / `errors.ts` / `notifications.ts`。
 判断新代码放哪：**需要 `useState` 或发请求吗？**
 需要就留在 `App.tsx`（或抽成 hook），只把 props 变成界面就进 `components/`，只看数据变换就进纯模块。
 
@@ -99,6 +99,8 @@
 | [biliProgress.ts](../frontend/src/biliProgress.ts#L23) | 上传进度的**判定**：一条记录处在哪一段、在等什么（`uploadStageView`）、一个任务该显示哪一条与多少条已确认（`jobUploadProgress`）、「已用 01:23」（`uploadElapsedLabel`）。四段是四个**步骤**，不代表四段时间。 | 不造文案之外的状态、不请求、不决定是否显示（由 `waiting` 决定）。 |
 | [biliHealth.ts](../frontend/src/biliHealth.ts#L48) | 「重新体检」的**策略**：先带 12 秒时限探账号，超时就退回**离线**体检（工具/登录文件存在性）并标记 `timedOut`；网络错误照旧抛出。 | 不渲染界面、不拼文案（文案在 `BiliLoginSection`）、不决定探什么（两个 loader 由调用方注入）。 |
 | [errors.ts](../frontend/src/errors.ts#L15) | 异常 → 一句可显示的话（`errorMessage`）。收口原先散在十几处的 `err instanceof Error ? err.message : fallback`——重写一遍的代价不是行数，而是**语义各自漂移**（有的在 `message` 为空时兜到 fallback，有的不兜）。 | 不看 `ApiError.detail`：把 `advice` 拼进文案只在 `App.biliMessage`，只有那条链路会带 `advice`。 |
+| [notifications.ts](../frontend/src/notifications.ts) | 「任务跑完了」的提醒**判定**：哪些状态算终态（`succeeded`/`failed`，`cancelled` 不算——取消是用户自己点的）、一条提醒写成什么话（`describeCompletion`）、浮层队列的生命周期（`useCompletionToasts`：自动缩回、悬停暂停、**后台标签页不倒计时**）。提示音参数与下拉选项也是常量。 | 不发声、不渲染（声音在 `CompletionToasts` 里用 Web Audio 现场合成）；不决定「要不要提醒」（那是逐任务的 `notify_on_complete`）与「用什么方式」（那是全局 `completion_notification`）。 |
+| [CompletionToasts.tsx](../frontend/src/components/CompletionToasts.tsx#L21) | 右下角**浮层容器**：渲染 `notifications.ts` 给出的队列，悬停暂停缩回、可手动关。同时是提示音的出口（Web Audio 现场合成 C6→G6，没有任何音频文件跟着仓库走）。 | 不判断谁该被提醒（判定在 `notifications.ts`）；不读设置（方式由 `App` 传入）。 |
 
 说明浮层的设计约束（这几条是界面改版时最容易破坏的，改之前先读）：
 
@@ -311,7 +313,7 @@ B站 上传有**自己的两套状态**，与 `JobStatus` 无关：
 ## 已知限制与设计债
 
 1. **停滞判定依赖 progress 回调**：如果 yt-dlp 完全阻塞在 socket 读且不回调，看门狗不会触发，此时只有 `socket_timeout=30` 兜底。因此不能声称"解决了所有卡死"。
-2. **进程重启不恢复在途任务**：历史 `queued`/`running` item 在进程退出后不会自动重新入队或标记为取消，界面上表现为"永远排队"。这是可靠性问题，已在 [PLAN.md](../ai/perf/PLAN.md) 第 8 节记录为待单开计划处理。
+2. ~~**进程重启不恢复在途任务**：历史 `queued`/`running` item 在进程退出后不会自动重新入队或标记为取消，界面上表现为"永远排队"。~~ **已修复**（[`ai/bug-fix/015`](../ai/bug-fix/015-orphan-items-never-resume.md)，`ead7b81`）：启动时 [recover_orphaned_work](../backend/app/job_manager.py#L83) 先收敛孤儿条目再起 worker，默认重新排队并断点续传，准入分支的判据见 [实现文档](implementation.md#进程退出与恢复)。原记录（`ai/perf/PLAN.md` §8）保留作为历史上下文。
 3. **无正式迁移框架**：`_ensure_columns` 只能加列。删除列、改类型或数据回填都需要手工 SQL，且没有版本记录表。
 4. **单视频无法内部并行**：yt-dlp 内建 http 下载器是单连接，`concurrent_fragment_downloads=1`，因此单视频提速只能靠 aria2c（默认关闭，且会推高 403 风险）。
 5. **profile 链是串行且昂贵的**：每个 profile 都是一次完整 extract，失败路径的耗时按 profile 数累加；`DownloadStalled` 与 `DownloadCancelled` 已跳过链路，其余错误仍会逐级重试。
