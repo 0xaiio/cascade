@@ -37,7 +37,7 @@
 | [bili_read_model.py](../backend/app/bili_read_model.py#L60) | L2 编排 | 把 `bili_upload` / `bili_season` 投影成 API 读模型；**「多条记录 → 一档徽标」的聚合规则**只在这里定义。 | 不写库、不改状态；`elapsed_seconds` 复用 `job_read_model`（见下方「同层横向依赖」）。 |
 | [ytdlp_service.py](../backend/app/ytdlp_service.py#L88) | L3 领域 | yt-dlp 边界：元数据、预检测、参数构建、profile 重试链、错误分类、依赖诊断。 | 不碰数据库，不决定任务状态。 |
 | [subtitle_plan.py](../backend/app/subtitle_plan.py#L200) | L3 领域 | 字幕下载**计划**：主语言判定（`-orig` 原声轨）、同族轨偏好、人工→ASR→跳过的收敛、来源标签与摘要文案。**纯逻辑**：不联网、不读库、不 import yt-dlp。 | 不写库、不发请求；不知道 `JobItem` 的存在（结论由 `job_manager` 取走）。 |
-| [bili_subtitle.py](../backend/app/bili_subtitle.py#L218) | L3 领域 | B站 CC 字幕：SRT/VTT → BCC 转换、语言标识映射、一次字幕上传（`posted` / `skipped` / `failed`）。 | **不参与稿件状态判定**、不写库、不重试；不知道端点长什么样（端点在 `bili_api`）。 |
+| [bili_subtitle.py](../backend/app/bili_subtitle.py#L277) | L3 领域 | B站 CC 字幕：SRT/VTT → BCC 转换、语言标识映射、一次字幕上传（`posted` / `skipped` / `failed`）。 | **不参与稿件状态判定**、不写库、不重试；不知道端点长什么样（端点在 `bili_api`）。 |
 | [ytdlp_formats.py](../backend/app/ytdlp_formats.py#L9) | L3 领域 | 格式选择器、分辨率/大小/codec 提取、降级候选计算。 | 不导入 yt-dlp。 |
 | [stall_guard.py](../backend/app/stall_guard.py#L32) | L3 领域 | 纯函数式停滞判定与 `DownloadStalled`。 | 不写库、不发布事件。 |
 | [fallback_policy.py](../backend/app/fallback_policy.py#L10) | L3 领域 | 降级原因常量与用户可读文案、重启建议。 | 不做降级决策（决策在 `resolution_decisions`）。 |

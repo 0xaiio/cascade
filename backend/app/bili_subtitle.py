@@ -55,6 +55,16 @@ _TRADITIONAL_CHINESE = {
     "zh-mo": "zh-HK",
 }
 
+# 界面上的语言名。**平台码不进界面**：`en` / `zh-Hant` 是发给接口的值，用户读的是「英文」。
+# 取值覆盖面就是 `bilibili_language` 可能产出的那几个（它只放行中英两族），其余一律原样回显。
+LAN_DISPLAY: dict[str, str] = {
+    LAN_CHINESE: "中文",
+    "zh-Hant": "繁体中文",
+    "zh-TW": "繁体中文",
+    "zh-HK": "繁体中文",
+    LAN_ENGLISH_BILI: "英文",
+}
+
 # BCC 的默认样式。**这几个值取自 B站 播放器对 CC 字幕的默认值**：不写会有缺省值，
 # 但写出来是为了让「字幕长什么样」在本模块可见 —— 观众可关、可调，样式不是产品差异点。
 BCC_FONT_SIZE = 0.4
@@ -98,6 +108,14 @@ def bilibili_language(code: str | None) -> str:
             base = base[: -len("-orig")]
         return _TRADITIONAL_CHINESE.get(base, LAN_CHINESE)
     return DEFAULT_LAN
+
+
+def language_display(lan: str | None) -> str:
+    """平台语言码 → 用户读得懂的名字。**认不出来就原样返回，不猜**（与状态表同一条原则）。"""
+    code = (lan or "").strip()
+    if not code:
+        return "未知语言"
+    return LAN_DISPLAY.get(code, code)
 
 
 def parse_timestamp(text: str) -> float | None:
@@ -177,6 +195,42 @@ def merge_repeated_cues(cues: list[Cue]) -> list[Cue]:
     return merged
 
 
+# 滚动字幕的**过渡条**：YouTube 的 VTT 在每个滚动窗口之间插一条极短的 cue，内容是上一窗口里
+# 的一行。实测 Ep 130（`C++ Weekly - Ep 130`，5:53）的 241 条 cue 里，有 **119 条时长正好
+# 0.010 s**，且每一行文字都已被前后相邻的 cue 完整覆盖。
+#
+# 它在播放器里只活一帧（60fps 下不足一帧），却把条数抬高了近一倍：239 条 cue 对应 122 句台词。
+# 这是「字幕条数」这个数字看起来莫名其妙、也是字幕在换行处闪一下的根源。
+TRANSITION_MAX_SECONDS = 0.05
+
+
+def _lines_of(cue: Cue) -> set[str]:
+    return {row.strip() for row in cue.content.splitlines() if row.strip()}
+
+
+def drop_transition_cues(cues: list[Cue]) -> list[Cue]:
+    """丢掉滚动字幕的过渡条：**时长极短**且文字**已被相邻 cue 完整覆盖**。
+
+    两个条件缺一不可，各自都放过一类误删：
+
+    - 只按时长删 ⇒ 会误删「真的只有几十毫秒、但内容独一无二」的短字幕；
+    - 只按「文字在邻居里出现过」删 ⇒ 会误删正常重复 —— 同一句话隔几秒再说一次，
+      那是新的一条字幕，不是过渡条。
+    """
+    kept: list[Cue] = []
+    for index, cue in enumerate(cues):
+        if cue.end - cue.start <= TRANSITION_MAX_SECONDS:
+            neighbour: set[str] = set()
+            if index:
+                neighbour |= _lines_of(cues[index - 1])
+            if index + 1 < len(cues):
+                neighbour |= _lines_of(cues[index + 1])
+            if _lines_of(cue) and _lines_of(cue) <= neighbour:
+                continue
+        kept.append(cue)
+    return kept
+
+
 def to_bcc(cues: list[Cue]) -> str:
     """把 cue 列表序列化成 B站 的 BCC（JSON 字符串）。
 
@@ -198,10 +252,15 @@ def to_bcc(cues: list[Cue]) -> str:
 
 
 def load_bcc(path: Path) -> tuple[str, int]:
-    """读一个字幕文件并转成 BCC，返回 `(BCC 文本, 条数)`。**读不出来就抛** ——
-    让调用方决定是「跳过」还是「记为失败」，这里不替它做决定。"""
+    """读一个字幕文件并转成 BCC，返回 `(BCC 文本, 段数)`。**读不出来就抛** ——
+    让调用方决定是「跳过」还是「记为失败」，这里不替它做决定。
+
+    三步固定顺序：解析 → 丢过渡条 → 合并同文。先丢再合：过渡条本身就是「上一行」，先合会把
+    它的结束时间并进上一条，之后就再也看不出它是过渡条了（`merge_repeated_cues` 只判整条同文，
+    而「上一行 / 上一行+新一行」永远不相等）。
+    """
     text = Path(path).read_text(encoding="utf-8-sig", errors="replace")
-    cues = merge_repeated_cues(parse_subtitle_text(text))
+    cues = merge_repeated_cues(drop_transition_cues(parse_subtitle_text(text)))
     return to_bcc(cues), len(cues)
 
 
@@ -256,10 +315,13 @@ def upload_subtitle(
         logger.warning("bili 字幕上传失败：bvid=%s lan=%s error=%s", bvid, lan, exc)
         return SubtitleOutcome(state=SUBTITLE_FAILED, lan=lan, message=str(exc), cue_count=count)
 
-    logger.info("bili 字幕上传完成：bvid=%s lan=%s 条数=%s", bvid, lan, count)
+    logger.info("bili 字幕上传完成：bvid=%s lan=%s 段数=%s", bvid, lan, count)
+    # 界面只讲**结果**：语言说人话（「英文」而不是 `en`），段数进日志。
+    # 段数是转换器的中间量 —— 它既不是字数也不是句数（Ep 130：239 段对应 122 句），
+    # 摆在界面上只会引出一个答不上来的问题（见 ai/bug-fix/022）。
     return SubtitleOutcome(
         state=SUBTITLE_POSTED,
         lan=lan,
-        message=f"CC 字幕已上传（{count} 条，{lan}），观众可在播放器里开关",
+        message=f"CC 字幕已上传（{language_display(lan)}），观众可在播放器里开关",
         cue_count=count,
     )

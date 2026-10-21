@@ -174,7 +174,7 @@ B站 上传是一条与下载完全解耦的链路，模块划分（详见 [设�
 | [bili_auth.py](../backend/app/bili_auth.py#L75) | 扫码登录（二维码 / 轮询）、**TV 端三步换投稿令牌**、登录文件读写（四形态兼容）、**凭据摘要（只回名字与计数）**、是否被 git 跟踪。 |
 | [bili_bin.py](../backend/app/bili_bin.py#L271) | 投稿工具边界：`biliup` 探测（含 WinGet 0 字节空壳识别/修复）、命令组装、子进程执行、进度解析、ffmpeg 抽封面。 |
 | [bili_api.py](../backend/app/bili_api.py#L124) | B站 会员态客户端：稿件对账、稿件详情（cid）、建合集、归集稿件、列合集、发并置顶评论、**CC 字幕保存**（`oid` 用 cid、两个布尔按小写字面量发）。全部经可注入 `transport`。 |
-| [bili_subtitle.py](../backend/app/bili_subtitle.py#L83) | B站 CC 字幕：SRT/VTT → BCC 转换（`from`/`to` 是**秒**）、`<c>` 内联标签剥离、相邻重复字幕合并、语言标识映射（**只输出平台白名单内的值**）、一次上传的结论（`posted` / `skipped` / `failed`）。**失败一律落成结论，不抛异常。** |
+| [bili_subtitle.py](../backend/app/bili_subtitle.py#L93) | B站 CC 字幕：SRT/VTT → BCC 转换（`from`/`to` 是**秒**）、`<c>` 内联标签剥离、**滚动字幕的 10 毫秒过渡条丢弃**、相邻重复字幕合并、语言标识映射（**只输出平台白名单内的值**；界面另用 `language_display` 说人话）、一次上传的结论（`posted` / `skipped` / `failed`）。**失败一律落成结论，不抛异常。** |
 | [bili_upload.py](../backend/app/bili_upload.py#L299) | **单次上传的领域逻辑**：编排上面几个模块，产出「已发布 / 审核中 / 待核对 / 失败」的结论与下一步；含模板批量渲染与逐条校验。纯函数式，可整链离线单测。 |
 | [bili_read_model.py](../backend/app/bili_read_model.py#L60) | 把两张表投影成 API 读模型；**「多条记录 → 一档徽标」的聚合规则**只在这里定义。 |
 | [bili_manager.py](../backend/app/bili_manager.py#L328) | 队列与编排：单 worker 串行、投稿间隔、状态写库与收敛、重启收敛、环境体检（含投稿令牌档）、事件发布。 |
@@ -191,7 +191,7 @@ B站 上传是一条与下载完全解耦的链路，模块划分（详见 [设�
 - **二维码 SVG 的尺寸单位是毫米**（B站 返回 `width="29.6mm"`），前端必须显式覆盖宽高，否则渲染尺寸会跟着宿主字号变。
 - **CC 字幕挂在投稿的最末尾**，因为字幕要挂在**分P**上：必须先拿到 `cid`（`oid` 取的就是它），
   而 `cid` 只有对账之后才有。拿不到就 `skipped`，绝不因为字幕把已发布的稿件翻成失败
-  （[upload_subtitle](../backend/app/bili_subtitle.py#L218) 内部也不抛异常，理由同上）。
+  （[upload_subtitle](../backend/app/bili_subtitle.py#L277) 内部也不抛异常，理由同上）。
 - **BCC 的时间是秒不是毫秒**。`00:01:02,500` 解析成 `62.5`；解析不出来返回 `None` 而不是猜 0 ——
   时间错了整条字幕就废了，猜出来的 0 会让所有字幕堆在片头。
 - **语言标识不是需求里写的那两个值**：B站 不接受 `zh-CN` / `en-US`（`code=79011 不合法的语言`），

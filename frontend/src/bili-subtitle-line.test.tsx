@@ -47,11 +47,11 @@ describe("B站 上传明细 · CC 字幕那一行", () => {
       ...biliUploadPayload,
       subtitle_state: "posted",
       subtitle_lan: "en",
-      subtitle_message: "CC 字幕已上传（120 条，en），观众可在播放器里开关"
+      subtitle_message: "CC 字幕已上传（英文），观众可在播放器里开关"
     });
 
     expect(screen.getByText("CC 字幕")).toBeInTheDocument();
-    expect(screen.getByText(/CC 字幕已上传（120 条，en）/)).toBeInTheDocument();
+    expect(screen.getByText(/CC 字幕已上传（英文）/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /重新上传字幕/ })).not.toBeInTheDocument();
   });
 

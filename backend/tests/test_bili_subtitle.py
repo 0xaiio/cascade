@@ -7,7 +7,9 @@
 2. 语言标识用的是**平台白名单**（`zh` / `en` / `zh-Hant` …），不是常见的 `zh-CN` / `en-US`
    —— 后者实测被拒为 `code=79011 不合法的语言`；
 3. 上传失败**一律降级**，绝不能把一条已发布的稿件说成失败；
-4. VTT 的行内标签要剥掉 —— YouTube 的自动字幕带 `<c>`，原样传上去就是一排尖括号。
+4. VTT 的行内标签要剥掉 —— YouTube 的自动字幕带 `<c>`，原样传上去就是一排尖括号；
+5. 滚动字幕的**10 毫秒过渡条**要丢掉 —— 它让段数虚高一倍（Ep 130：239 段 / 122 句），
+   也是「CC 字幕已上传（239 条，en）」这句话里那个数字看不懂的原因。
 """
 
 from __future__ import annotations
@@ -25,7 +27,10 @@ from app.bili_subtitle import (
     SUBTITLE_FAILED,
     SUBTITLE_POSTED,
     SUBTITLE_SKIPPED,
+    TRANSITION_MAX_SECONDS,
     bilibili_language,
+    drop_transition_cues,
+    language_display,
     load_bcc,
     merge_repeated_cues,
     parse_subtitle_text,
@@ -59,6 +64,32 @@ NOTE this block must be skipped
 
 00:00:04.000 --> 00:00:06.000
 Second &amp; line
+"""
+
+# 滚动字幕的真实片段：从本机 `C++ Weekly - Ep 130` 的 `.en.vtt` 里**逐字**抄下来的前四块。
+# 形状是「滚屏条 / 10 毫秒过渡条 / 滚屏条 / 10 毫秒过渡条」交替：
+#   0.03-3.05 A          ← 滚屏条（带 <c> 与行内时间戳）
+#   3.05-3.06 A          ← 过渡条（10 毫秒，内容就是上一行）
+#   3.06-5.12 A ↵ B      ← 滚屏条（上一行 + 新一行）
+#   5.12-5.13 B          ← 过渡条
+# 唯一与原文不同的是**去掉了原文件里那些「只有一个空格」的行**（它们本来就被 `_clean_line`
+# 与 `strip()` 过滤，结果等价）—— 保留它们会让本文件带上行尾空白，`git diff --check` 会红。
+ROLLING_VTT = """WEBVTT
+Kind: captions
+Language: en
+
+00:00:00.030 --> 00:00:03.050 align:start position:0%
+hello<00:00:00.690><c> and</c><00:00:00.989><c> welcome</c><00:00:01.530><c> to</c><00:00:01.560><c> C++</c><00:00:01.949><c> weekly</c><00:00:02.610><c> I'm</c><00:00:02.760><c> your</c>
+
+00:00:03.050 --> 00:00:03.060 align:start position:0%
+hello and welcome to C++ weekly I'm your
+
+00:00:03.060 --> 00:00:05.120 align:start position:0%
+hello and welcome to C++ weekly I'm your
+host<00:00:03.210><c> Jason</c><00:00:03.600><c> Turner</c><00:00:03.959><c> I</c><00:00:04.230><c> am</c><00:00:04.589><c> available</c><00:00:04.830><c> for</c>
+
+00:00:05.120 --> 00:00:05.130 align:start position:0%
+host Jason Turner I am available for
 """
 
 
@@ -119,6 +150,64 @@ def test_merge_only_touches_identical_neighbours() -> None:
     assert len(merged) == 2
     assert (merged[0].start, merged[0].end) == (1.0, 3.0)
     assert merged[1].content == "different"
+
+
+# ---------------------------------------------------------------- 过渡条
+def test_rolling_transition_cues_are_dropped() -> None:
+    """真实滚动字幕：4 段里 2 段是 10 毫秒过渡条，留下的正是「一句一条」。"""
+    cues = parse_subtitle_text(ROLLING_VTT)
+    assert len(cues) == 4
+    kept = drop_transition_cues(cues)
+    assert [(cue.start, cue.end, cue.content) for cue in kept] == [
+        (0.03, 3.05, "hello and welcome to C++ weekly I'm your"),
+        (3.06, 5.12, "hello and welcome to C++ weekly I'm your\nhost Jason Turner I am available for"),
+    ]
+
+
+def test_a_short_cue_with_unique_text_is_kept() -> None:
+    """**只按时长删是错的**：真的只有几十毫秒、内容却独一无二的短字幕必须留下。"""
+    cues = parse_subtitle_text(
+        "00:00:01.000 --> 00:00:02.000\nfirst line\n\n"
+        "00:00:02.000 --> 00:00:02.030\nHey!\n\n"
+        "00:00:02.030 --> 00:00:03.000\nsecond line\n"
+    )
+    assert [cue.content for cue in drop_transition_cues(cues)] == ["first line", "Hey!", "second line"]
+
+
+def test_a_short_line_is_kept_when_the_same_text_only_appears_far_away() -> None:
+    """判据只看**紧邻**的两条：同一句话在别处（隔几秒）出现过，不构成「过渡条」的理由。
+
+    一段 30 毫秒、内容独一无二于邻居的短字幕必须留下 —— 这正是「只按内容出现过就删」会踩的坑。
+    """
+    cues = parse_subtitle_text(
+        "00:00:01.000 --> 00:00:02.000\nsure\n\n"
+        "00:00:02.000 --> 00:00:02.030\nagain\n\n"
+        "00:00:02.030 --> 00:00:03.000\nother\n\n"
+        "00:00:04.000 --> 00:00:05.000\nagain\n"
+    )
+    assert [cue.content for cue in drop_transition_cues(cues)] == ["sure", "again", "other", "again"]
+
+
+def test_the_transition_threshold_stays_below_a_visible_frame() -> None:
+    """阈值是**实测归纳**的：Ep 130 里 119 条过渡条时长正好 0.010 s。
+
+    取 0.05 s（3 帧）为界：再放大就会开始吞掉真字幕。
+    """
+    assert 0.01 <= TRANSITION_MAX_SECONDS <= 0.05
+
+
+def test_load_bcc_drops_the_transitions_end_to_end(tmp_path: Path) -> None:
+    """端到端：**239 段 → 122 段**这件事必须发生在 `load_bcc` 这条唯一入口上。"""
+    path = tmp_path / "clip.en.vtt"
+    path.write_text(ROLLING_VTT, encoding="utf-8")
+    data, count = load_bcc(path)
+    assert count == 2
+    body = json.loads(data)["body"]
+    assert [item["content"] for item in body] == [
+        "hello and welcome to C++ weekly I'm your",
+        "hello and welcome to C++ weekly I'm your\nhost Jason Turner I am available for",
+    ]
+    assert all(item["to"] - item["from"] > TRANSITION_MAX_SECONDS for item in body)
 
 
 # ---------------------------------------------------------------- BCC
@@ -189,6 +278,24 @@ def test_chinese_default_is_the_simplified_code() -> None:
     assert bilibili_language("zh") == LAN_CHINESE
 
 
+@pytest.mark.parametrize(
+    ("code", "text"),
+    [
+        ("en", "英文"),
+        ("zh", "中文"),
+        ("zh-Hant", "繁体中文"),
+        ("zh-TW", "繁体中文"),
+        ("zh-HK", "繁体中文"),
+        (None, "未知语言"),
+        ("", "未知语言"),
+        ("xx", "xx"),
+    ],
+)
+def test_language_display_never_leaks_a_platform_code(code: str | None, text: str) -> None:
+    """界面说「英文」不说 `en`。认不出来的码**原样回显**，不猜成别的语言。"""
+    assert language_display(code) == text
+
+
 # ---------------------------------------------------------------- 上传
 def _write(tmp_path: Path, name: str = "clip.en.srt") -> Path:
     path = tmp_path / name
@@ -215,6 +322,24 @@ def test_upload_posts_the_draft_save_endpoint(tmp_path: Path) -> None:
     assert form["sign"] == "false"
     assert form["submit"] == "true"
     assert json.loads(form["data"])["body"][0]["content"] == "Hello there"
+
+
+def test_the_success_message_says_what_happened_not_how_many_cues(tmp_path: Path) -> None:
+    """**这条是用户报的那个问题的回归**：界面上那句「CC 字幕已上传（239 条，en）」。
+
+    `239` 是转换器的段数（既不是字数也不是句数），`en` 是发给接口的平台码 —— 两个中间量
+    都不该出现在结论里。结论只讲发生了什么、观众能做什么。
+    """
+    transport = StubTransport({"code": 0, "data": None})
+    outcome = upload_subtitle(
+        transport, JAR, aid=111, bvid="BV1", cid=222, path=_write(tmp_path), lan="en"
+    )
+    assert outcome.state == SUBTITLE_POSTED
+    assert outcome.message == "CC 字幕已上传（英文），观众可在播放器里开关"
+    assert "en" not in outcome.message
+    assert "条" not in outcome.message
+    # 段数没有丢，只是留在字段与日志里（排障要看它）。
+    assert outcome.cue_count == 2
 
 
 def test_upload_failure_becomes_a_conclusion_never_an_exception(tmp_path: Path) -> None:

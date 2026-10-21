@@ -340,7 +340,7 @@ cookies 体检结果。字段分三层：
 | --- | --- | --- |
 | `subtitle_state` | `posted` / `skipped` / `failed`，默认 `skipped` | 字幕这一步自己的结论。**不参与徽标聚合**，也绝不把 `published` 翻成 `failed`。`skipped` 只表示「确实没有可传的字幕」；「有字幕但挂不上」（例如稿件还在审核、拿不到分P编号）记 `failed` |
 | `subtitle_lan` | 平台侧实际用的标识（`zh` / `en` / `zh-Hant`…），未传时 `""` | **不是** `zh-CN` / `en-US` —— 平台不接受这两个值（实测 `code=79011 不合法的语言`），也不接受 `zh-Hans` / `en-GB`。白名单只有 `zh` / `en` / `zh-Hant` / `zh-TW` / `zh-HK` / `ja` / `ko` / `yue` / `fr` |
-| `subtitle_message` | 恒非空（成功也写一句） | 给用户看的那句：「没有已下载的字幕，跳过字幕上传」/「CC 字幕已上传（N 条，en），观众可在播放器里开关」/「稿件已提交（reviewing），但平台还没给出分P编号…」/ 失败原因 |
+| `subtitle_message` | 恒非空（成功也写一句） | 给用户看的那句：「没有已下载的字幕，跳过字幕上传」/「CC 字幕已上传（英文），观众可在播放器里开关」/「稿件已提交（reviewing），但平台还没给出分P编号…」/ 失败原因 |
 
 提交前，`GET /api/bilibili/prefill` 的每条 `BiliPrefillItem.subtitle` 会告诉界面**这一条会带什么字幕**
 （`en · 人工` / `zh · 自动生成` / `无字幕` / 空串）。这句文案由服务端

@@ -869,3 +869,48 @@ Ep 125 上传时进度条显示「已提交 7:59:59」，跑的过程中出现�
 - **没有测到 biliup 到 CDN 的可达性**：`curl` 探测走的是本机代理（`remote_ip=127.0.0.1`），
   与 biliup 直连不是同一条路径，不作证据。
 - CDN 侧 HTTP 4xx/5xx 两支没有真实样本，只有单测。
+
+## 18. 字幕段数与文案：两条判据各配守护用例（022）
+
+### 18.1 夹具来自真实滚动字幕
+
+`ROLLING_VTT` 是 Ep 130 的 `.en.vtt` 前四块**逐字**抄本（滚屏条 / 10ms 过渡条 / 滚屏条 / 过渡条）。
+唯一改动是去掉原文件里那些「只有一个空格」的行 —— 它们本来就被 `strip()` 过滤，结果等价，
+但保留会让本文件带上行尾空白、`git diff --check` 会红。
+
+### 18.2 用例（`test_bili_subtitle.py` +14，共 52）
+
+| 用例 | 钉住什么 |
+| --- | --- |
+| `test_rolling_transition_cues_are_dropped` | 4 段 → 2 段，留下的正是「一句一条」 |
+| `test_a_short_cue_with_unique_text_is_kept` | 30ms 但文字独一份 ⇒ 保留（挡「只按时长删」） |
+| `test_a_short_line_is_kept_when_the_same_text_only_appears_far_away` | 文字在别处出现、不在**紧邻** ⇒ 保留（挡「只按内容出现过删」） |
+| `test_the_transition_threshold_stays_below_a_visible_frame` | 阈值 ∈ [0.01, 0.05]（实测 0.010，上限 3 帧） |
+| `test_load_bcc_drops_the_transitions_end_to_end` | **接线**：规则必须挂在 `load_bcc` 这条唯一入口上 |
+| `test_language_display_never_leaks_a_platform_code`（8 例） | `en→英文`…；空/未知不猜 |
+| `test_the_success_message_says_what_happened_not_how_many_cues` | 文案逐字；不含 `en`、不含「条」；段数仍在 `cue_count` |
+
+### 18.3 四个方向的承重
+
+| 把什么改坏 | 结果 |
+| --- | --- |
+| `load_bcc` 去掉 `drop_transition_cues(...)` | 1 红（接线） |
+| `drop_transition_cues` 直接 `return cues` | 2 红 |
+| 判据只留时长 | 2 红（两条守护用例） |
+| 阈值放大到 10s | 3 红 |
+
+**这里有一个反例值得记下来**：最初写的「同一句话说两次不算过渡条」用的是两条 **2 秒**的 cue，
+阈值放大到 10s 时它照样绿 —— 因为时长判据本就不覆盖 2 秒的 cue。是承重把这条用例拆穿的：
+改成「**30 毫秒**且文字只在远处出现」之后，它才真正守住「紧邻」这条判据。
+
+### 18.4 全语料校验（不是推断）
+
+`downloads/` 里 28 个 `.vtt` 跑一遍：20,385 → 10,973；被删的 100% ≤0.02s；
+0 文字丢失；0 个文件末条结束时间改变。**量级比单样本本身更有说服力**：删掉的是 46% 的 cue，
+而一句台词都没少。
+
+### 18.5 未覆盖
+
+- 没有真实重传字幕（会覆盖线上稿件）；真实判据是重传后平台 `body` 段数 ≈ 句数。
+- 「换行处闪一帧」只在数据层确认（10ms 不足一帧，肉眼难判）。
+- 字幕仍是「上一行 + 新一行」的滚动窗口形态，没有重排成单行。
