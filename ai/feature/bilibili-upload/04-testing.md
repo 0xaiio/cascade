@@ -534,12 +534,12 @@ APP接口投稿成功 (code 0)
 
 | 层 | 用例 | 钉住什么 |
 | --- | --- | --- |
-| 纯函数（`biliProgress.test.ts`，15） | `uploadStageView` 的表驱动 | 八档状态各落在哪一段、是否 settled、是否 broken；0/0.19/0.2/0.59/0.6/0.95 的分界 |
+| 纯函数（`biliProgress.test.ts`，20） | `uploadStageView` 的表驱动 | 八档状态各落在哪一段、是否 settled、是否 broken；0/0.19/0.2/0.59/0.6/0.95 的分界 |
 | 纯函数 | `jobUploadProgress` | 合集选**正在跑的那条**而不是第一条；`done` 只数已确认的；全成功/全失败/待核对都 `waiting=false`；空数组 → `null` |
-| 纯函数 | `uploadElapsedLabel` | 在跑说「已用」、等审核说「已提交」；起点缺失或坏值 → `null`（不显示 0:00）；时钟倒挂不出负数 |
+| 纯函数 | `uploadElapsedLabel` | 在跑说「已用」；**跑完（含等审核）给定值「上传用时 m:ss」，两个不同的 `now` 必须输出同一个值**；起点/终点缺失或坏值 → `null`（不显示 0:00）；时钟倒挂不出负数 |
 | 界面（`bili-upload.test.tsx`，+4） | 上传中 | 「上传进度」出现、当前段 `is-active`、前序段 `is-done`、`已用 01:0x` |
 | 界面 | 合集 | 「第 2/2 条 · Part two」+「已有 1/2 条确认在平台上」 |
-| 界面 | 审核中 | 四段全 `is-done`、没有 active、「已提交 12:0x」 |
+| 界面 | 审核中 | 四段全 `is-done`、没有 active、「上传用时 03:00」且**2.2 秒后仍是它**（不替审核计时） |
 | 界面 | 已发布 / 失败 / 待核对 | **不渲染**进度块 |
 | 后端（`test_bili_manager.py`，+3） | `test_a_real_upload_walks_the_progress_gates` | 走真实回调链（替身回放 biliup 三类行）→ 事件恰好 `[0.2, 0.6, 0.95]`，一次投稿最多 3 条 |
 | 后端 | `test_progress_events_only_fire_when_the_gate_moves` | 同值重放**不**发、倒退既不写库也不发 |
@@ -928,3 +928,61 @@ Ep 125 上传时进度条显示「已提交 7:59:59」，跑的过程中出现�
 - 「换行处闪一帧」只在数据层确认（10ms 不足一帧，肉眼难判）。
 - 字幕仍是「上一行 + 新一行」的滚动窗口形态，没有重排成单行。
 - 观众侧是否已可见：未区分登录要求与审核，故不下结论。
+
+## 19. 「重试归集」与审核期秒表：两处都是「界面在说没发生的事」（023/024 之后的一轮）
+
+### 19.1 起点是两个用户原话
+
+*「点「重试归集」按钮后没有任何反应」*、*「上传进度仍在持续计时」*。
+两条都出在同一张任务卡片的 B站 区，成因互相独立（功能缺陷 → [024](../../bug-fix/024-retry-grouping-never-asks-the-platform.md)；
+界面缺陷 → [ui/007](../../ui/007-retry-grouping-looks-dead.md) / [ui/008](../../ui/008-the-upload-clock-counts-the-review.md)）。
+
+### 19.2 用例
+
+| 层 | 用例 | 钉住什么 |
+| --- | --- | --- |
+| `test_bili_upload.py`（+4） | `test_refresh_episode_*` | 事后回读能补 `cid`（只读、不投稿）；**bvid 优先于标题**；读不到返回 `None`（不猜）；列表读挂也不抛到归集那一步 |
+| `test_bili_manager.py`（+3） | `test_retry_season_asks_the_platform_again_and_groups_once_it_can` | 完整真实形状：投稿时 `-30`/无 `cid` ⇒ `pending`；平台过审后**同一次重试** ⇒ `grouped`，`cid` 落库，`episodes/add` 恰好一次 |
+| 同上 | `test_retry_season_says_it_did_not_even_start_while_the_video_is_in_review` | 前提不满足 ⇒ `action=waiting` + 「这次没有发起归集」+ `episodes/add` **零次** |
+| 同上 | `test_retry_season_does_not_downgrade_a_row_when_the_platform_cannot_be_read` | 读不到平台时行保持 `reviewing/-30` |
+| `test_api_bilibili.py` | `test_retry_season_returns_the_season_view` | 回包带 `action` |
+| `biliProgress.test.ts`（+5） | 定值口径 | 两个不同的 `now` 同一个输出；缺终点 ⇒ `null`；真实样本 ⇒ `上传用时 00:5[23]` 且不是三段式 |
+| `bili-upload.test.tsx`（+1 改 1） | 审核中秒表 | 2.2 秒后仍是 `上传用时 00:00`，页面上没有 `已提交 \d` |
+| `bili-upload.test.tsx`（+1） | 「重试归集」原地留痕 | 点击后「归集中…」+ 禁用 → 落款 `上次重试 HH:MM:SS` → 回执落在 `.notice.is-info` 且说「这次没有发起归集」 |
+
+### 19.3 三次承重（都不是「代码看起来对」）
+
+- `retry_season` 的 `refresh=True` 改回 `False` ⇒ `assert 'waiting' == 'grouped'`，1 条转红。
+- `uploadElapsedLabel` 的「跑完」分支改回 `now - started` ⇒ 3 条转红。
+- `JobQueue` 把 `onBiliRetrySeason` 接回 `(id) => void onRetrySeason(id)` ⇒
+  新用例卡在 `Unable to find role="button" and name "归集中…"`（加载态帧宽 0 毫秒、落款永不写）。
+  **这一条是写用例时才发现的原因**：`void` 吞掉 Promise 后，`await onRetrySeason(...)` 立刻返回
+  `undefined`，组件以为请求已经完成。
+
+### 19.4 真实浏览器（`tmp_acceptance/probe_retry_grouping.py`）
+
+同一台机、同一条 Ep 125 记录，修复前 / 后各跑一次：
+
+| | 修复前 | 修复后 |
+| --- | --- | --- |
+| `上传进度` 秒表（相隔 2.6 s） | `已提交 6:41:54` → `已提交 6:41:56` | `上传用时 00:53` → `上传用时 00:53` |
+| 点击过程中的加载态 | 0/10 帧 | 6/10 帧（`归集中…` + 禁用） |
+| 点完之后按钮旁 | 无 | `上次重试 01:30:56` |
+| 回执 | 绿对勾「已重新尝试归集」，`top = -1115px`（视口外） | `.notice is-info`「这次没有发起归集：视频还在 B站 排队审核…」 |
+| 前提满足时 | 行内无变化（空转） | 行内变成「已提交归集（B站 需人工审核）」+ 稿件「已发布」 |
+
+点击那一下的真实副作用（后端日志 + 平台回读）：
+
+```
+回读到新事实：('reviewing', 117478428514876, 'BV1CAnz6KEok', None, '-30')
+            → ('published', 117478428514876, 'BV1CAnz6KEok', 42927065206, '0')
+归集：合集 9355267 → 分区 10469380「正片」1 条
+平台侧 GET view?bvid=BV1CAnz6KEok → ugc_season.id = 9355267，sections = [('正片', 9)]
+```
+
+### 19.5 未覆盖
+
+- 「视频还在审核 ⇒ `waiting`」这条**没有在真实账号上跑通**：本机另外 5 条 `reviewing` 记录一查平台
+  也全是 `state=0`。它的凭据是单测 + 浏览器探针里用**合成响应**量到的界面。
+- 本轮**没有为了验证秒表而再投一条稿**：`已用`（在跑）那一档没有新的真实读数，只有单测与修复前的探针。
+- 归集成功后，页顶回执可能被「徽标翻成已上传」的播报盖掉：两条都真，本轮未做优先级仲裁。
