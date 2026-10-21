@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   BADGE_NONE,
+  BADGE_UPLOADED,
   BAD_SEASON_STATUSES,
   BAD_UPLOAD_STATUSES,
   RETRYABLE_SEASON_STATUSES,
@@ -11,7 +12,8 @@ import {
   isNotableSubtitle,
   isNotableUpload,
   isRetryableSeason,
-  isRetryableUpload
+  isRetryableUpload,
+  uploadedTargetUrl
 } from "./biliStatus";
 import type { BiliSeasonStatus, BiliSubtitleState, BiliUploadStatus } from "./types";
 
@@ -130,6 +132,35 @@ describe("徽标与条目可见性", () => {
 
   test("字幕失败也算「有话说」—— 否则没有 bvid 的稿件会把这件事藏掉", () => {
     expect(isNotableUpload({ error: null, video_url: null, subtitle_state: "failed" })).toBe(true);
+  });
+});
+
+describe("「已上传」点进去打开哪一个页面", () => {
+  test("徽标取值与服务端一致", () => {
+    expect(BADGE_UPLOADED).toBe("uploaded");
+  });
+
+  test("任务级取第一条有链接的稿件（`uploads` 已按条目序号排过 = 第一个视频）", () => {
+    expect(
+      uploadedTargetUrl([
+        { video_url: null },
+        { video_url: "https://www.bilibili.com/video/BV1one" },
+        { video_url: "https://www.bilibili.com/video/BV1two" }
+      ])
+    ).toBe("https://www.bilibili.com/video/BV1one");
+  });
+
+  test("一条链接都没有就返回 null —— 让调用方退回「重新上传」，绝不给点下去没反应的按钮", () => {
+    expect(uploadedTargetUrl([{ video_url: null }])).toBeNull();
+    expect(uploadedTargetUrl([])).toBeNull();
+    expect(uploadedTargetUrl(null)).toBeNull();
+    expect(uploadedTargetUrl(undefined)).toBeNull();
+  });
+
+  test("空字符串等同于「没有」—— 服务端用空串表示缺值，别把它当链接", () => {
+    expect(uploadedTargetUrl([{ video_url: "" }, { video_url: "https://www.bilibili.com/video/BV1two" }])).toBe(
+      "https://www.bilibili.com/video/BV1two"
+    );
   });
 });
 

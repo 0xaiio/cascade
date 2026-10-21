@@ -51,6 +51,11 @@
 新增的三份全是**不挂载组件**的纯函数测试（`biliForm.test.ts` 35、`biliStatus.test.ts` 14、
 `errors.test.ts` 4）—— 判断被抽成纯函数之后，边界才测得动。
 
+**「已上传」按钮改为进入 B 站这一轮只动前端**（见 §10）：后端一行未改，上面那张表与等式
+（557 + 356 = 913）保持不动；前端从 **208 passed** 到 **216 passed**（`biliStatus.test.ts` +4、
+`bili-upload.test.tsx` +4），`tsc --noEmit` 退出码 0。文件数是 **18 个**（172 → 208 这一段是字幕
+那几轮涨出来的，不在本功能账上）。
+
 `test_bili_meta.py` 里与版权 / 来源有关的那批集中在三组判据：`normalize_copyright` 的回退方向
 （读不出合法值时**回退转载而不是自制** —— 标成自制是替用户声明一件他没说过的事）、
 `effective_source`（自制稿即便带着来源也不提交）、`validate` 对「转载缺来源」的拦截。
@@ -217,6 +222,10 @@ npx tsc --noEmit
    手机确认后变成「已登录（账号名）」。
 3. **单视频**：下载一个 1 分钟以内的小视频 → 点 B站 上传 → 弹窗里标题/分区/标签/简介**已预填** →
    随便改一个字 → 确认 → 条目状态从「排队中」→「上传中」→「已上传」。
+3b. **已上传之后按钮换了件事做**：鼠标悬停在那个绿色「已上传」上，提示必须是
+   **「B 站已上传；点击进入 B 站」**；点它应**新开一个 B站 稿件页**，且**不弹出上传表单**。
+   （若提示仍是「点击重新上传」，说明这条记录本地没记下 `bvid` —— 那是回落路径，不是缺陷，
+   见 §10 第 4 条。）
 4. **去 B站 创作中心核对**：稿件在不在、标题对不对、分区对不对、封面是不是第 1 秒那一帧。
 5. **置顶评论**：稿件评论区里应该有一条已置顶的评论，内容是弹窗里那段。
 6. **对账延迟**：若状态停在「待核对」，等 1–2 分钟点「重新核对」→ 应变成「已上传」。
@@ -390,3 +399,49 @@ CSS 是否缺（`.bili-choice` 在源与产物里都有）、以及链路是否�
 - `SEASON_LIST_TIMEOUT_MS` 这条路径**在本机是被真实验到的**（请求 40s 不回），但
   「真结果迟到并覆盖兜底结论」这条只在单测里构造过，真实环境没出现（本机压根读不到）。
 - B站 侧对归集的接受度：与前几节同一条边界，需要真实账号。
+
+## 10. 「已上传」按钮改为进入 B 站
+
+需求原话是「鼠标移到绿着的『已上传』上，提示却说『点击重新上传』，这不太合理」。改动只有一处语义：
+**`uploaded` 这一档的点击与 tooltip 换掉，外观与文案一个字没动**（FR-B31）。
+
+前端 **208 → 216 passed**（+8），`tsc --noEmit` 退出码 0；后端一行未改，未重跑。文件数不变（18）。
+
+### 10.1 单测钉住的四件「写错了会被用户发现」的事
+
+| 用例 | 钉住什么 |
+| --- | --- |
+| `makes 已上传 an entry point to B站 instead of a second upload` | tooltip **恰好**是「B 站已上传；点击进入 B 站」；点击只调一次 `window.open`（目标 URL 正确），**没有** `dialog`、**没有**预填请求、**没有**提交请求 |
+| `still opens B站 when the local video file is gone` | `output_path` 为空时按钮仍可点并仍打开稿件页 —— 「视频还没下载好」这条理由只约束**上传** |
+| `falls back to the upload path when the record has no link at all` | `bvid`/`video_url` 都为空时退回老路（tooltip 仍是「点击重新上传」且确实打开表单） |
+| `an uploaded collection item opens its own page, not the first one` | 条目级只打开**这一条**的链接（BV1two），不拿任务级的第一条顶替 |
+| `biliStatus.test.ts` 的四条 | `uploadedTargetUrl` 取「第一条有链接的」；`null` / `[]` / `undefined` / 全空串一律返回 `null`；空串等同「没有」 |
+
+`title` 与 `aria-label` 共用同一个常量（`BiliUploadButton.UPLOADED_HINT`）：视觉与读屏说同一句话，
+两处各写一份必然漂移 —— 这也是为什么测试断言的是**整句相等**而不是「包含『进入 B 站』」。
+
+### 10.2 真实浏览器：`tmp_acceptance/ui_bili_uploaded_button.py`（11 条断言，全过）
+
+`Fetch` 在**请求阶段**把 `/api/bilibili/uploads/summary` 换成一条合成的「已上传」记录
+（任务列表是真的，从 `GET /api/jobs` 现取 25 条里第一条已下载好的），其余请求照旧打到真实后端。
+两种形态各跑一遍，11/11 通过：
+
+- 有链接：tooltip 与无障碍名都是约定那句、按钮文字仍是「已上传」、`tone-ok` 仍是绿、可点；
+  点击后 **`Target.targetCreated` 真的开出了 `bilibili.com/video/BV1xx411c7mD/`**，且页面上没有 `[role=dialog]`。
+- 无链接：tooltip 退回「B站：已上传 · 点击重新上传」，点击打开上传表单。
+
+**三条探针自身的坑（都当场修了）**：
+
+1. **按标题子串找按钮会撞上明细链接。** 第一版用 `button[aria-label*="<稿件标题>"]`，结果命中
+   `[在 B 站查看]` 那枚链接（`aria-label="在 B 站打开 …"`），于是断言一路「徽标没变绿」，
+   而界面其实完全正常。判据要收窄到 `button.bili-button` **并且**按主语 `endsWith` 匹配。
+2. **`send()` 必须带事件队列。** `Fetch.requestPaused` 若被「等自己的应答」那一步吞掉，
+   请求永久挂起、summary 永远不返回，症状同样是「徽标不变」，与界面缺陷长得一样。
+3. **`window.open` 要用 `userGesture: true` 触发**，否则 headless 会当成弹窗拦截，看不到新 target。
+
+### 10.3 未验证
+
+- 任务级「已上传」在**多稿件**（合集）情形下打开的是第一个稿件 —— 真实浏览器里只验了单稿件形态
+  （`item_id` 为空）；多稿件只在单测里构造过。
+- 合集页（`collectiondetail?sid=`）**没有做入口**：它要账号 `mid`，为一个次要入口多引一次账号请求
+  不划算，见 [02-design.md](02-design.md) §10。

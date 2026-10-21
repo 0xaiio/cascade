@@ -154,9 +154,111 @@ describe("App · B站 上传入口", () => {
     mockState.biliUploads = [jobUploads()];
     render(<App />);
 
-    const button = await screen.findByRole("button", { name: /B站：已上传 Running video/ });
+    const button = await screen.findByRole("button", { name: /B 站已上传；点击进入 B 站 Running video/ });
     expect(within(button).getByText("已上传")).toBeInTheDocument();
     expect(within(button).queryByText("未上传")).not.toBeInTheDocument();
+  });
+
+  test("makes 已上传 an entry point to B站 instead of a second upload", async () => {
+    const user = userEvent.setup();
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    mockState.jobs = [downloadedJob()];
+    mockState.biliUploads = [jobUploads()];
+    render(<App />);
+
+    const button = await screen.findByRole("button", { name: /B 站已上传；点击进入 B 站 Running video/ });
+    // tooltip 与无障碍名是**同一句**：视觉与读屏不能说两件事。
+    expect(button).toHaveAttribute("title", "B 站已上传；点击进入 B 站");
+    expect(button).toBeEnabled();
+
+    await user.click(button);
+
+    expect(open).toHaveBeenCalledWith(
+      "https://www.bilibili.com/video/BV1xx411c7mD",
+      "_blank",
+      "noopener,noreferrer"
+    );
+    // 关键：**没有**开上传表单。开着表单就等于在暗示「再投一遍」，
+    // 而用户点这一下只是想看看它在 B站 上长什么样。
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(mockState.biliPrefillQueries).toEqual([]);
+    expect(mockState.biliUploadBodies).toEqual([]);
+  });
+
+  test("still opens B站 when the local video file is gone", async () => {
+    const user = userEvent.setup();
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    // 传完就把本地文件删掉是常态。稿件已经在平台上了，这个按钮不该因此连链接都点不开 ——
+    // 「视频还没下载好」这条禁用理由是给**上传**用的，与「打开已上传的页面」无关。
+    mockState.jobs = [downloadedJob({ items: [{ ...downloadedJob().items[0], output_path: null }] })];
+    mockState.biliUploads = [jobUploads()];
+    render(<App />);
+
+    const button = await screen.findByRole("button", { name: /B 站已上传；点击进入 B 站 Running video/ });
+    expect(button).toBeEnabled();
+    await user.click(button);
+    expect(open).toHaveBeenCalledWith(
+      "https://www.bilibili.com/video/BV1xx411c7mD",
+      "_blank",
+      "noopener,noreferrer"
+    );
+  });
+
+  test("falls back to the upload path when the record has no link at all", async () => {
+    const user = userEvent.setup();
+    mockState.jobs = [downloadedJob()];
+    // 徽标可以由「合集已归集」派生而来，那条路径下可能一条带 bvid 的稿件都没有。
+    // 这时「点击重新上传」是**事实**，不是误导 —— 保持老路比一个点下去没反应的绿按钮好。
+    mockState.biliUploads = [
+      jobUploads([{ ...biliUploadPayload, bvid: null, video_url: null }], {
+        badge: "uploaded",
+        badge_text: "已上传",
+        badge_tone: "ok"
+      })
+    ];
+    render(<App />);
+
+    const button = await screen.findByRole("button", { name: /B站：已上传 Running video/ });
+    expect(button).toHaveAttribute("title", "B站：已上传 · 点击重新上传");
+    await user.click(button);
+    await waitFor(() =>
+      expect(mockState.biliPrefillQueries).toEqual([{ jobId: "job-running", itemId: "item-running" }])
+    );
+  });
+
+  test("an uploaded collection item opens its own page, not the first one", async () => {
+    const user = userEvent.setup();
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    mockState.jobs = [downloadedPlaylistJob()];
+    mockState.biliUploads = [
+      jobUploads(
+        [
+          {
+            ...biliUploadPayload,
+            id: "bili-p1",
+            item_id: "item-playlist-1",
+            title: "Part one",
+            bvid: "BV1one",
+            video_url: "https://www.bilibili.com/video/BV1one"
+          },
+          {
+            ...biliUploadPayload,
+            id: "bili-p2",
+            item_id: "item-playlist-2",
+            title: "Part two",
+            bvid: "BV1two",
+            video_url: "https://www.bilibili.com/video/BV1two"
+          }
+        ],
+        { job_id: "job-playlist" }
+      )
+    ];
+    render(<App />);
+
+    // 点第 2 集却打开第 1 集，比不给链接更糟：用户会以为那就是第 2 集。
+    await user.click(await screen.findByRole("button", { name: /B 站已上传；点击进入 B 站 Part two/ }));
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(open).toHaveBeenCalledWith("https://www.bilibili.com/video/BV1two", "_blank", "noopener,noreferrer");
   });
 
   test("disables the button and says why while an upload is in flight", async () => {
@@ -248,7 +350,9 @@ describe("App · B站 上传表单（单视频）", () => {
       expect(notice()).toHaveTextContent("已开始上传《Unsupported resolution》，不归集 —— 跑完这里会变成「已上传」。")
     );
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: /B站：已上传 Running video/ })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: /B 站已上传；点击进入 B 站 Running video/ })
+    ).toBeInTheDocument();
   });
 
   test("blocks the submit on an over-long title but never truncates the input", async () => {
@@ -885,13 +989,14 @@ describe("App · B站 稿件明细与重试", () => {
     mockState.biliUploads = [jobUploads()];
     render(<App />);
 
-    await screen.findByRole("button", { name: /B站：已上传 Running video/ });
+    const settled = { name: /B 站已上传；点击进入 B 站 Running video/ };
+    await screen.findByRole("button", settled);
     const source = mockState.eventSources[0];
     expect(source, "App 必须订阅 /api/events 才能知道后台跑完了").toBeDefined();
 
     // 1) 首次拉到状态**不播报**：否则每次打开页面都会把历史结果重播一遍。
     source.onmessage?.(new MessageEvent("message", { data: "{}" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: /B站：已上传 Running video/ })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", settled)).toBeInTheDocument());
     expect(notice()).toBeNull();
 
     // 2) 徽标没变也不播报：`biliUploads` 在每条 SSE 事件后都会被重拉，没变就是没变化。

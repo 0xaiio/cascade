@@ -76,6 +76,34 @@ export function isNotableSubtitle(state: BiliSubtitleState): boolean {
 /** 徽标里「还没上传」那一档。按钮文案要在这一档换成动作词（「上传」而不是「未上传」）。 */
 export const BADGE_NONE: BiliBadge = "none";
 
+/**
+ * 徽标里「已经传上去了」那一档。按钮在这一档改成「进入 B 站」——
+ * 再点一次只会投出第二条同名稿件，那不是用户此刻想做的事。
+ */
+export const BADGE_UPLOADED: BiliBadge = "uploaded";
+
+/** 「已上传」按钮点下去要打开的 B 站页面。
+ *
+ * 传进来的数组**只能放本次点击真正对应的稿件**：
+ *
+ * - 任务级放该任务的全部稿件（后端已按条目序号排过，取第一条有链接的 = 第一个视频）；
+ * - 条目级**只放这一条**，多一条都不给 —— 点第 3 集却打开第 1 集，比不给链接更糟：
+ *   用户会以为那就是第 3 集，然后去评论第 1 集。
+ *
+ * 返回 `null` 表示「本地没记下 bvid」。这不是异常：徽标可以由**合集已归集**派生而来，
+ * 那条路径下可能一条带链接的稿件都没有。调用方要据此退回「重新上传」那条老路，
+ * 而不是给一个点下去什么都不发生的绿按钮。
+ */
+export function uploadedTargetUrl(
+  uploads: readonly { video_url: string | null }[] | null | undefined
+): string | null {
+  if (!uploads) return null;
+  for (const upload of uploads) {
+    if (upload.video_url) return upload.video_url;
+  }
+  return null;
+}
+
 /** 一条稿件在任务卡片里是否**有话说**（值得渲染一行）。
  *
  * 字幕失败也要算：那条稿件本身可能已经 `published` 并且有 `video_url`（本来就会渲染），

@@ -1,6 +1,7 @@
 ﻿import { useEffect, useState } from "react";
 import { Check, ChevronDown, Copy, ExternalLink, FileX2, FolderOpen, Gauge, Pause, Play, RotateCcw, Trash2 } from "lucide-react";
 import type { BiliJobUploads, BiliUpload, Job, JobBatchAction, ResolutionFallback, SubtitleOpenMode } from "../types";
+import { uploadedTargetUrl } from "../biliStatus";
 import {
   formatBytesPerSecond,
   formatClock,
@@ -222,6 +223,10 @@ export function JobQueue({
                   badgeTone={jobBili?.badge_tone ?? IDLE_BADGE.badgeTone}
                   subject={title}
                   disabledReason={biliDisabledReason}
+                  // 任务级「已上传」点进去打开**第一个**稿件（`uploads` 已按条目序号排过）。
+                  // 合集页（`collectiondetail?sid=`）要账号 mid，前端不为此多引一次账号请求。
+                  openUrl={uploadedTargetUrl(jobBili?.uploads)}
+                  onOpenUrl={onOpenVideoPage}
                   onClick={() => onBiliUpload(job.id, isPlaylist ? null : primaryItem?.id ?? null)}
                 />
                 {isPlaylist && (
@@ -428,6 +433,9 @@ export function JobQueue({
                           disabledReason={
                             itemBiliBusy ? "正在上传中" : item.output_path ? null : "视频还没下载好"
                           }
+                          // 条目级只认这一条自己的链接：**不拿同任务别的稿件顶替**。
+                          openUrl={uploadedTargetUrl(itemBili ? [itemBili] : null)}
+                          onOpenUrl={onOpenVideoPage}
                           onClick={() => onBiliUpload(job.id, item.id)}
                         />
                         <button
