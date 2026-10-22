@@ -51,7 +51,10 @@ init 脚本底层调用的就是 `python -m app`，其进阶参数（`--port` / 
 
 ## 视频介绍
 
-6 分钟演示（真实解析、下载、任务中心与 B站 投稿全流程）：[B站 · BV1JQJY6LExf](https://www.bilibili.com/video/BV1JQJY6LExf)。文稿、字幕与制作说明见 [ai/promotion](ai/promotion/README.md)。
+- **完整上手（6 分 03 秒）**：克隆、启动、解析、下载、任务中心与 B站 投稿全流程 —— [B站 · BV1JQJY6LExf](https://www.bilibili.com/video/BV1JQJY6LExf)
+- **新特性（5 分 09 秒）**：字幕流水线、完成提醒、视频时长、B站 上传体验大修 —— [B站 · BV1EKn267E2T](https://www.bilibili.com/video/BV1EKn267E2T)
+
+文稿、字幕与制作说明见 [ai/promotion](ai/promotion/README.md)。
 
 视频基于提交 `0dd4b5d`（2026-10-17 投稿）制作；该提交之后 `main` 上的全部新功能与修复（字幕流水线、任务完成提醒、进程重启恢复、时长显示、B站 上传体验大修）逐条记录在 [更新日志](docs/changelog/CHANGELOG.md)，可作为下一支推广视频的素材清单；分支对比见 [BRANCH-DIFF](docs/changelog/BRANCH-DIFF.md)。
 
