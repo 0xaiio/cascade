@@ -749,7 +749,7 @@ README 快速启动当前混用了单端口托管和 Vite 开发模式，导致�
 检查 `docs/` 后确认已有系统上下文、组件、时序、生命周期和数据模型图，但没有按 4+1 架构视图明确组织逻辑、开发、进程、物理和场景视图。本次补齐专门文档与对应 UML 图，并把后续维护规则写入维护文档。
 
 ## Key Changes
-- 新增 [4+1 架构视图](../docs/4-plus-1-view.md)，覆盖逻辑视图、开发视图、进程视图、物理视图和场景视图。
+- 新增 [4+1 架构视图](../../docs/4-plus-1-view.md)，覆盖逻辑视图、开发视图、进程视图、物理视图和场景视图。
 - 新增 `four-plus-one-*.puml` 和对应 SVG 图，作为后续架构审查入口。
 - 更新 README、文档中心、架构设计和维护文档，要求后续涉及架构、模块边界、运行时流程、部署假设或关键用户场景的变更同步检查 4+1 视图。
 
@@ -769,7 +769,7 @@ README 快速启动当前混用了单端口托管和 Vite 开发模式，导致�
 - PlantUML 固定使用 Maven Central 的 `plantuml-mit-1.2026.5.jar`，首次执行自动下载到 `.tools/docs/` 并校验 SHA-256；`.tools/` 加入 Git 忽略。
 - 新增 `.editorconfig`，统一 Markdown 和 PlantUML 的 UTF-8、LF、末尾换行和行尾空格规则。
 - `check` 校验 README 和 `docs/**/*.md` 的本地链接、`.puml` 与 SVG 成对存在，以及 SVG 是否由当前 UML 源生成。
-- 新增 [文档写作与生成环境](../docs/documentation-workflow.md)，同步更新 README、开发、架构、4+1 物理视图、测试和维护文档。
+- 新增 [文档写作与生成环境](../../docs/documentation-workflow.md)，同步更新 README、开发、架构、4+1 物理视图、测试和维护文档。
 
 ## Test Plan
 - `python scripts\docs.py bootstrap`
