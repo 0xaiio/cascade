@@ -50,8 +50,13 @@ def test_should_not_look_for_fallback_when_format_id_is_explicit() -> None:
 
 @pytest.mark.parametrize("resolution", ["best", "hd", "1080", ""])
 def test_should_not_look_for_fallback_when_resolution_has_no_height(resolution: str) -> None:
-    """解析不出高度就没有"比它低"的定义，连元数据都不必取。"""
-    assert should_look_for_fallback(DownloadOptions(resolution=resolution)) is False
+    """解析不出高度就没有"比它低"的定义，连元数据都不必取。
+
+    `hd` / `1080` / `""` 现在在**入口**就会被 `schemas._normalize_resolution` 拒掉，所以这里
+    只能用 `model_construct` 造出来 —— 它代表的是**库里早于那次校验的行**。判定层仍然要能
+    安全地处理这种取值（返回 False），不能因为「入口挡住了」就假定它不存在。
+    """
+    assert should_look_for_fallback(DownloadOptions.model_construct(resolution=resolution)) is False
 
 
 def test_should_look_for_fallback_on_a_concrete_height() -> None:

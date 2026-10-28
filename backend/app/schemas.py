@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+import re
 from typing import Annotated, Literal, get_args
 
 from pydantic import BaseModel, Field, HttpUrl
@@ -35,6 +36,36 @@ UtcDateTime = Annotated[datetime, BeforeValidator(_as_aware_utc)]
 CompletionNotification = Literal["off", "sound", "toast", "both"]
 COMPLETION_NOTIFICATION_MODES: tuple[str, ...] = get_args(CompletionNotification)
 DEFAULT_COMPLETION_NOTIFICATION: CompletionNotification = "both"
+
+_RESOLUTION_PATTERN = re.compile(r"^[1-9]\d*p$")
+
+
+def _normalize_resolution(value: object) -> object:
+    """把清晰度收敛成 `best` 或 `<高度>p`，其余**报错**。
+
+    只做**无歧义**的改写：去首尾空白、转小写。不做猜测 —— `1080`（漏了 `p`）、`hd`、`1440p60`
+    各自可能意味着不同的东西，猜错一次的代价是「用户要 1440p，实际拿到 2160p」。
+
+    为什么必须挡在入口：`ytdlp_formats.format_selector()` 认不出这些写法，会**回落成
+    `bv*+ba/b`（最佳可用）**；`resolution_decisions.should_look_for_fallback()` 同样认不出它，
+    于是连降级链路都不会介入。表现是**静默换了画质**，界面上没提示、日志里一个字都没有
+    （实测 `1440P` 只差一个大小写，选择器就从 `[height=1440]` 变成 `bv*+ba/b`）。见 ai/bug-fix/026。
+    """
+    if not isinstance(value, str):
+        return value
+    text = value.strip().lower()
+    if text == "best" or _RESOLUTION_PATTERN.match(text):
+        return text
+    raise ValueError(
+        f"清晰度只接受 best 或 <高度>p（例如 1080p、1440p），收到 {value!r}。"
+        "请检查请求里的 resolution、设置里的「默认清晰度」，或环境变量 YTDL_DEFAULT_RESOLUTION。"
+    )
+
+
+# 所有对外的清晰度字段都用它：`DownloadOptions.resolution`、`RestartJobRequest.resolution`、
+# `SettingsUpdate.default_resolution`。三处都要 —— `JobManager._options_with_resolution()`
+# 用的是 `model_copy(update=...)`，**不触发** `DownloadOptions` 的校验，重启路径得自己挡。
+Resolution = Annotated[str, BeforeValidator(_normalize_resolution)]
 
 
 class AnalyzeRequest(BaseModel):
@@ -81,7 +112,7 @@ class AnalyzeResponse(BaseModel):
 
 class DownloadOptions(BaseModel):
     mode: DownloadMode = "video_subtitles"
-    resolution: str = "1440p"
+    resolution: Resolution = "1440p"
     format_id: str | None = None
     subtitle_languages: list[str] = Field(default_factory=list)
     subtitle_source: SubtitleSource = "both"
@@ -104,7 +135,7 @@ class CreateJobRequest(BaseModel):
 
 
 class RestartJobRequest(BaseModel):
-    resolution: str | None = None
+    resolution: Resolution | None = None
 
 
 class JobBatchActionRequest(BaseModel):
@@ -230,7 +261,7 @@ class SettingsUpdate(BaseModel):
     download_dir: str | None = None
     default_concurrency: int | None = Field(default=None, ge=1)
     default_subtitle_languages: list[str] | None = None
-    default_resolution: str | None = None
+    default_resolution: Resolution | None = None
     default_speed_limit_kbps: int | None = Field(default=None, ge=1)
     default_retries: int | None = Field(default=None, ge=0, le=20)
     aria2c_connections: int | None = Field(default=None, ge=1, le=4)

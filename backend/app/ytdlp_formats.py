@@ -11,10 +11,10 @@ def format_selector(options: DownloadOptions, allow_merge: bool = True, prefer_h
         return single_file_format_selector(options)
     if options.format_id:
         return f"{options.format_id}+ba/{options.format_id}"
-    if options.resolution == "best":
+    if options.resolution.strip().lower() == "best":
         return "b[protocol^=m3u8]/bv*+ba/b" if prefer_hls else "bv*+ba/b"
-    if options.resolution.endswith("p") and options.resolution[:-1].isdigit():
-        height = int(options.resolution[:-1])
+    height = resolution_height(options.resolution)
+    if height is not None:
         selector = (
             f"bv*[height={height}][ext=mp4][vcodec^=avc1]+ba[ext=m4a][acodec^=mp4a]/"
             f"bv*[height={height}][ext=mp4]+ba[ext=m4a]/"
@@ -31,8 +31,8 @@ def format_selector(options: DownloadOptions, allow_merge: bool = True, prefer_h
 def single_file_format_selector(options: DownloadOptions) -> str:
     if options.format_id:
         return options.format_id
-    if options.resolution.endswith("p") and options.resolution[:-1].isdigit():
-        height = int(options.resolution[:-1])
+    height = resolution_height(options.resolution)
+    if height is not None:
         return f"b[height={height}][ext=mp4]/b[height={height}]"
     return "best[ext=mp4]/best"
 
@@ -156,12 +156,20 @@ def short_codec(value: Any) -> str | None:
 
 
 def resolution_height(resolution: str) -> int | None:
-    if not resolution.endswith("p"):
+    """`1440p` → 1440；`best`、`1080`（漏 p）、`hd` 一律 `None`。
+
+    **大小写不敏感**（`1440P` 也算 1440）：API 入口已经把取值归一化了（`schemas._normalize_resolution`），
+    但库里可能存着早于那次校验的行 —— 它们以前会被静默当成 `best`，现在按真实高度处理。
+    这里是「`<n>p` 怎么解析」的**唯一实现**，选择器与降级判定都调它，避免三份各自漂移。
+    """
+    text = resolution.strip().lower()
+    if not text.endswith("p"):
         return None
-    value = resolution[:-1]
+    value = text[:-1]
     if not value.isdigit():
         return None
-    return int(value)
+    height = int(value)
+    return height if height > 0 else None
 
 
 def suggest_lower_resolution(
