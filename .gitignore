@@ -35,3 +35,7 @@ cookies*.txt
 Thumbs.db
 .vscode/
 .idea/
+
+# 覆盖率数据文件（coverage run 的产物）
+.coverage
+coverage.json

@@ -56,6 +56,8 @@
 | [026](026-a-resolution-that-silently-means-best.md) | 清晰度写成 `1440P`，静默下了最高画质 | `5d5b228` | `DownloadOptions.resolution` 没有任何校验，而 `format_selector()` 认不出大小写/漏 `p` 的写法时会回落成 `bv*+ba/b`（最佳可用），`should_look_for_fallback()` 同样认不出、连降级都不介入 ⇒ **不按用户要求做，也不告诉任何人**。三个入口（建任务 / 重启 / 默认清晰度）加归一化与校验，重启那条必须单独挡（`model_copy` 不触发校验） |
 | [027](027-sse-disconnect-keeps-the-listener.md) | SSE 断开后订阅者没注销，每个关掉的标签页留一个无界队列 | `ba10f37` | `async for` **不会**关闭子异步生成器（PEP 525 老坑）⇒ `EventBroker.subscribe()` 的 `finally` 要等 GC 才跑，期间断开的订阅者仍被逐个喂消息。路由里显式 `aclose()` 订阅对象，注销判据仍只在 `EventBroker` 一处 |
 | [028](028-upload-timestamp-test-races-the-worker.md) | 时间戳用例与 worker 抢时序，同一份代码跑三次两种结果 | 本次 | 用例用的是**真的** `BiliManager`，`POST` 返回时上传还在跑；worker 收尾写 `finished_at`，与用例手工写值抢先后 —— 谁在后谁生效。证据是只有 `finished_at` 被改成「现在」而 `started_at` 没动。夹具里本来就有 `wait_until_finished`，这条漏了调用；改后整文件 3/3 绿、全量 2/2 绿 |
+| [029](029-open-with-list-is-never-read.md) | 自带「打开方式」的清单里，系统登记的一个都不在里面 | `—` | `_registered_handlers` 读 `OpenWithList` 时用 `name.isdigit()` 判「不是程序项」，而真实键名是 `a`/`b`/`c`/`MRUList` ⇒ **两个来源恒为空**；即便过滤修好，值也只是裸 exe 名（`QQ.exe`），`is_file()` 仍为假；第三个来源在 ProgID 没有显示名时把 GUID 印给用户。修法：只跳过 `MRUList`、裸名经 `PATH` / `App Paths` 解析、标识不当作名字 |
+| [030](030-the-layer-check-blames-the-wrong-thing.md) | 分层校验把「反向依赖」报成「模块没登记」 | `—` | `imports_of` 对 `from ..pkg import submod` 只记到 `pkg`（真实依赖是 `pkg/submod`）⇒ 目标未登记，先撞上「未登记」分支，方向判据根本没执行。照着这条报错去补文档，反向依赖就被永久掩盖。修法：用「该子模块是否真实存在」把它与符号分开；顺手补 15 条用例（这个闸门此前零测试） |
 
 ## 本轮（2026-10-01）背景
 
@@ -184,6 +186,28 @@ TOTAL 89%），再逐个看**未覆盖的行本身**是不是也可能错 ——
 详见「已知但未处理」第 25 条 —— 这条比本轮修的三个缺陷都更值得记住，
 因为它会让**任何**一次「测试全绿」变成不可信的结论。
 
+## 本轮（2026-10-28 晚）背景：靶子是**重构过的模块**
+
+输入是「全面审查 + 重点看最近几次提交里重构过的模块」。这一天两次重构（[011](../refactor/011-flat-modules-into-feature-packages.md)
+后端分包、[013](../refactor/013-frontend-feature-directories.md) 前端分目录）都是**纯移动**：只挪不改名、
+行数不变，验证数据也齐全（用例数逐数相同）。纯移动的回归风险只有一个方向 ——
+**靠 `__file__` 深度或字符串路径推算**的东西：
+
+- `contracts/config.py` 的 `REPO_ROOT` 从 `parents[2]` 改成 `parents[3]`，改对了，
+  但**没有任何测试守它**：`test_dev_server.py` 那条 `env_file == REPO_ROOT / ".env"` 是自证
+  （`env_file` 本来就是用它定义的），改错照样绿。改错的后果不是导入失败，而是默认目录悄悄
+  挪到 `backend/data` —— 应用照常启动、建一个空库，旧任务像是全丢了。新增
+  `test_config_paths.py`（3 条）从**外部事实**判：仓库根下必须有 `backend/app/main.py` 与
+  `frontend/package.json`。
+- 模块路径的**字符串**形态（monkeypatch 目标、日志里的模块名）导入期不报错，只在某条分支
+  被触发时才炸。逐个检索了 `app.<扁平名>` 的残留，只剩 `app.main`（没搬过），干净。
+- 重构 011 顺手重写了 `check_layers.py`，而它**零测试** —— 见 [030](030-the-layer-check-blames-the-wrong-thing.md)。
+
+主产出是 [029](029-open-with-list-is-never-read.md)：`host/system_open.py` 是覆盖率的最后一块
+洼地（**40%**，562 行里 338 行未覆盖），也是本日改动最多的模块之一。它的「打开方式」候选清单里
+两个来源恒定为空，而**那条测试恰好把该函数整个替换成了假的**，所以一直全绿。
+
+
 ## 已知但**未处理**的问题（下一轮候选）
 
 1. ~~**应用没有代理配置项。**~~ → 已由 [006](006-proxy-is-not-configurable.md) 处理。
@@ -295,3 +319,8 @@ TOTAL 89%），再逐个看**未覆盖的行本身**是不是也可能错 ——
    现在会明确报错而不是静默降级。要支持得先想清楚界面怎么表达「清晰度 × 帧率」。
 28. **SSE 没有背压**（027 遗留）。慢消费者仍会积压（无界队列，有意为之：不能阻塞其他订阅者）。
    本轮只修了「断开后不注销」，没动「连接着但读得慢」。
+29. **自带对话框列不出 AppX 包程序**（029 遗留）。`…!App` 这类包标识要用
+   `IApplicationActivationManager` 启动，而自带对话框是 `subprocess.Popen([exe, path])`。
+   现在明确丢掉而不是列出来点不动；系统那两级仍能列出它们。
+30. **裸 exe 名解析不出来就没了**（029 遗留）。本机 `.mp4` 的 `QQ.exe` / `Everything.exe`
+   既不在 `PATH` 也不在 `App Paths`，实测解析为 `None`。再往下只能全盘搜索，不值得。

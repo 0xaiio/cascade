@@ -22,15 +22,15 @@ python -m pytest backend\tests -q
 > 沙箱的批量删除守卫是**累积计数**的（一轮命令内累计到阈值就整条拒掉），于是 1069 个用例放在一个进程里跑会在中途被拦下。
 > 现象很好认：**大量 `at setup of ...` 的 error，而 `FAILED` 一个都没有** —— 那是环境问题，不是代码问题。
 >
-> 按下面的分块跑，六块相加应恰好等于 1223（各块 116～242 项；若某块仍被拦下，继续拆小即可）：
+> 按下面的分块跑，六块相加应恰好等于 1274（各块 116～242 项；若某块仍被拦下，继续拆小即可）：
 >
 > ```powershell
-> python -m pytest backend\tests\test_bili_policy.py backend\tests\test_bili_meta.py backend\tests\test_bili_auth.py backend\tests\test_bili_bin.py -q -p no:cacheprovider --basetemp=tmp_pytest\a   # 202
-> python -m pytest backend\tests\test_bili_read_model.py backend\tests\test_bili_subtitle.py backend\tests\test_bili_api.py -q -p no:cacheprovider --basetemp=tmp_pytest\b                                            # 187
-> python -m pytest backend\tests\test_bili_upload.py backend\tests\test_bili_manager.py backend\tests\test_api_bilibili.py -q -p no:cacheprovider --basetemp=tmp_pytest\c                                                # 216
+> python -m pytest backend\tests\test_bili_policy.py backend\tests\test_bili_meta.py backend\tests\test_bili_auth.py backend\tests\test_bili_bin.py -q -p no:cacheprovider --basetemp=tmp_pytest\a   # 221
+> python -m pytest backend\tests\test_bili_read_model.py backend\tests\test_bili_subtitle.py backend\tests\test_bili_api.py -q -p no:cacheprovider --basetemp=tmp_pytest\b                                            # 201
+> python -m pytest backend\tests\test_bili_upload.py backend\tests\test_bili_manager.py backend\tests\test_api_bilibili.py -q -p no:cacheprovider --basetemp=tmp_pytest\c                                                # 242
 > python -m pytest backend\tests\test_ytdlp_service.py backend\tests\test_subtitle_plan.py backend\tests\test_subtitle_recording.py backend\tests\test_api.py -q -p no:cacheprovider --basetemp=tmp_pytest\d                # 224
-> python -m pytest backend\tests\test_resolution_decisions.py backend\tests\test_output_paths.py backend\tests\test_safe_delete.py backend\tests\test_system_open.py backend\tests\test_dev_server.py backend\tests\test_proxy.py backend\tests\test_cookie_health.py backend\tests\test_stall_guard.py backend\tests\test_ytdlp_formats.py backend\tests\test_resolution_input.py backend\tests\test_job_routes.py -q -p no:cacheprovider --basetemp=tmp_pytest\e   # 219
-> python -m pytest backend\tests\test_error_advice.py backend\tests\test_connectivity.py backend\tests\test_download_progress.py backend\tests\test_runtime_env.py backend\tests\test_job_manager_finally.py backend\tests\test_finally_guards.py backend\tests\test_orphan_recovery.py backend\tests\test_completion_notification.py backend\tests\test_db.py backend\tests\test_logging_setup.py backend\tests\test_paths.py backend\tests\test_transfer_stats.py backend\tests\test_progress_persist.py backend\tests\test_log_safety.py backend\tests\test_events.py backend\tests\test_job_artifacts.py backend\tests\test_bili_http.py -q -p no:cacheprovider --basetemp=tmp_pytest\f   # 116
+> python -m pytest backend\tests\test_resolution_decisions.py backend\tests\test_output_paths.py backend\tests\test_safe_delete.py backend\tests\test_system_open.py backend\tests\test_open_with_registry.py backend\tests\test_dev_server.py backend\tests\test_config_paths.py backend\tests\test_proxy.py backend\tests\test_cookie_health.py backend\tests\test_stall_guard.py backend\tests\test_ytdlp_formats.py backend\tests\test_resolution_input.py backend\tests\test_job_routes.py -q -p no:cacheprovider --basetemp=tmp_pytest\e   # 255
+> python -m pytest backend\tests\test_error_advice.py backend\tests\test_connectivity.py backend\tests\test_download_progress.py backend\tests\test_runtime_env.py backend\tests\test_job_manager_finally.py backend\tests\test_finally_guards.py backend\tests\test_check_layers.py backend\tests\test_orphan_recovery.py backend\tests\test_completion_notification.py backend\tests\test_db.py backend\tests\test_logging_setup.py backend\tests\test_paths.py backend\tests\test_transfer_stats.py backend\tests\test_progress_persist.py backend\tests\test_log_safety.py backend\tests\test_events.py backend\tests\test_job_artifacts.py backend\tests\test_bili_http.py -q -p no:cacheprovider --basetemp=tmp_pytest\f   # 131
 > ```
 >
 > 上面的块内数字不用手数：`python -m pytest backend\tests --collect-only -q -p no:cacheprovider` 会逐条打印用例 id，
@@ -119,11 +119,11 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 
 ## 后端测试范围
 
-后端测试位于 [backend/tests](../backend/tests/)（42 个 `test_*.py` + [fakes.py](../backend/tests/fakes.py) / [bili_fakes.py](../backend/tests/bili_fakes.py)，当前 **1223 passed**）：
+后端测试位于 [backend/tests](../backend/tests/)（45 个 `test_*.py` + [fakes.py](../backend/tests/fakes.py) / [bili_fakes.py](../backend/tests/bili_fakes.py)，当前 **1274 passed**）：
 
 > **数字必须自己数一遍**，不要只信 `-q` 的汇总行。逐文件规模用
 > `pytest backend/tests/<文件> -q -p no:cacheprovider --co` 取，各文件之和应**恰等于**全集
-> （2026-10-28 实测：42 个文件逐项相加 = 1223 = 全集）。历史上有过把「收集不全的那一次」当成
+> （2026-10-28 实测：45 个文件逐项相加 = 1274 = 全集）。历史上有过把「收集不全的那一次」当成
 > 基线的教训（见过 267 / 286 / 289 三个数，真实基线一直是当时的 913）。
 
 > **夹具里被 worker 认领的状态会让「同步断言写库结果」变成竞态**（2026-10-21 修掉一条）：
@@ -161,8 +161,11 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 | [test_safe_delete.py](../backend/tests/test_safe_delete.py) | 删除白名单的路径安全判定：根目录与子孙放行，父目录、无关绝对路径、以及**共享字符串前缀的兄弟目录**一律拒绝，Windows 大小写差异视为同一根（见 [ai/refactor/005](../ai/refactor/005-safe-delete.md)）。 |
 | [test_proxy.py](../backend/tests/test_proxy.py) | 代理**解析**：`direct` 哨兵、显式 > 系统 > 环境变量的优先级、环境变量只报告不落盘、`no_proxy` 绕过与凭据脱敏。 |
 | [test_dev_server.py](../backend/tests/test_dev_server.py) | 端口预检与「谁占了这个端口」：`netstat` / `tasklist` 输出解析、可用端口向后查找、`YTDL_API_PORT` 默认值与 `.env` 锚定仓库根（[009](../ai/bug-fix/009-local-dev-port-is-occupied-and-unconfigurable.md)）。 |
+| [test_config_paths.py](../backend/tests/test_config_paths.py) | 仓库根与默认目录（3 条）。`REPO_ROOT` 从**外部事实**判（仓库根下必须有 `backend/app/main.py` 与 `frontend/package.json`），`data_dir`/`download_dir`/`database_path` 必须由它派生，`.env` 必须是绝对路径。守的是 `app/` 分包后 `parents[2] → parents[3]` 那处改动 —— 改错的症状是「默认目录悄悄挪到 `backend/`、建一个空库」，而不是导入失败。 |
 | [test_system_open.py](../backend/tests/test_system_open.py) | 本地打开：Windows 目录开新窗口、文件走默认关联、有可用播放器时优先、无可用播放器时如实报告缺失。另加 14 条关于「打开方式」的：**没有关联（`WinError 1155`）时改弹对话框**、其它错误照原样抛（别把「拒绝访问」变成弹窗）、**系统对话框健康时优先用它**、**降级提示框要被关掉而不是当成选择器**、**降级后只给第二条系统入口一半的等待时间**、**对话框一出现就认领并返回**、**始终不出现要抛 `LocalOpenError` 且文案带下一步**、**取消不算失败**、**选中后按 `[exe, 文件]` 启动**、**已有窗口时不再叠一个**、候选 = 系统登记 + 本机编辑器且去重、候选只留真实存在的 exe、命令字符串取可执行文件、非 Windows 退化成默认打开。 |
+| [test_open_with_registry.py](../backend/tests/test_open_with_registry.py) | 「打开方式」的**候选来源**（[029](../ai/bug-fix/029-open-with-list-is-never-read.md)，33 条）：`OpenWithList` 的键名是 `a`/`b`/`c` 而 `MRUList` 只是顺序（**过滤条件写反过一次，两个来源因此恒为空**）、裸 exe 名经 `PATH` 与 `App Paths` 两级解析、AppX 包标识与已卸载路径都要丢掉、ProgID 有显示名就用它没有就退回 exe 名、命令为空的行不产出垃圾条目、候选清单按路径与名字各去重一次、`%VAR%` 与 `*` 的展开。注册表用**假 `winreg`**（替换 `sys.modules`，函数内 `import`），不读也不改本机真实注册表。 |
 | [test_finally_guards.py](../backend/tests/test_finally_guards.py) | **守护测试**：扫源码禁止 `finally` 里出现 `return`；自带「违规能被抓到」「嵌套作用域里的 `return` 不算违规」两条自检。 |
+| [test_check_layers.py](../backend/tests/test_check_layers.py) | 分层闸门自身（[030](../ai/bug-fix/030-the-layer-check-blames-the-wrong-thing.md)，15 条）：矩阵解析只认「层号在格子开头」（目录说明表不能被当成层登记）、一行多链接逐条登记、包链接记成包键、层号回退到最近的已登记祖先、相对导入按 `level` 折算、**`from ..pkg import submod` 要记成 `pkg/submod` 而不是 `pkg`**（否则「反向依赖」会被报成「模块没登记」）、绝对导入不在检查范围、以及整条闸门在当前仓库返回 0、注入未登记模块/反向依赖时返回 1 且诊断类别正确。 |
 | [test_job_manager_finally.py](../backend/tests/test_job_manager_finally.py) | 行为层回归：条目被删除时收尾不再吞掉逃逸中的异常，崩溃的条目被判 `failed` 而不是永久停在 `running`（[008](../ai/bug-fix/008-return-in-finally-swallows-the-real-error.md)）。 |
 | [test_orphan_recovery.py](../backend/tests/test_orphan_recovery.py) | 启动时的孤儿条目收敛（[015](../ai/bug-fix/015-orphan-items-never-resume.md)）：残留 `queued`/`running` 被重新排队且进度清空、`paused` 任何策略下都不动、**正在被取消**的任务不被恢复、所属任务已消失的条目被取消、`fail` 策略只标失败不下载、恢复顺序按任务创建时间与条目序号；另有三条走 `TestClient` lifespan 的端到端 —— **不做任何操作**、只启动应用，孤儿任务自己跑到 `succeeded`，并留下 `jobs_recovered` 事件作为「恢复真的发生过」的正面证据。 |
 | [fakes.py](../backend/tests/fakes.py) | API 测试的 fake service 和辅助对象，其中 `RaisingUnselectableProbeService` 刻意让 `prepare_download` **抛异常**而不是返回 `is_selectable=False` —— 复现真实 yt-dlp 的行为，防止降级分支再次退化成死代码。 |

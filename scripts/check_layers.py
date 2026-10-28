@@ -101,12 +101,17 @@ def layer_of(key: str, layers: dict[str, int]) -> int | None:
     return None
 
 
-def imports_of(path: Path) -> set[str]:
+def imports_of(path: Path, known: set[str] | None = None) -> set[str]:
     """模块里的包内相对 import（`from ..x import …` / `from . import x`），解析成模块键。
 
     要按 `level` 折算：模块搬到 `download/` 之后，「上一层」不再等于「包根」。
     只认相对导入是有意的 —— 包内一律写相对导入（绝对导入绕开了这条校验），
     这正是文档里「依赖方向」那条规则能被机器检查的前提。
+
+    `known` 是「真实存在的模块键」集合，用来区分 `from ..api import api_support` 里
+    `api_support` 是**子模块**还是**符号**：前者应记成 `api/api_support`，后者只能记成 `api`。
+    不分清的话，`from ..api import api_support` 会被记成 `api` —— 而 `api` 从未在矩阵里登记，
+    于是「依赖方向朝上」被报成「指向未登记的模块」，把人引去改文档而不是改代码。
     """
     relative = path.relative_to(APP_DIR).with_suffix("")
     package = relative.as_posix().split("/")
@@ -120,11 +125,23 @@ def imports_of(path: Path) -> set[str]:
             continue
         base = package[: len(package) - (node.level - 1)]
         if node.module:
-            targets.add("/".join([*base, *node.module.split(".")]))
+            key = "/".join([*base, *node.module.split(".")])
+            targets.add(_prefer_existing_module(key, [alias.name for alias in node.names], known))
         else:
             for alias in node.names:
                 targets.add("/".join([*base, alias.name]))
     return targets
+
+
+def _prefer_existing_module(key: str, names: list[str], known: set[str] | None) -> str:
+    """`from ..pkg import thing` 里 `thing` 确实是模块时，把依赖细化到 `pkg/thing`。"""
+    if not known:
+        return key
+    for name in names:
+        candidate = f"{key}/{name}"
+        if candidate in known:
+            return candidate
+    return key
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -140,6 +157,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     modules = actual_modules()
+    known = set(modules)
     problems: list[str] = []
 
     for key, path in sorted(modules.items()):
@@ -147,7 +165,7 @@ def main(argv: list[str] | None = None) -> int:
         if source_layer is None:
             problems.append(f"{key}.py 没有登记在 docs/design.md 的模块职责矩阵里")
             continue
-        for target in sorted(imports_of(path)):
+        for target in sorted(imports_of(path, known)):
             target_layer = layer_of(target, layers)
             if target_layer is None:
                 problems.append(f"{key}.py 里的 `from .{target.replace('/', '.')}` 指向未登记的模块")
