@@ -54,7 +54,7 @@ YouTube Downloader 是本机单用户工具。前端提供链接解析、下载�
 
 ## 下载选项
 
-下载选项的数据结构由 [DownloadOptions](../backend/app/schemas.py#L82) 定义，前端对应类型见 [types.ts](../frontend/src/types.ts#L43)。
+下载选项的数据结构由 [DownloadOptions](../backend/app/schemas.py#L113) 定义，前端对应类型见 [types.ts](../frontend/src/types.ts#L43)。
 
 | 选项 | 行为 |
 | --- | --- |
@@ -94,7 +94,7 @@ YouTube Downloader 是本机单用户工具。前端提供链接解析、下载�
 
 ## 任务中心
 
-任务中心展示任务级和子视频级状态。后端 API 返回的字段见 [JobRead](../backend/app/schemas.py#L168) 和 [JobItemRead](../backend/app/schemas.py#L129)，前端展示组件见 [JobQueue](../frontend/src/components/JobQueue.tsx#L24)。
+任务中心展示任务级和子视频级状态。后端 API 返回的字段见 [JobRead](../backend/app/schemas.py#L199) 和 [JobItemRead](../backend/app/schemas.py#L160)，前端展示组件见 [JobQueue](../frontend/src/components/JobQueue.tsx#L24)。
 Playlist 展开后会用浅色分组背景承载子视频列表，便于区分合集任务行和单个视频任务。
 
 | 信息 | 说明 |

@@ -8,6 +8,8 @@
 
 用户只选择清晰度；后端自动选择格式。选择器实现位于 [ytdlp_formats.py](../backend/app/ytdlp_formats.py#L9)。
 
+清晰度的取值在**入口**就收敛成 `best` 或 `<高度>p`（`schemas._normalize_resolution`：去空白、转小写，`1080P` → `1080p`），其余写法直接 422。理由：选择器认不出 `1080`/`hd`/`1440p60` 时会回落成 `bv*+ba/b`（最佳可用），而 `resolution_decisions` 也认不出、连降级都不介入 —— **不按用户要求做，也不告诉任何人**，见 [026](../ai/bug-fix/026-a-resolution-that-silently-means-best.md)。
+
 数字清晰度如 `1080p` 的优先级：
 
 1. 同高度 `mp4`/H.264 视频 + `m4a`/AAC 音频。
@@ -81,7 +83,7 @@ yt-dlp 对「请求的语言不存在」是静默跳过（不报错），所以�
 | `requested_resolution_unselectable` | 元数据显示目标清晰度存在，但当前 selector 选不出可下载组合。 | 是，只降到 720p 或更高的安全清晰度。 |
 | `media_stream_blocked` | 目标清晰度媒体流被 403、连接重置、超时或 TLS 错误阻断。 | 否，只提供较低清晰度重启建议。 |
 
-720p 底线由 [DEFAULT_MIN_AUTO_FALLBACK_HEIGHT](../backend/app/ytdlp_formats.py#L6) 定义，`resolution_decisions` 以 `MIN_AUTO_FALLBACK_HEIGHT` 暴露同一常量。候选计算见 [suggest_lower_resolution](../backend/app/ytdlp_formats.py#L167)；「要不要放弃自动降级、以及为什么」的判定不在那里，在 `resolution_decisions` 的四个 `decide_*` 函数里。
+720p 底线由 [DEFAULT_MIN_AUTO_FALLBACK_HEIGHT](../backend/app/ytdlp_formats.py#L6) 定义，`resolution_decisions` 以 `MIN_AUTO_FALLBACK_HEIGHT` 暴露同一常量。候选计算见 [suggest_lower_resolution](../backend/app/ytdlp_formats.py#L175)；「要不要放弃自动降级、以及为什么」的判定不在那里，在 `resolution_decisions` 的四个 `decide_*` 函数里。
 
 ## 稳定下载策略
 
