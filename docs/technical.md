@@ -476,6 +476,19 @@ notepad / VS Code / Sublime 只能是它的子集：用户装了别的我们不�
   写字板在 Win11 24H2 已被移除，所以不出现）；
 - **「浏览…」**兜住剩下的：文件对话框从 `Program Files` 起步、默认只显示 `.exe`（普通用户不知道程序装在哪）。
 
+**登记表里的值不是路径，必须先解析。** `OpenWithList` 存的是裸 exe 名（`QQ.exe`）或 AppX 包标识
+（`…!App`），`Path(value).is_file()` 对前者也是假（那是相对工作目录找）。所以取值一律过
+`_resolve_executable`：带分隔符的按路径判存在，裸名走 `PATH` → `App Paths`，`…!App` 直接放弃
+（它要用 `IApplicationActivationManager` 启动，不是 `Popen` 能开的）。解析不出来的一律**在源头丢掉**，
+不留 `(名字, "")` 这种点了没反应的行。
+
+判据也是这里的坑：`OpenWithList` 的键名是 `a` / `b` / `c`（程序项）与 `MRUList`（记录它们的顺序），
+只有 `MRUList` 不是程序项。曾经写成 `name.isdigit()` —— 真实键名一个都不是数字，于是**两个来源
+恒为空**，界面上表现为「清单里只有编辑器，没有我平时用来打开这类文件的那个程序」。
+显示名同理：ProgID 没有登记显示名时（`Toolbox.Air.b9908000-…`）退回可执行文件名，
+不要把标识印给用户。见 [029](../ai/bug-fix/029-open-with-list-is-never-read.md)。
+
+
 **五、窗口出现了就算成功；没出现必须报错；点取消不算失败。** 旧实现只能「204 空转」：界面看起来点过了，
 其实什么都没发生。现在整条链超时（6s）仍没有任何窗口，就抛 `LocalOpenError`，接口回 400，前端把原因
 写在**那一行**。已有窗口时再点**不再叠一个**，而是提示「先在那个窗口里选完」；用户点「取消」则静默返回。
@@ -485,7 +498,7 @@ notepad / VS Code / Sublime 只能是它的子集：用户装了别的我们不�
 **六、前台：先等它自己上来，超时才抢；自带对话框钉 topmost。** 用户点的是浏览器，窗口是我们的后台
 进程画的，Windows 的前台锁默认拒绝后台进程 `SetForegroundWindow`。但**提前抢更糟**：窗口刚创建时它
 自己在激活，这时去抢会被拒，而且被拒之后它就不再自行激活 —— 实测「提前抢 → 前台始终是浏览器；
-不碰它 → 对话框自己上来」。所以顺序是：先给它 1.2s 自己上来（[_ensure_dialog_foreground](../backend/app/host/system_open.py#L777)），
+不碰它 → 对话框自己上来」。所以顺序是：先给它 1.2s 自己上来（[_ensure_dialog_foreground](../backend/app/host/system_open.py#L871)），
 确实没上来才用 `AttachThreadInput` 接管前台线程的输入队列再抢。自带对话框另外声明 `-topmost`：
 即使焦点被别的窗口抢走，它仍然压在最上面（真机探针量 `WS_EX_TOPMOST`）。
 
@@ -496,12 +509,12 @@ notepad / VS Code / Sublime 只能是它的子集：用户装了别的我们不�
 
 **八、没有关联不是错误。** 在干净的 Windows 上对一个 `.srt` 调 `os.startfile`，抛的是
 `OSError [WinError 1155] 没有应用程序与此操作的指定文件有关联`。这不是「打不开」，是「还没人认领这个
-后缀」—— 正确反应是像资源管理器那样**弹「打开方式」**（[open_path_with_default_app](../backend/app/host/system_open.py#L79)
+后缀」—— 正确反应是像资源管理器那样**弹「打开方式」**（[open_path_with_default_app](../backend/app/host/system_open.py#L90)
 里只对这一种 `winerror` 降级，其它错误照原样抛：把「拒绝访问」也悄悄变成弹窗，就是把真问题藏起来）。
 这条路现在只有接口的 `?mode=default` 会走到。
 
 其它平台没有等价的「选择器」（macOS 的 `open -a` 要的是应用名，Linux 的 `xdg-open` 只有默认），
-`mode=chooser` 在那里退化成默认打开，见 [open_path_with_chooser](../backend/app/host/system_open.py#L97)。
+`mode=chooser` 在那里退化成默认打开，见 [open_path_with_chooser](../backend/app/host/system_open.py#L108)。
 
 前端因此是**一颗**按钮（[SubtitleOpenButton](../frontend/src/task-center/SubtitleOpenButton.tsx#L19)），
 `title="打开字幕文件；可选择打开方式"`，点下去就是选择器。它曾经是**组合控件**（主段 + 右侧 20px 箭头）：

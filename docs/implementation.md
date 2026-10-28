@@ -238,7 +238,7 @@ B站 上传的界面由四个组件加一个图标组成：[BiliIcon](../fronten
 本机打开器位于 [system_open.py](../backend/app/host/system_open.py)。打开目录时显式调用 `explorer.exe /n, <folder>` 并尽量把窗口置前，减少已有窗口只在任务栏闪烁但没有前置的情况。播放视频不再盲目使用默认文件关联，而是优先选择 VLC、mpv、PotPlayer、MPC、IINA 等可确认解码能力更强的播放器；常见 MP4 可回退到 Windows Media Player。找不到合适播放器时返回 `409`，错误内容包含当前格式和建议安装的播放器。
 
 **打开字幕不挑程序**：`POST /api/jobs/{job_id}/open-subtitle` 与条目级同名接口把
-`JobItem.subtitle_path` 交给系统 —— 缺省（界面走的就是这条）弹**应用自带的「打开方式」对话框**，候选读系统注册表为该后缀登记的处理器（见 [open_path_with_chooser](../backend/app/host/system_open.py#L97)）；
+`JobItem.subtitle_path` 交给系统 —— 缺省（界面走的就是这条）弹**应用自带的「打开方式」对话框**，候选读系统注册表为该后缀登记的处理器（见 [open_path_with_chooser](../backend/app/host/system_open.py#L108)）；
 `?mode=default` 才走文件关联，Windows 上该后缀还没有关联程序时**自动改弹对话框**而不是把 `WinError 1155` 抛给用户。
 三级链按顺序处理：**系统两条入口先试**（`SHOpenWithDialog` → `OpenAs_RunDLL`），**判据是窗口高度不是窗口存在**
 （降级提示框 680×118、选择器约 700×500），都不成才用**自带对话框**（候选 = 系统登记的处理程序 + 本机真实存在的常见编辑器 + 「浏览…」）；

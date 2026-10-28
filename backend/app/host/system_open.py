@@ -3,6 +3,7 @@ from ctypes import wintypes
 from dataclasses import dataclass
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -42,6 +43,16 @@ OPEN_WITH_HOST_WAIT_SECONDS = 1.6
 # 第一级已经弹出「若要更改默认应用…」提示框时，只给它一半时间：两条路走的是**同一套**系统 UI，
 # 那套 UI 降级时这条路也不会起来（实测 0/6 次）。留给它一个短窗口，是怕万一两者会分叉。
 OPEN_WITH_HOST_WAIT_AFTER_NOTICE_SECONDS = 0.8
+
+# `OpenWithList` 里的键名是 `a` / `b` / `c`（程序项）与 `MRUList`（记录它们的先后顺序）。
+# 只有 `MRUList` 不是程序项 —— 判据是**键名等于它**，不是「键名是不是数字」。
+OPEN_WITH_MRU_VALUE = "MRUList"
+
+# `AppX4ztf…`、`Toolbox.Air.b9908000-346e-4c93-ac4a-3f3799308eae`、`<包名>!App`：
+# 这些是包标识 / ProgID，把原文印进对话框等于让用户读一串十六进制。
+_MACHINE_ID_RE = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE
+)
 
 # 整条链等窗口出现的总时限（系统两路 + 自带对话框），超过就当失败。
 OPEN_WITH_APPEAR_TIMEOUT_SECONDS = 6.0
@@ -398,8 +409,9 @@ def _program_candidates(ext: str) -> list[ProgramCandidate]:
             return  # 比如记事本同时命中 System32 与 WindowsApps 的别名
         seen_paths.add(key)
         seen_names.add(name.lower())
-        # `AppX4ztfk9wxr86nxmzzq47px0nh0e58b8fw` 这种是包标识，不是给人看的名字。
-        label = exe.stem if not name or name.startswith("AppX") else name
+        # `AppX4ztfk9wxr86nxmzzq47px0nh0e58b8fw`、`Toolbox.Air.b9908000-…` 这种是包标识 /
+        # ProgID，不是给人看的名字：一律退回可执行文件名。
+        label = exe.stem if _looks_like_machine_id(name) else name
         entries.append(ProgramCandidate(label, exe))
 
     for name, executable in _registered_handlers(ext):
@@ -416,6 +428,12 @@ def _registered_handlers(ext: str) -> list[tuple[str, str]]:
       - `HKCU\\...\\FileExts\\<ext>\\OpenWithList`（用户用过的，带 MRU 顺序）；
       - `HKCR\\<ext>\\OpenWithList`（按 exe 名登记）；
       - `HKCR\\<ext>\\OpenWithProgids`（按 ProgID 登记，命令在 `HKCR\\<ProgID>\\shell\\open\\command`）。
+
+    **前两个来源的值不是路径，必须先解析**：实测（本机 2026-10-28）它们是裸 exe 名
+    （`QQ.exe`、`Everything.exe`）或 AppX 包标识（`Microsoft.WindowsNotepad_8wekyb3d8bbwe!App`），
+    对前者 `Path(value).is_file()` 同样是假。所以取值一律过 `_resolve_executable`；解析不出来的
+    （已卸载、AppX 包）直接丢掉 —— 留在清单里只会让用户点一个打不开的条目。
+    见 ai/bug-fix/029。
     """
     if os.name != "nt" or not ext:
         return []
@@ -425,7 +443,7 @@ def _registered_handlers(ext: str) -> list[tuple[str, str]]:
         return []
 
     extension = ext if ext.startswith(".") else f".{ext}"
-    found: list[tuple[str, str]] = []
+    raw_values: list[str] = []
 
     def read_exe_names(root_key: int, sub_key: str) -> None:
         try:
@@ -437,20 +455,30 @@ def _registered_handlers(ext: str) -> list[tuple[str, str]]:
                     except OSError:
                         break
                     index += 1
-                    if name.isdigit():  # `a` / `b` / `MRUList` 这些不是程序项
-                        found.append((Path(str(value)).stem, str(value)))
+                    # 这里原本写的是 `if name.isdigit()`，把「不是程序项」判断成了「键名是数字」。
+                    # 真实键名是 `a` / `b` / `c`（程序项）与 `MRUList`（它们的顺序）——
+                    # 一个都不是数字，于是这两个来源**永远产出为空**。
+                    if name == OPEN_WITH_MRU_VALUE:
+                        continue
+                    raw_values.append(str(value))
         except OSError:
             pass
 
     read_exe_names(
         winreg.HKEY_CURRENT_USER,
-        rf"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\{extension}\\OpenWithList",
+        rf"Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\{extension}\OpenWithList",
     )
-    read_exe_names(winreg.HKEY_CLASSES_ROOT, rf"{extension}\\OpenWithList")
+    read_exe_names(winreg.HKEY_CLASSES_ROOT, rf"{extension}\OpenWithList")
+
+    found: list[tuple[str, str]] = []
+    for raw in raw_values:
+        executable = _resolve_executable(raw)
+        if executable is not None:
+            found.append((executable.stem, str(executable)))
 
     progids: list[str] = []
     try:
-        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, rf"{extension}\\OpenWithProgids") as key:
+        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, rf"{extension}\OpenWithProgids") as key:
             index = 0
             while True:
                 try:
@@ -464,13 +492,69 @@ def _registered_handlers(ext: str) -> list[tuple[str, str]]:
 
     for progid in progids:
         try:
-            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, rf"{progid}\\shell\\open\\command") as key:
+            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, rf"{progid}\shell\open\command") as key:
                 command = str(winreg.QueryValue(key, None) or "")
         except OSError:
             continue
-        found.append((_progid_label(winreg, progid), _command_executable(command)))
+        executable = _resolve_executable(_command_executable(command))
+        if executable is None:
+            # 命令为空（本机 `.mp4` 的三个 AppX ProgID 都是空串）或指向已卸载的程序。
+            continue
+        # 显示名取不到时退回可执行文件名，**不要**把 ProgID 原文印给用户。
+        found.append((_progid_label(winreg, progid) or executable.stem, str(executable)))
 
     return found
+
+
+def _resolve_executable(value: str) -> Path | None:
+    """把注册表里的取值解析成一个**真实存在**的可执行文件；解析不出来返回 `None`。
+
+    三种形态实测（本机 2026-10-28）：
+      - 完整路径 / 带引号的命令行首段 —— 直接判存在；
+      - 裸 exe 名（`QQ.exe`）—— 先靠 `PATH`，再靠 `App Paths` 登记；
+      - AppX 包标识（`…!App`）—— 不能按路径启动，只能放弃。
+    """
+    text = value.strip().strip('"').strip()
+    if not text or "!" in text:
+        return None
+    if "\\" in text or "/" in text:
+        path = Path(text)
+        return path if path.is_file() else None  # 带目录却不是文件 = 已经卸载
+    resolved = shutil.which(text)
+    if resolved:
+        return Path(resolved)
+    return _app_path_executable(text)
+
+
+def _app_path_executable(exe_name: str) -> Path | None:
+    """`App Paths` 里登记的 exe → 完整路径，这是裸 exe 名的**第二个**解析来源。"""
+    try:
+        import winreg
+    except Exception:
+        return None
+    for sub_key, root_name in _APP_PATHS_ROOTS:
+        root = getattr(winreg, root_name)
+        try:
+            with winreg.OpenKey(root, sub_key + "\\" + exe_name) as entry:
+                value = str(winreg.QueryValue(entry, None) or "")
+        except OSError:
+            continue
+        candidate = value.strip().strip('"')
+        if candidate and Path(candidate).is_file():
+            return Path(candidate)
+    return None
+
+
+def _looks_like_machine_id(text: str) -> bool:
+    """`AppX…` / `<包名>!App` / 带 GUID 的 ProgID：是标识，不是给人看的名字。"""
+    value = text.strip()
+    if not value:
+        return False
+    if value.lower().startswith("appx"):
+        return True
+    if "!" in value:
+        return True
+    return _MACHINE_ID_RE.search(value) is not None
 
 
 # 本机常见编辑器：品牌名 → 可能的安装位置（支持 `*` 通配）。
@@ -610,8 +694,13 @@ def _editor_candidates() -> list[tuple[str, str]]:
                             value = str(winreg.QueryValue(entry, None) or "")
                     except OSError:
                         continue
-                    if value:
-                        found.append((label, value))
+                    if not value:
+                        continue
+                    # `App Paths` 的默认值常带引号（`"C:\…\Code.exe"`），也可能指向已卸载的程序。
+                    # 与 `_registered_handlers` 一样在这里就解析干净，别把「剥引号」留给下游。
+                    executable = _resolve_executable(value)
+                    if executable is not None:
+                        found.append((label, str(executable)))
         except OSError:
             continue
     return found
@@ -640,8 +729,13 @@ def _command_executable(command: str) -> str:
 
 
 def _progid_label(winreg: object, progid: str) -> str:
-    """ProgID 的显示名：优先它自己的默认值，其次 `\\Application` 子键的默认值。"""
-    for key_path in (progid, rf"{progid}\\Application"):
+    """ProgID 的显示名：优先它自己的默认值，其次 `\\Application` 子键的默认值。
+
+    **取不到就返回空串**，由调用方退回可执行文件名。此前是 `return progid`，于是
+    `Toolbox.Air.b9908000-346e-4c93-ac4a-3f3799308eae` 这种没有默认值的 ProgID 被原样
+    印进对话框 —— 用户看到的是一串 GUID。
+    """
+    for key_path in (progid, rf"{progid}\Application"):
         try:
             with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, key_path) as key:  # type: ignore[attr-defined]
                 value = winreg.QueryValue(key, None)  # type: ignore[attr-defined]
@@ -649,7 +743,7 @@ def _progid_label(winreg: object, progid: str) -> str:
             continue
         if value:
             return str(value)
-    return progid
+    return ""
 
 
 def _visible_windows() -> dict[int, tuple[int, str, str, int]]:
