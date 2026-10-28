@@ -191,6 +191,7 @@ hash 只能在**下一次触碰本目录时**回填；查某条改动用 `git lo
 | [011](011-flat-modules-into-feature-packages.md) | 平铺模块按功能分包：46 个平铺文件 → 7 个能力包 | 回填        | `api/` `contracts/` `download/` `bilibili/` `host/` `infra/` `common/` 七个包，52 个文件 `git mv` 且**不改名**；`check_layers.py` 升级为按 `level` 解析多级相对导入、层号回退到最近的已登记祖先；后端 1223 passed、行锚 0 漂移 |
 | [012](012-make-the-dependency-diagram-true.md) | 让依赖图说真话：补 6 个模块、改 40 条边，并纳入机器校验 | 回填        | `module-dependencies.puml` 105 边里 10 条是拆分后留下的死箭头、另缺 30 条（连带 5 个模块没画）；边集改由代码生成（125 条，逐边一致），新增 `scripts/check_diagram_edges.py` + CI 一步 —— `docs.py check` 只管 SVG 与源同源，管不了图与代码同构 |
 | [013](013-frontend-feature-directories.md) | 前端按功能分目录：19 组件 + 21 测试拆出两个平铺桶 | 本次        | `components/` 与 `src/` 根两个桶重排成 `contracts/` `shared/` `shared/ui/` `download-request/` `cookies/` `task-center/` `settings/` `bilibili/` `notifications/`；50 个文件只挪不改名，**21 文件 / 286 用例**前后逐数相同；定下「测试跟能力走、只有一份才进 shared」两条约定并写进设计文档 |
+| [014](014-doc-paths-that-point-nowhere.md) | 文档里指向代码的路径不再悬空：13 处断引分类改写 + 一道闸门 | 本次        | 判据是「导航指称 vs 事件记录」：9 处改到现址、其余保留原文；新增 `scripts/check_doc_paths.py`（路径级白名单，每条写理由）接进 CI —— `docs.py check` 只看链接、`check_doc_anchors` 只看行锚，行内代码里的裸路径两边都不管 |
 
 ---
 

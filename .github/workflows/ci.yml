@@ -3,7 +3,7 @@ name: CI
 # 门槛**只由已有的命令组成**：不引入 ruff / eslint / prettier。
 # 理由是 [ai/refactor/refactor.md §4.1 第 4 项](../../ai/refactor/refactor.md#41-后续候选清单登记为本轮三轮不做此后逐项单独一轮)
 # 记的那两条：它们会把 pip / npm 依赖带进来（撞 §3.1 第 6 条），且对 6000+ 行既有代码
-# 产生大量机械改动。这里补的是**本仓库自己的**门槛：分层依赖 + 契约漂移 + 代码锚点 + 依赖图边集。
+# 产生大量机械改动。这里补的是**本仓库自己的**门槛：分层依赖 + 契约漂移 + 代码锚点 + 依赖图边集 + 文档路径。
 #
 # 两处「本机有、CI 没有」的差异，刻意保留：
 #   1) 后端测试：本机要加 `--basetemp=tmp_pytest/runNNN`，那是**本机沙箱**拦删除导致的绕过
@@ -22,7 +22,7 @@ permissions:
 
 jobs:
   backend:
-    name: 后端（测试 / 分层 / 契约 / 依赖图 / 锚点）
+    name: 后端（测试 / 分层 / 契约 / 依赖图 / 文档路径 / 锚点）
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,6 +49,9 @@ jobs:
 
       - name: 依赖图边集（module-dependencies.puml ↔ 实际 import）
         run: python scripts/check_diagram_edges.py
+
+      - name: 文档里的代码路径（docs/ ai/ → 磁盘）
+        run: python scripts/check_doc_paths.py
 
       - name: 文档代码锚点
         run: python scripts/check_doc_anchors.py

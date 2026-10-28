@@ -118,7 +118,7 @@ Linux/macOS：bash init/start.sh dev
 | `data` | 本地 SQLite、cookies，已被 Git 忽略。 |
 | `downloads` | 默认下载产物目录，已被 Git 忽略。 |
 | `docs` | 工程文档、PlantUML 源和渲染图；`docs/changelog/` 另存宣传视频基准提交之后的更新日志与分支对比。 |
-| `scripts` | 可复现的工程辅助脚本：文档工具入口 [docs.py](../scripts/docs.py) 与锚点检查 [check_doc_anchors.py](../scripts/check_doc_anchors.py)；离线基准 [bench_concurrency.py](../scripts/bench_concurrency.py)、[bench_throttle_guard.py](../scripts/bench_throttle_guard.py)；cookies 导出 [export_cookies_via_cdp.py](../scripts/export_cookies_via_cdp.py)；需真实网络的验收 [acceptance_network.py](../scripts/acceptance_network.py)、[acceptance_real.py](../scripts/acceptance_real.py)。 |
+| `scripts` | 可复现的工程辅助脚本：文档工具入口 [docs.py](../scripts/docs.py)、锚点检查 [check_doc_anchors.py](../scripts/check_doc_anchors.py) 与路径检查 [check_doc_paths.py](../scripts/check_doc_paths.py)；离线基准 [bench_concurrency.py](../scripts/bench_concurrency.py)、[bench_throttle_guard.py](../scripts/bench_throttle_guard.py)；cookies 导出 [export_cookies_via_cdp.py](../scripts/export_cookies_via_cdp.py)；需真实网络的验收 [acceptance_network.py](../scripts/acceptance_network.py)、[acceptance_real.py](../scripts/acceptance_real.py)。 |
 | `.tools` | 文档工具自动下载的本机缓存，已被 Git 忽略。 |
 | `ai` | 任务计划、重构日志和文档生成 prompt。 |
 | `ai/perf/PLAN.md` | 下载性能与稳定性修复计划：根因分析、修复项、验证与回滚，是引用性能结论时的权威来源。 |
@@ -201,7 +201,7 @@ git diff --check
 
 ### 结构性检查（本仓库自己的门槛）
 
-除测试外，仓库还有四个**不需要新增依赖**的检查脚本：
+除测试外，仓库还有五个**不需要新增依赖**的检查脚本：
 
 | 脚本 | 检查什么 | 什么时候必须跑 |
 | --- | --- | --- |
@@ -209,13 +209,14 @@ git diff --check
 | `python scripts/check_api_contract.py` | 运行时契约 `app.openapi()` 与 [types.ts](../frontend/src/contracts/types.ts)、[openapi.yaml](openapi.yaml) 有没有分叉 | 改了 `schemas.py`、路由的响应模型，或 `types.ts` / `openapi.yaml` |
 | `python scripts/check_doc_anchors.py` | 文档里的 `文件.py#LNN` 锚点有没有随代码改动漂移（加 `--fix` 自动重算） | 改动 `backend/app/**` 或 `frontend/src/**` 之后 |
 | `python scripts/check_diagram_edges.py` | [依赖图](design.md#依赖方向与分层规则)的**边集**与 `backend/app` 的实际 import 是否一致（缺边、多边、图上有没画的模块，都算错） | 新增 / 移动模块，或改了模块间的 import；改完 `module-dependencies.puml` 之后 |
+| `python scripts/check_doc_paths.py` | `docs/`、`ai/` 与 README 里提到的 `frontend/src`、`backend/app`、`backend/tests`、`scripts` 路径是否**真的存在**（历史指称登记在脚本内的 `ALLOWED` 里，每条写明理由） | 移动 / 重命名 / 删除任何代码文件之后；写或改文档里指向代码的路径之后 |
 
 它们同时也跑在 CI 里。
 
 ### CI
 
 [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) 在 push 到 `main` 与 PR 时跑两个 job：
-**后端**（`pytest` → `check_layers` → `check_api_contract` → `check_doc_anchors`）与
+**后端**（`pytest` → `check_layers` → `check_api_contract` → `check_diagram_edges` → `check_doc_paths` → `check_doc_anchors`）与
 **前端**（`tsc --noEmit` → `vitest` → `vite build`）。
 
 两处刻意与本地不同：CI 的 `pytest` **不带** `--basetemp`（那是本机沙箱拦删除导致的绕过，见

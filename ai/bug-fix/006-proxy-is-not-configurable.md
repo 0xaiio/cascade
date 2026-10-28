@@ -118,6 +118,8 @@ ProxyResolution(url='http://127.0.0.1:7890', source='system',
 | `tests/test_api.py`（+2 例） | `PUT /api/settings` 保存/清空代理并持久化；不带 `proxy` 的部分更新不会抹掉已配置的值 |
 | `frontend/src/App.test.tsx`（+2 例） | 输入框自动保存、清空发送 `null`（而不是 `direct`）；「当前生效」提示文案 |
 
+> 上表最后一行指的文件已于 2026-10-02 拆分（[008](../refactor/008-split-app-tests.md)）。那 2 例现在都在 `frontend/src/settings/settings.test.tsx`：`autosaves the proxy and sends null when cleared back to auto`、`shows which proxy is actually in effect`。
+
 回归：后端 **165 → 202 passed**，前端 **52 → 54 passed**，`tsc --noEmit` 无错误。
 （`FakeYtDlpService` 也随之补上了 `proxy_resolution()`，否则所有 API 测试都会因为
 设置响应要读代理而报错。）

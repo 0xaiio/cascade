@@ -257,7 +257,7 @@ concurrency=8: wall=1.26s  peak_parallel_downloads=8
 
   并在单视频任务（`total_items === 1`）的任务行提示一次「单视频任务不受并发设置影响」。
 - **预期收益**：消除「调了并发没变化」的误解，把用户引导到正确的加速手段（多视频批量下载）。
-- **风险**：纯文案，无行为变更。需同步 `frontend/src/App.test.tsx:331` 的标签断言。
+- **风险**：纯文案，无行为变更。需同步 `frontend/src/App.test.tsx:331` 的标签断言（该文件 2026-10-02 已拆分、[013](../refactor/013-frontend-feature-directories.md) 已归位；这条断言现在在 `frontend/src/settings/settings.test.tsx` 的 `autosaves concurrency without a save settings button` 里，取的是 `getByLabelText("并发（同时下载的视频数；单个视频无效）")`）。
 
 ### P1-2　aria2c 多连接（可选，默认关闭）
 
@@ -331,7 +331,7 @@ git diff --check
 - `test_ytdlp_service.py`：默认 opts 不含 `throttledratelimit`；`YTDL_THROTTLED_RATE_KBPS=64` 时为 `65536`；
 - `test_stall_guard.py`：字节增长的 payload 序列不触发；90s 零增长触发 `DownloadStalled`；
 - 错误分类测试：`DownloadStalled` 的文案**不**被 `is_media_stream_blocked_error()` 命中；
-- `App.test.tsx`：并发标签文案更新后的断言。
+- `App.test.tsx`（现为 `frontend/src/settings/settings.test.tsx`）：并发标签文案更新后的断言。
 
 ### 6.3 并发基准（回归基线，离线可跑）
 

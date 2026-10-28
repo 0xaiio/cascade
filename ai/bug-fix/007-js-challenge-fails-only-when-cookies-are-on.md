@@ -187,6 +187,13 @@ B 与 D 是**故意保留的失败用例**：它们失败才反证 A/C 的成功
 | `tests/test_ytdlp_service.py`（+4 例） | 跳过跑不起来的候选、运行时报错原样上报、探测本身不抛异常、诊断暴露失败原因 |
 | `tests/test_api.py`（+8 例） | 三个新接口：保存值/临时覆盖/返回体、cookies 缺失/上传后离线/deep 联网、诊断暴露日志与运行时刷新计数 |
 | `frontend/src/App.test.tsx`（+9 例） | 检测失败+下一步、试地址不保存、预设表、JS 运行时不可用+重新自检、日志路径、校验成功、google-only 解释、离线体检、三种获取方式 |
+
+> 上表最后一行指的文件已于 2026-10-02 拆分（[008](../refactor/008-split-app-tests.md)）。那 9 例现在分在四处：
+>
+> - `frontend/src/settings/settings.test.tsx`（3 例）：检测失败+下一步、试地址不保存、预设表；
+> - `frontend/src/settings/diagnostics.test.tsx`（2 例）：JS 运行时不可用+重新自检、日志路径；
+> - `frontend/src/cookies/cookies.test.tsx`（3 例）：校验成功、google-only 解释、离线体检；
+> - `frontend/src/shared/ui/help-notes.test.tsx`（1 例）：`documents the three ways to obtain cookies and warns about the unsafe one`。
 | `scripts/acceptance_network.py`（新） | 真实网络的四段验收：环境快照 / 代理矩阵 / cookies 体检 / 端到端 + 环境净化 A/B |
 
 回归：后端 **202 → 255 passed**，前端 **54 → 63 passed**，`tsc --noEmit` 无错误，

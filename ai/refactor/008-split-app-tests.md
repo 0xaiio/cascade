@@ -273,14 +273,22 @@ SVG 的 diff 只有 1 行（标签文本），说明渲染环境与已提交版�
   - `docs/testing.md` 的「前端测试范围」一节：链接从 `[App.test.tsx]` 改为 `frontend/src/*.test.tsx` +
     三个共享件，并写明「每个文件必须能单独跑绿」。
   - `docs/diagrams/four-plus-one-development-view.puml` + 重渲染的 `.svg`（§4.5）。
-- **波及但保留原文的引用**（都是"当时"的事实，非链接，不影响任何检查）：
+- **波及的引用**（非链接，不影响任何检查）。处置分两类，判据是「读这句话的人要不要按它去找东西」：
+  **导航指称**（「这条断言在哪」「这个 fixture 要改哪个」）加现址；
+  **事件记录**（删除清单、当时跑的命令、当时的基线）保留原文，因为改了就成了假的。
 
   | 位置 | 内容 | 处置 |
   | --- | --- | --- |
-  | `ai/ui/001`~`003` | 「新增断言（`App.test.tsx` → 某条不变式）」 | 保留。断言本体已原文搬入 `src/styles.test.ts`，用例名未变，按名可搜到 |
-  | `ai/perf/PLAN.md` | `frontend/src/App.test.tsx:331` 等行号指称 | 保留（历史计划） |
+  | `ai/ui/001`、`002` | 「新增断言（`App.test.tsx` → 某条不变式）」 | 保留原文 + 现址括注（2026-10-28 补）。断言本体在 `frontend/src/styles.test.ts`，用例名未变 |
+  | `ai/bug-fix/006` / `007` | 验证表里的「`frontend/src/App.test.tsx`（+2 / +9 例）」 | 保留原文 + 表格下加现址清单（2026-10-28 补），逐例点到文件名 |
+  | `ai/perf/PLAN.md`、`ai/plan/plan.md` | `App.test.tsx:331` 等行号与 fixture 指称 | 保留原文 + 现址括注（2026-10-28 补）—— 它们是**待执行的计划**，不是已发生的事实 |
   | `ai/docs/docs-prompt.md` | 前端测试 69 passed / 基线 289、320 | **留给收尾一轮**统一刷新（§5 第 6 条） |
-  | `ai/refactor/001` | 「`App.test.tsx` 未拆分，仍是 1521 行（候选 R4）」 | 保留 —— 那正是本项被登记的由来 |
+  | `ai/refactor/001`、[refactor.md](refactor.md) §4.1 | 「`App.test.tsx` 未拆分，仍是 1521 行（候选 R4）」 | 保留 —— 那正是本项被登记的由来 |
+  | 本文件里的「删除 `frontend/src/App.test.tsx`」与 `git show HEAD:…` 命令 | 被删的对象、当时跑的命令 | 保留 —— 改一个字就假 |
+
+  > 2026-10-28：上面这些「保留原文」的指称已全部带现址，并且这类断引现在是**可机检的** ——
+  > `scripts/check_doc_paths.py` 会把悬空路径拦下来，确属历史指称的登记在脚本内的白名单里（每条写明理由）。
+  > 见 [014](014-doc-paths-that-point-nowhere.md)。
 
 - **与 [007](007-ci-and-layers.md) 的关系**：本轮的 11 个文件都由 007 建的 CI 前端 job 覆盖
   （`vitest run --environment jsdom` 自动收集全部 `*.test.tsx`），无需改 `ci.yml`。

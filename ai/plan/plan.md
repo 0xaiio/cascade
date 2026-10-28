@@ -157,7 +157,7 @@ Thumbs.db
   - 若发现格式 label 生成缺陷，增加对应单元测试后修复。
   - 跑全量：`python -m pytest backend\tests -q`。
 - 前端：
-  - 更新 `App.test.tsx` 的 analyze fixture，断言格式下拉显示 `720p` 和格式大小。
+  - 更新 `App.test.tsx`（现为 `frontend/src/download-request/analyzer.test.tsx`）的 analyze fixture，断言格式下拉显示 `720p` 和格式大小。
   - 增加/更新测试：选中具体格式后，页面显示当前格式分辨率和大小。
   - 跑全量：`npm test` 和 `npm run build`。
 - 手动验收建议：

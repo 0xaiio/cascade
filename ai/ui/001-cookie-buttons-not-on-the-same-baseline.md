@@ -3,7 +3,7 @@
 - **提交**：`7b62a8c`（按 `ai/bug-fix/` 的同样做法，hash 在下一次触碰本目录时回填 ——
   写在同一次提交里必然自我指涉。本次触碰即 002 那一轮）。
   查本次改动：`git log --oneline -- ai/ui/001-cookie-buttons-not-on-the-same-baseline.md`
-- **范围**：`frontend/src/styles.css`、`frontend/src/App.test.tsx`、`frontend/vite.config.ts`、`frontend/src/vite-env.d.ts`
+- **范围**：`frontend/src/styles.css`、`frontend/src/App.test.tsx`（该文件 2026-10-02 已拆分，本轮加的那条版面不变式现在在 `frontend/src/styles.test.ts`）、`frontend/vite.config.ts`、`frontend/src/vite-env.d.ts`
 
 ## 问题
 
@@ -94,6 +94,8 @@ actions 行高=60.00   primary 行高=60.00
 ## 验证
 
 ### 新增断言（`App.test.tsx` → `keeps layout out of the file-button base class`）
+
+> 现位于 `frontend/src/styles.test.ts`（`App.test.tsx` 于 2026-10-02 拆分），用例名未变。
 
 jsdom 不做布局，量不出「对齐」，所以断言的是**根因对应的不变式**：
 `.file-button` 基类不得声明纵向外边距、也不得声明宽度。它先剥掉 CSS 注释再解析规则块

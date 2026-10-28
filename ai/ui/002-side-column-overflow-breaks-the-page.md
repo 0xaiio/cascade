@@ -3,7 +3,7 @@
 - **提交**：`a4d492c`（按 `ai/bug-fix/` 的同样做法，hash 在下一次触碰本目录时回填 ——
   写在同一次提交里必然自我指涉。本次触碰即 003 那一轮）。
   查本次改动：`git log --oneline -- ai/ui/002-side-column-overflow-breaks-the-page.md`
-- **范围**：`frontend/src/styles.css`、`frontend/src/App.test.tsx`
+- **范围**：`frontend/src/styles.css`、`frontend/src/App.test.tsx`（该文件 2026-10-02 已拆分，本轮加的版面不变式现在在 `frontend/src/styles.test.ts`）
 - **性质**：是缺陷。判定依据不是「不好看」，而是**页面多了一条横向滚动条**：
   内容超出一屏、可被横向拖动，属于版式失效，不是审美偏好。
 
@@ -137,6 +137,8 @@
 ## 验证
 
 ### 新增断言（`App.test.tsx` → `keeps the fixed-width side column able to wrap its text`）
+
+> 现位于 `frontend/src/styles.test.ts`（`App.test.tsx` 于 2026-10-02 拆分），用例名未变。
 
 jsdom 不做布局，量不出「页面有没有横向滚动条」，所以断言的是**根因对应的不变式**：
 `.side-column` 必须声明 `overflow-wrap: anywhere`（而不是 `break-word`），
