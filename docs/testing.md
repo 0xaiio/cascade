@@ -22,15 +22,15 @@ python -m pytest backend\tests -q
 > 沙箱的批量删除守卫是**累积计数**的（一轮命令内累计到阈值就整条拒掉），于是 1069 个用例放在一个进程里跑会在中途被拦下。
 > 现象很好认：**大量 `at setup of ...` 的 error，而 `FAILED` 一个都没有** —— 那是环境问题，不是代码问题。
 >
-> 按下面的分块跑，六块相加应恰好等于 1069（各块 85～224 项；若某块仍被拦下，继续拆小即可）：
+> 按下面的分块跑，六块相加应恰好等于 1223（各块 116～242 项；若某块仍被拦下，继续拆小即可）：
 >
 > ```powershell
 > python -m pytest backend\tests\test_bili_policy.py backend\tests\test_bili_meta.py backend\tests\test_bili_auth.py backend\tests\test_bili_bin.py -q -p no:cacheprovider --basetemp=tmp_pytest\a   # 202
 > python -m pytest backend\tests\test_bili_read_model.py backend\tests\test_bili_subtitle.py backend\tests\test_bili_api.py -q -p no:cacheprovider --basetemp=tmp_pytest\b                                            # 187
 > python -m pytest backend\tests\test_bili_upload.py backend\tests\test_bili_manager.py backend\tests\test_api_bilibili.py -q -p no:cacheprovider --basetemp=tmp_pytest\c                                                # 216
 > python -m pytest backend\tests\test_ytdlp_service.py backend\tests\test_subtitle_plan.py backend\tests\test_subtitle_recording.py backend\tests\test_api.py -q -p no:cacheprovider --basetemp=tmp_pytest\d                # 224
-> python -m pytest backend\tests\test_resolution_decisions.py backend\tests\test_output_paths.py backend\tests\test_safe_delete.py backend\tests\test_system_open.py backend\tests\test_dev_server.py backend\tests\test_proxy.py backend\tests\test_cookie_health.py backend\tests\test_stall_guard.py -q -p no:cacheprovider --basetemp=tmp_pytest\e   # 155
-> python -m pytest backend\tests\test_error_advice.py backend\tests\test_connectivity.py backend\tests\test_download_progress.py backend\tests\test_runtime_env.py backend\tests\test_job_manager_finally.py backend\tests\test_finally_guards.py backend\tests\test_orphan_recovery.py backend\tests\test_completion_notification.py backend\tests\test_db.py backend\tests\test_logging_setup.py backend\tests\test_paths.py backend\tests\test_transfer_stats.py backend\tests\test_progress_persist.py backend\tests\test_log_safety.py -q -p no:cacheprovider --basetemp=tmp_pytest\f   # 85
+> python -m pytest backend\tests\test_resolution_decisions.py backend\tests\test_output_paths.py backend\tests\test_safe_delete.py backend\tests\test_system_open.py backend\tests\test_dev_server.py backend\tests\test_proxy.py backend\tests\test_cookie_health.py backend\tests\test_stall_guard.py backend\tests\test_ytdlp_formats.py backend\tests\test_resolution_input.py backend\tests\test_job_routes.py -q -p no:cacheprovider --basetemp=tmp_pytest\e   # 219
+> python -m pytest backend\tests\test_error_advice.py backend\tests\test_connectivity.py backend\tests\test_download_progress.py backend\tests\test_runtime_env.py backend\tests\test_job_manager_finally.py backend\tests\test_finally_guards.py backend\tests\test_orphan_recovery.py backend\tests\test_completion_notification.py backend\tests\test_db.py backend\tests\test_logging_setup.py backend\tests\test_paths.py backend\tests\test_transfer_stats.py backend\tests\test_progress_persist.py backend\tests\test_log_safety.py backend\tests\test_events.py backend\tests\test_job_artifacts.py backend\tests\test_bili_http.py -q -p no:cacheprovider --basetemp=tmp_pytest\f   # 116
 > ```
 >
 > 上面的块内数字不用手数：`python -m pytest backend\tests --collect-only -q -p no:cacheprovider` 会逐条打印用例 id，
@@ -39,7 +39,7 @@ python -m pytest backend\tests -q
 >
 > `--basetemp` 指向的目录**必须不存在**，否则 pytest 会先 `rmtree` 它、同样会触发守卫（`tmp_pytest\` 已在 `.gitignore` 里）。
 
-前端测试和构建（当前基线：**279 passed**，20 个文件；`tsc --noEmit` 与 `vite build` 通过）：
+前端测试和构建（当前基线：**286 passed**，21 个文件；`tsc --noEmit` 与 `vite build` 通过）：
 
 ```powershell
 cd frontend
@@ -119,11 +119,11 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 
 ## 后端测试范围
 
-后端测试位于 [backend/tests](../backend/tests/)（36 个 `test_*.py` + [fakes.py](../backend/tests/fakes.py) / [bili_fakes.py](../backend/tests/bili_fakes.py)，当前 **1093 passed**）：
+后端测试位于 [backend/tests](../backend/tests/)（42 个 `test_*.py` + [fakes.py](../backend/tests/fakes.py) / [bili_fakes.py](../backend/tests/bili_fakes.py)，当前 **1223 passed**）：
 
 > **数字必须自己数一遍**，不要只信 `-q` 的汇总行。逐文件规模用
 > `pytest backend/tests/<文件> -q -p no:cacheprovider --co` 取，各文件之和应**恰等于**全集
-> （2026-10-21 实测：36 个文件逐项相加 = 1069 = 全集）。历史上有过把「收集不全的那一次」当成
+> （2026-10-28 实测：42 个文件逐项相加 = 1223 = 全集）。历史上有过把「收集不全的那一次」当成
 > 基线的教训（见过 267 / 286 / 289 三个数，真实基线一直是当时的 913）。
 
 > **夹具里被 worker 认领的状态会让「同步断言写库结果」变成竞态**（2026-10-21 修掉一条）：
@@ -151,6 +151,12 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 | [test_connectivity.py](../backend/tests/test_connectivity.py) | 代理探针：直连与走代理分别构造正确的 opener、HTTP 错误与网络异常都变成可展示证据、失败必带 `next_steps`、`direct` 失败文案说明「可能预期」。 |
 | [test_cookie_health.py](../backend/tests/test_cookie_health.py) | cookies 体检：格式、域名分布、鉴权项命中/缺失、过期、`LOGGED_IN` 三态（真/假/未知）、结论与下一步。 |
 | [test_resolution_decisions.py](../backend/tests/test_resolution_decisions.py) | 降级**判定**的纯单测（31 例，0.12 s）：四种降级原因各自的输入条件、"该不该找降级候选"的两个早退条件、两句失败文案不可互换、"元数据不可得"与"零个格式"必须区分、每个 reason 都能被 `fallback_policy` 翻成非空文案。 |
+| [test_ytdlp_formats.py](../backend/tests/test_ytdlp_formats.py) | **35 例**。格式选择与信息字典的纯逻辑：`format_id` 与 `ba` 的配对、`best` 与 `prefer_hls` 的两种写法、清晰度选择器**逐段顺序**（avc1+m4a → mp4 → 任意编码 → 单文件）、无 ffmpeg 时只能单文件、`1440P` 仍等价于 `1440p`（[026](../ai/bug-fix/026-a-resolution-that-silently-means-best.md)）、**认不出的取值会回落 `bv*+ba/b`**（这条是记录兜底本身）、合并流的分辨率/格式/大小聚合、零与负数时长按「未知」、`suggest_lower_resolution` 的 720 底线与「源本身低于底线」的例外。 |
+| [test_resolution_input.py](../backend/tests/test_resolution_input.py) | 清晰度取值的**入口校验**（[026](../ai/bug-fix/026-a-resolution-that-silently-means-best.md)）：`1080P` 被归一化后入库、`hd` / `1080` 一律 422 且消息点名三处可改的位置、设置里的 `default_resolution` 同样归一化与拒绝、**重启整任务与重启单条**两条路径各自挡住非法值（`model_copy(update=…)` 不触发字段校验，这条最容易漏）。 |
+| [test_events.py](../backend/tests/test_events.py) | 进程内事件扇出与 SSE 装配：每个订阅者都收到每条消息、`datetime`/`Path` 被 `default=str` 兜住、**关闭后立刻从订阅集合里消失**（[027](../ai/bug-fix/027-sse-disconnect-keeps-the-listener.md)）、慢消费者不阻塞其他人、路由把 payload 包成 `data: …\n\n`。异步生成器的注册与 `publish` 之间有竞态，用例统一先等注册完成再发，避免「等一条永远不来的消息」。 |
+| [test_job_artifacts.py](../backend/tests/test_job_artifacts.py) | 产物的定位与本机打开：成品缺失/被目录占住/解析后被删（TOCTOU）三种 409 的**文案各不相同**、条目文件夹退到下载目录、字幕优先用记录路径再退回视频旁的 sidecar、单视频与合集的文件夹语义、`open_*` 把「播放器不可用」折成 409 而其它错误折成 400、调用方已翻译的 `HTTPException` 不被改写。 |
+| [test_bili_http.py](../backend/tests/test_bili_http.py) | `UrllibTransport` 的真实发送（对着本机 `ThreadingHTTPServer`，不起外网）：query 拼接与 `None` 丢弃、表单 / JSON 两种 body 与 `Content-Type`、自定义头覆盖默认头、**非 2xx 也把正文带回来**、`Set-Cookie` 收集、连不上与超时都折成 `HttpError`、非 JSON 正文的报错里带前 200 字。 |
+| [test_job_routes.py](../backend/tests/test_job_routes.py) | 「查不到就 404」这一族约定（13 条参数化）：8 个任务级接口回 `Job not found.`、4 个条目级接口回条目文案、批量动作一个都没命中时是 404 而不是「成功，影响 0 个」。这条契约决定前端是重拉任务表还是就地提示。 |
 | [test_output_paths.py](../backend/tests/test_output_paths.py) | 产物位置计算：候选链「记录值优先 + 去重」、成品定位与 sidecar 排除；含一条**与重构前实现逐项对照**的用例（见 [ai/refactor/004](../ai/refactor/004-artifact-paths.md)）。字幕定位另加 12 条：标题含 `[` `]` 时仍能找到（**必须用 `iterdir` 而不是 `glob`** —— 后者把方括号当字符类）、不误吃同前缀的 `作品 [abc123]2.en.srt`、按族偏好挑一条、非中英语种被过滤、语言取 stem 最后一段点号后；以及 `existing_subtitle_file` 的四条（记录值优先、记录为空时退回视频旁边的同名字幕、记录指向已删文件时返回 `None`、视频没定位到时不扫目录）。（见 [ai/feature/subtitle-pipeline](../ai/feature/subtitle-pipeline/README.md)） |
 | [test_safe_delete.py](../backend/tests/test_safe_delete.py) | 删除白名单的路径安全判定：根目录与子孙放行，父目录、无关绝对路径、以及**共享字符串前缀的兄弟目录**一律拒绝，Windows 大小写差异视为同一根（见 [ai/refactor/005](../ai/refactor/005-safe-delete.md)）。 |
 | [test_proxy.py](../backend/tests/test_proxy.py) | 代理**解析**：`direct` 哨兵、显式 > 系统 > 环境变量的优先级、环境变量只报告不落盘、`no_proxy` 绕过与凭据脱敏。 |
@@ -178,11 +184,13 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 
 ## 前端测试范围
 
-前端组件测试是对 `App` 的**集成测试**，按功能面拆成 `frontend/src/*.test.tsx` 多个文件：解析链接与下载选项（`analyzer.test.tsx`，11）、cookies 导入与校验（7）、设置面板与代理检测（10）、任务中心（控制/删除/展开 11、本地文件操作与链接 13、进度与详情呈现 6）、清晰度降级（4）、自检信息（2）、帮助浮层（3）、**B站 上传（`bili-upload.test.tsx`，73 例）**、**CC 字幕结论的呈现（`bili-subtitle-line.test.tsx`，5 例）**、完成通知（19）、版面与文案不变式（3），以及只读样式源文的 `styles.test.ts`（4）。当前 **20 个文件 / 279 passed**（13 个 `.tsx` 组件测试 + 7 个 `.ts` 纯函数测试）；`biliStatus.test.ts` 另含字幕两档判据与「已上传点进去打开哪一页」「待核对/部分失败该补哪几条」的判据（24 例）。
+前端组件测试是对 `App` 的**集成测试**，按功能面拆成 `frontend/src/*.test.tsx` 多个文件：解析链接与下载选项（`analyzer.test.tsx`，11）、cookies 导入与校验（7）、设置面板与代理检测（10）、任务中心（控制/删除/展开 11、本地文件操作与链接 13、进度与详情呈现 6）、清晰度降级（4）、自检信息（2）、帮助浮层（3）、**B站 上传（`bili-upload.test.tsx`，73 例）**、**CC 字幕结论的呈现（`bili-subtitle-line.test.tsx`，5 例）**、完成通知（19）、版面与文案不变式（3），以及只读样式源文的 `styles.test.ts`（4）。当前 **21 个文件 / 286 passed**（13 个 `.tsx` 组件测试 + 8 个 `.ts` 纯函数测试）；`biliStatus.test.ts` 另含字幕两档判据与「已上传点进去打开哪一页」「待核对/部分失败该补哪几条」的判据（24 例）。
 
-另有五份**不挂载任何组件**的纯函数测试（`frontend/src/*.test.ts`，不经过 `App`）：B站 表单词汇表与本地预检 `biliForm.test.ts`（46 例）、B站 状态谓词 `biliStatus.test.ts`（24 例）、**上传进度的分段与聚合 `biliProgress.test.ts`（20 例）**、错误取值兜底 `errors.test.ts`（4 例）、**体检策略 `biliHealth.test.ts`（5 例）**。它们把原先内联在 `BiliUploadDialog.tsx` / `App.tsx` 里的判断抽成纯函数后再测，所以能在不渲染界面的前提下覆盖边界（例如「列表还在读」与「还没选合集」不能同时报出来，见 [ai/bug-fix/012](../ai/bug-fix/012-preflight-contradicts-itself-and-the-server.md)；`uploadedTargetUrl` 在两种空值下必须返回 `null`；合集的标题判据量的是**渲染后的每一条**而非模板，见 [ai/bug-fix/019](../ai/bug-fix/019-the-title-length-check-never-fires-for-collections.md)）。
+另有六份**不挂载任何组件**的纯函数测试（`frontend/src/*.test.ts`，不经过 `App`）：B站 表单词汇表与本地预检 `biliForm.test.ts`（46 例）、B站 状态谓词 `biliStatus.test.ts`（24 例）、**上传进度的分段与聚合 `biliProgress.test.ts`（20 例）**、错误取值兜底 `errors.test.ts`（4 例）、**体检策略 `biliHealth.test.ts`（5 例）**、**请求超时兜底 `api-timeout.test.ts`（4 例）**。后者用假定时器把 60 s / 180 s 走完 —— 挂住的请求不会抛错、不会写日志，只能靠计时器抓（[025](../ai/bug-fix/025-requests-without-a-deadline.md)）。它们把原先内联在 `BiliUploadDialog.tsx` / `App.tsx` 里的判断抽成纯函数后再测，所以能在不渲染界面的前提下覆盖边界（例如「列表还在读」与「还没选合集」不能同时报出来，见 [ai/bug-fix/012](../ai/bug-fix/012-preflight-contradicts-itself-and-the-server.md)；`uploadedTargetUrl` 在两种空值下必须返回 `null`；合集的标题判据量的是**渲染后的每一条**而非模板，见 [ai/bug-fix/019](../ai/bug-fix/019-the-title-length-check-never-fires-for-collections.md)）。
 
 逐文件用例数可用 `npx vitest run --reporter=json --outputFile=<临时路径>` 复算（JSON 报告的 `testResults[].assertionResults` 长度即该文件用例数）。
+
+> **核数时加 `--no-file-parallelism`**（2026-10-28 实测）：并行跑同一份代码，连续几次得到 21 / 20 / 19 / 15 个文件、286 / 275 / 261 / 172 条用例，**每次都报 passed** —— 被丢掉的用例不会变成失败，只会消失。串行跑稳定复现 21 / 286。「文件数变少了但全绿」不是好消息，见 [ai/bug-fix/README.md](../ai/bug-fix/README.md) 第 25 条。
 
 纯函数测试里 `biliProgress.test.ts` 额外钉住**时区**（服务端发的是不带偏移量的 UTC 墙上时间，
 按本地解析会让 52 秒显示成 8 小时，见 [ai/bug-fix/020](../ai/bug-fix/020-the-progress-clock-is-eight-hours-off.md)）；

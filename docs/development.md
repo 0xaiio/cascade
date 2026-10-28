@@ -141,7 +141,7 @@ Linux/macOS：bash init/start.sh dev
 | `YTDL_DATABASE_PATH` | `data/app.sqlite3` | SQLite 文件路径。WAL 模式下同目录还会出现 `*.sqlite3-wal` 和 `*.sqlite3-shm`，已由 `.gitignore` 忽略。 |
 | `YTDL_COOKIES_FILENAME` | `cookies.txt` | cookies 文件名，实际路径为 `YTDL_DATA_DIR / YTDL_COOKIES_FILENAME`。 |
 | `YTDL_DEFAULT_CONCURRENCY` | 同 `YTDL_YOUTUBE_MAX_PARALLEL_DOWNLOADS` | 同时下载的视频数（跨任务和合集子项）。 |
-| `YTDL_DEFAULT_RESOLUTION` | `1440p` | 默认清晰度。 |
+| `YTDL_DEFAULT_RESOLUTION` | `1440p` | 默认清晰度，只接受 `best` 或 `<高度>p`。**大小写不敏感**（`1080P` 会被归一化成 `1080p`），但 `1080`（漏 `p`）、`hd` 这类写法会在建任务/存设置时被 422 拒绝 —— 它们没有唯一解释，猜错就是「要 1080p、实际下最高画质」，见 [026](../ai/bug-fix/026-a-resolution-that-silently-means-best.md)。 |
 | `YTDL_DEFAULT_SUBTITLE_LANGUAGES` | `["en"]` | 默认字幕语言；列表类型，作为环境变量时用 JSON 语法提供。 |
 | `YTDL_DEFAULT_SPEED_LIMIT_KBPS` | 空 | 全局默认限速，空值表示不限速。 |
 | `YTDL_DEFAULT_RETRIES` | `10` | 默认下载重试次数，环境变量层面取值范围 `0..20`。 |
