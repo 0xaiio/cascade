@@ -36,23 +36,68 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
-    headers: init?.body instanceof FormData ? undefined : { "Content-Type": "application/json" },
-    ...init
-  });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null);
-    const detail = payload?.detail ?? null;
-    if (detail && typeof detail === "object") {
-      throw new ApiError(detail.message ?? `Request failed with ${response.status}`, response.status, detail);
+/**
+ * 一次请求最多等多久。**这是「永远不返回」的兜底，不是性能预算** —— 取值要比任何正常的
+ * 服务端耗时都长，所以它只在真的挂住时才触发。
+ *
+ * 为什么需要它：`fetch` 本身没有超时。后端把连接接下来却不回话（后端卡死、DNS 挂起、
+ * 代理黑洞）时，Promise **永不 settle**，界面就是一条永远不结束的 loading ——
+ * 用户看到的不是错误，而是一句「正在读取…」永远不消失。这类失败没有任何提示，
+ * 只能靠调用方自己计时（见 ai/bug-fix/025）。
+ *
+ * 60 s 的依据：服务端最长的一次「合法阻塞」是「打开方式」窗口的出现判定（6 s）与
+ * 浏览器 cookie 库的等待（约 10 s），B站 请求自带 20 s 超时，都远在 60 s 之内。
+ */
+export const REQUEST_TIMEOUT_MS = 60_000;
+
+/**
+ * 解析链接的预算。它要真的连 YouTube（`extract_metadata` + 可能的 cookies 导入重试 +
+ * JS challenge 求解），实测可以到半分钟以上，所以单独放宽 —— 但对「永不返回」同样必须封顶。
+ */
+export const ANALYZE_TIMEOUT_MS = 180_000;
+
+function timeoutError(url: string, timeoutMs: number): ApiError {
+  const seconds = Math.round(timeoutMs / 1000);
+  return new ApiError(
+    `请求超时：${seconds} 秒内后端没有响应（${url}）。` +
+      "这不代表请求失败，而是连「失败」都没回来 —— 后端可能卡住、代理或 DNS 挂起。" +
+      "可以先看 data/logs/app.log 的最后一条，或重启后端再试。",
+    0,
+    null
+  );
+}
+
+async function request<T>(url: string, init?: RequestInit, timeoutMs: number = REQUEST_TIMEOUT_MS): Promise<T> {
+  // 超时和「用户主动取消」必须分得开：前者要报一句能照做的话，后者应该安静地结束。
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      headers: init?.body instanceof FormData ? undefined : { "Content-Type": "application/json" },
+      ...init,
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      const detail = payload?.detail ?? null;
+      if (detail && typeof detail === "object") {
+        throw new ApiError(detail.message ?? `Request failed with ${response.status}`, response.status, detail);
+      }
+      throw new ApiError(detail ?? `Request failed with ${response.status}`, response.status, detail);
     }
-    throw new ApiError(detail ?? `Request failed with ${response.status}`, response.status, detail);
+    if (response.status === 204) {
+      return undefined as T;
+    }
+    return (await response.json()) as T;
+  } catch (error) {
+    // `AbortError` 只可能来自我们自己（调用方目前都不传 signal），所以直接翻译成超时。
+    if (controller.signal.aborted) {
+      throw timeoutError(url, timeoutMs);
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timer);
   }
-  if (response.status === 204) {
-    return undefined as T;
-  }
-  return response.json() as Promise<T>;
 }
 
 export function getSettings(): Promise<Settings> {
@@ -71,10 +116,14 @@ export function selectDownloadDirectory(): Promise<Settings> {
 }
 
 export function analyzeUrl(url: string): Promise<AnalyzeResponse> {
-  return request<AnalyzeResponse>("/api/analyze", {
-    method: "POST",
-    body: JSON.stringify({ url, cookies_enabled: true })
-  });
+  return request<AnalyzeResponse>(
+    "/api/analyze",
+    {
+      method: "POST",
+      body: JSON.stringify({ url, cookies_enabled: true })
+    },
+    ANALYZE_TIMEOUT_MS
+  );
 }
 
 export function listJobs(): Promise<Job[]> {
