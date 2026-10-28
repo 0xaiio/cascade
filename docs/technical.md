@@ -503,7 +503,7 @@ notepad / VS Code / Sublime 只能是它的子集：用户装了别的我们不�
 其它平台没有等价的「选择器」（macOS 的 `open -a` 要的是应用名，Linux 的 `xdg-open` 只有默认），
 `mode=chooser` 在那里退化成默认打开，见 [open_path_with_chooser](../backend/app/host/system_open.py#L97)。
 
-前端因此是**一颗**按钮（[SubtitleOpenButton](../frontend/src/components/SubtitleOpenButton.tsx#L19)），
+前端因此是**一颗**按钮（[SubtitleOpenButton](../frontend/src/task-center/SubtitleOpenButton.tsx#L19)），
 `title="打开字幕文件；可选择打开方式"`，点下去就是选择器。它曾经是**组合控件**（主段 + 右侧 20px 箭头）：
 那个箭头正是「看起来什么都没发生」的那一处 —— 把一个动作拆成两颗按钮、其中一颗还看不见效果，
 比「入口藏起来」更糟。一个动作 = 一颗按钮；Shift 点击这类看不见的修饰键同样不行。

@@ -153,7 +153,7 @@ TERMINAL_JOB_STATUSES = new Set(["succeeded", "failed"]);
 
 1. **没有在真实浏览器里听过那一声「叮」。** 合成参数（C6→G6、0.5 s、峰值增益 0.16）是
    按「不刺耳」选的，但好不好听只能人耳判断；测试只保证「排进了两个音、没有抛异常」。
-   要调音色改 `frontend/src/notifications.ts` 的 `CHIME_NOTES` 即可，不影响其它逻辑。
+   要调音色改 `frontend/src/notifications/notifications.ts` 的 `CHIME_NOTES` 即可，不影响其它逻辑。
 2. **提示音能否出声取决于浏览器的自动播放策略。** 我在「加入下载队列」与「预览」里
    都调了 `prime()`，但**没有**在真实 Edge 上验证过「提交任务 → 十分钟之后切回来 → 声音
    是否真的响」。失败时会走 `blocked` 分支（不抛异常、也不显示任何东西）——

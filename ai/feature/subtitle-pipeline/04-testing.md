@@ -16,7 +16,7 @@
 | [test_output_paths.py](../../../backend/tests/test_output_paths.py) | 18 → **26**（+8） | 字幕定位：标题里带 `[` `]` 时仍能找到（**不能用 `glob`**，它把方括号当字符类）；不会误吃到 `作品 [abc123]2.en.srt` 这类同前缀文件；按族偏好挑一条；不支持的语种被过滤；语言取 stem 最后一段点号后 |
 | [test_bili_upload.py](../../../backend/tests/test_bili_upload.py) | 69 → **76**（+7） | 投稿成功时挂字幕；`zh-Hans` → `zh`；**字幕失败不把稿件状态翻成失败**；没有字幕 / 未核实稿件 / 文件已不在 → `skipped`（各带一句人话）；`reverify` 可只重挂字幕 |
 | [test_ytdlp_service.py](../../../backend/tests/test_ytdlp_service.py) | 74 → **81**（+7） | 显式字幕语言优先于默认；**非中英语言被忽略**、混合列表只留下中英；计划随 `DownloadPreparation` 回传（语言/轨码/来源/理由）；`subtitles_only` 路径也算出计划、且元数据失败在那里不致命 |
-| [bili-upload.test.tsx](../../../frontend/src/bili-upload.test.tsx) | 50 → **51**（+1） | 投稿预览表**在提交前**显示每条会带什么字幕（`en · 人工` 与 `无字幕` 都要渲染出来） |
+| [bili-upload.test.tsx](../../../frontend/src/bilibili/bili-upload.test.tsx) | 50 → **51**（+1） | 投稿预览表**在提交前**显示每条会带什么字幕（`en · 人工` 与 `无字幕` 都要渲染出来） |
 
 合计后端 **+111**（928 → 1039），前端 **+1**（195 → 196）。改完必须自己数一遍，不要只信 `-q` 的汇总行
 —— 历史上把「收集不全的那一次」当成基线，写出过 267 / 286 / 289 三个数，而真实基线一直是当时的 913。
@@ -92,7 +92,7 @@
 | [test_system_open.py](../../../backend/tests/test_system_open.py) | 4 → **8**（+4） | **没有关联（`1155`）时改弹系统选择器**；非 1155 的 `OSError` 照原样抛（不许把「拒绝访问」变成弹窗）；`chooser` 真的起系统的「打开方式」入口；非 Windows 退化成默认打开 |
 | [test_output_paths.py](../../../backend/tests/test_output_paths.py) | 26 → **30**（+4） | `existing_subtitle_file` 四条：记录值优先、记录为空时退回视频旁边的同名字幕（历史任务）、记录指向已删文件时返回 `None`、视频没定位到时不扫目录 |
 | [test_api.py](../../../backend/tests/test_api.py) | 84 → **92**（+8） | 单视频与条目级各自打开**自己**那份字幕；`mode=chooser` 与默认走**不同**入口（两条路都真的不同才叫实现了选程序）；没有字幕 `409` 且什么都没打开；`mode` 取别的值 `422`；读模型给出 `subtitle_path`；**旧记录（该列为空）能靠视频旁边的同名字幕找到并打开**；文件没了回 `null` |
-| [task-center-files.test.tsx](../../../frontend/src/task-center-files.test.tsx) | 9 → **13**（+4） | 单视频与子视频各自打到自己的接口、带 `?mode=default`；右段打到 `?mode=chooser`；`subtitle_path` 为空时**主段与右段都禁用**；失败文案落在对应那一行 |
+| [task-center-files.test.tsx](../../../frontend/src/task-center/task-center-files.test.tsx) | 9 → **13**（+4） | 单视频与子视频各自打到自己的接口、带 `?mode=default`；右段打到 `?mode=chooser`；`subtitle_path` 为空时**主段与右段都禁用**；失败文案落在对应那一行 |
 
 合计后端 **1050 → 1066**（+16），前端 **196 → 200**（+4）。逐文件相加恰等于全集
 （2026-10-18 实测；上一轮记录的 1039 是当前基线的前一个数，中间合入了「进程重启恢复」那 11 条）。
@@ -130,8 +130,8 @@
 
 | 文件 | 用例数 | 增量覆盖什么 |
 | --- | --- | --- |
-| [bili-subtitle-line.test.tsx](../../../frontend/src/bili-subtitle-line.test.tsx) | **5**（新文件） | `posted` 显示一句结论且**不给**重传按钮；`failed` 带警告并给「重传字幕」、点了打到**这一条**；`skipped` 不画这一行；稿件本身没 `video_url`/`error` 时字幕失败**仍单独撑起一行**；「已上传 + 字幕失败」是两行，徽标文案不被带偏 |
-| [biliStatus.test.ts](../../../frontend/src/biliStatus.test.ts) | 15 → **17**（+2） | 字幕两档判据：`isBadSubtitle` 只有 `failed`，`isNotableSubtitle` 是 `posted` + `failed`；`isNotableUpload` 把字幕失败也算「有话说」 |
+| [bili-subtitle-line.test.tsx](../../../frontend/src/bilibili/bili-subtitle-line.test.tsx) | **5**（新文件） | `posted` 显示一句结论且**不给**重传按钮；`failed` 带警告并给「重传字幕」、点了打到**这一条**；`skipped` 不画这一行；稿件本身没 `video_url`/`error` 时字幕失败**仍单独撑起一行**；「已上传 + 字幕失败」是两行，徽标文案不被带偏 |
+| [biliStatus.test.ts](../../../frontend/src/bilibili/biliStatus.test.ts) | 15 → **17**（+2） | 字幕两档判据：`isBadSubtitle` 只有 `failed`，`isNotableSubtitle` 是 `posted` + `failed`；`isNotableUpload` 把字幕失败也算「有话说」 |
 
 **顺带补上的一处缺口**：这块渲染代码（`BiliJobStatus.tsx` / `biliStatus.ts` / `types.ts` 的
 `BiliSubtitleState`）此前一直**没进版本库** —— HEAD 里既没有「CC 字幕」那一行的渲染，

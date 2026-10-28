@@ -23,7 +23,7 @@
 - **一切以仓库事实为准**：不臆测不存在的功能、接口、配置或部署方式。每个数字（用例数、默认值、阈值、端口、并发数）必须能在仓库中找到出处；找不到出处的数字不许写。
 - **README 只做入口页**：保留一句话定位、合规提醒、快速启动、端口说明、文档导航表、测试命令入口和维护提示；详细内容一律链接到 `docs/`。
 - **禁止重复叙述**：各文档之间不得复制大段相同说明；复用一律用相对链接交叉引用（含锚点）。
-- **引用必须本地可跳转**：引用源文件、文档、代码行、类名、类型和命令时使用相对路径与行锚，例如 `../backend/app/main.py#L98`、`../frontend/src/api.ts#L24`、`implementation.md#任务调度`。行锚由 `scripts/check_doc_anchors.py` 校验，`--fix` 可自动重算能唯一确定符号的那些。
+- **引用必须本地可跳转**：引用源文件、文档、代码行、类名、类型和命令时使用相对路径与行锚，例如 `../backend/app/main.py#L98`、`../frontend/src/shared/api.ts#L24`、`implementation.md#任务调度`。行锚由 `scripts/check_doc_anchors.py` 校验，`--fix` 可自动重算能唯一确定符号的那些。
 - **区分「已核验」与「推断」**：凡结论依赖实验或数据的，注明取证方式与时间基线；不确定处显式标注，不得用「应该」「可能是」蒙混。
 - **合规边界**：涉及 YouTube、cookies、PO token、下载稳定性、版权或权限限制时保持合规与边界清晰：不承诺绕过 DRM、会员、地区、年龄、私有视频等权限限制，不把「规避风控」写成产品目标。
 - **风险项必须写明代价**：`throttledratelimit`、aria2c 多连接等会影响 403 率的开关，必须在文档中同时给出「收益」与「代价」，并说明默认值与回退方式。
@@ -118,7 +118,7 @@
   - `docs.py`：文档工具链（`bootstrap` / `render` / `check`），固定版本 PlantUML。
   - `check_doc_anchors.py`：代码行锚点漂移检查（`--fix` 自动重算）。
   - `check_layers.py`：**分层依赖校验**——解析 `docs/design.md` 的模块职责矩阵，与 `backend/app` 实际模块集合对比，并检查 import 方向只向下。
-  - `check_api_contract.py`：**契约漂移校验**——以运行时 `app.openapi()` 为单一来源，比对 `docs/openapi.yaml` 与 `frontend/src/types.ts`。
+  - `check_api_contract.py`：**契约漂移校验**——以运行时 `app.openapi()` 为单一来源，比对 `docs/openapi.yaml` 与 `frontend/src/contracts/types.ts`。
   - `bench_concurrency.py`、`bench_throttle_guard.py`：可离线复现的并发与节流基准。
   - `acceptance_network.py`、`acceptance_real.py`：需要真实网络的验收脚本（本机常因环境无法执行，属「未验证」事项）。
   - `export_cookies_via_cdp.py`：独立配置的有头浏览器导出 cookies（有域名校验，失败退出码 2）。

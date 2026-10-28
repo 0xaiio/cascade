@@ -1,7 +1,7 @@
 # 012 · 投稿表单的本地预检有两处口径不对：列表还在读就要求用户去选合集、标签回显截断写死 12 个字
 
 - **状态**：已修复
-- **发现方式**：给新抽出的纯函数模块补单元测试（`frontend/src/biliForm.test.ts`），一条断言当场红
+- **发现方式**：给新抽出的纯函数模块补单元测试（`frontend/src/bilibili/biliForm.test.ts`），一条断言当场红
 - **提交**：本次提交（hash 见索引，按目录约定下次触碰时回填）
 
 > **为什么不记在 `ai/ui/`**：那条目录的硬要求是「元素 + 属性 + 像素差 + 量它的命令」，
@@ -40,12 +40,12 @@
 ## 原因
 
 都在同一个函数上 —— 原先内联在 `BiliUploadDialog.tsx` 里的 `localProblems` useMemo，
-本轮重构成纯函数 `frontend/src/biliForm.ts#L133` 的 `localPreflight`。两处都是**独立可达**的，
+本轮重构成纯函数 `frontend/src/bilibili/biliForm.ts#L133` 的 `localPreflight`。两处都是**独立可达**的，
 叠在同一个函数里：
 
 **（一）「正在读取」与「还没选」是两条并列的展开条件，彼此不知道对方存在。**
 
-`git show HEAD:frontend/src/components/BiliUploadDialog.tsx`（第 189-199 行原文）：
+`git show HEAD:frontend/src/bilibili/BiliUploadDialog.tsx`（第 189-199 行原文）：
 两条 `...(cond ? [...] : [])` 各自独立求值，`groupMode === "existing"` 时两条同时成立：
 
 - `!seasonsLoaded` → 第一条出「正在读取账号里的合集…」；
@@ -93,7 +93,7 @@ longestTag.length > 12 ? `${longestTag.slice(0, 12)}…` : longestTag
 **（二）把回显长度变成服务端下发的数字，前端不再自己造一个。**
 
 - `schemas.BiliLimits` 新增 `tag_preview: int`，`bili_meta.limits()` 填 `TAG_PREVIEW_MAX`；
-- `frontend/src/types.ts` 的 `BiliLimits` 同步加字段（契约检查会拦漏改，见「验证」）；
+- `frontend/src/contracts/types.ts` 的 `BiliLimits` 同步加字段（契约检查会拦漏改，见「验证」）；
 - `biliForm.localPreflight` 用它，删掉字面量 12：
 
 ```ts
@@ -125,7 +125,7 @@ const preview = longest.length > limits.tag_preview
 
 | 文件 | 用例 | 钉住什么 |
 |---|---|---|
-| `frontend/src/biliForm.test.ts` | `本地预检：加入已有合集 > 列表还在读时把它当成一条问题 —— 提交按钮的禁用条件就是「有没有问题」` | **本条（一）**。修复前实测红：`expected [ Array(2) ] to deeply equal [ '正在读取账号里的合集…' ]`，多出来的一句正是「选了「加入已有合集」但还没选是哪个合集」 |
+| `frontend/src/bilibili/biliForm.test.ts` | `本地预检：加入已有合集 > 列表还在读时把它当成一条问题 —— 提交按钮的禁用条件就是「有没有问题」` | **本条（一）**。修复前实测红：`expected [ Array(2) ] to deeply equal [ '正在读取账号里的合集…' ]`，多出来的一句正是「选了「加入已有合集」但还没选是哪个合集」 |
 | | `… > 列表读出来了但一个都没选` | `seasonsLoaded` 为真时那条判据必须回来（不能修过头） |
 | | `… > 选过的合集已经不在列表里（列表刷新后消失）` | 二级判据没被顺手碰掉 |
 | | `… > 单视频与合集共用同一条规则` | 两条入口的判据一致 |

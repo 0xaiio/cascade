@@ -29,20 +29,20 @@ import {
   retryBiliUpload,
   updateSettings,
   uploadCookies
-} from "./api";
-import { AnalysisPanel } from "./components/AnalysisPanel";
-import { BiliUploadDialog } from "./components/BiliUploadDialog";
-import { CompletionToasts } from "./components/CompletionToasts";
-import { DownloadOptionsPanel } from "./components/DownloadOptionsPanel";
-import { JobQueue } from "./components/JobQueue";
-import { SettingsPanel } from "./components/SettingsPanel";
-import { StatusPill } from "./components/StatusPill";
-import { UrlAnalyzer } from "./components/UrlAnalyzer";
-import { groupNotice, noticeTarget } from "./biliForm";
-import { browserCookieLockFromError, type BrowserCookieLock } from "./cookieLock";
-import { errorMessage } from "./errors";
-import { chooseAvailableResolution } from "./quality";
-import { effectiveSubtitleSourceForAnalysis } from "./subtitles";
+} from "./shared/api";
+import { AnalysisPanel } from "./download-request/AnalysisPanel";
+import { BiliUploadDialog } from "./bilibili/BiliUploadDialog";
+import { CompletionToasts } from "./notifications/CompletionToasts";
+import { DownloadOptionsPanel } from "./download-request/DownloadOptionsPanel";
+import { JobQueue } from "./task-center/JobQueue";
+import { SettingsPanel } from "./settings/SettingsPanel";
+import { StatusPill } from "./shared/ui/StatusPill";
+import { UrlAnalyzer } from "./download-request/UrlAnalyzer";
+import { groupNotice, noticeTarget } from "./bilibili/biliForm";
+import { browserCookieLockFromError, type BrowserCookieLock } from "./cookies/cookieLock";
+import { errorMessage } from "./shared/errors";
+import { chooseAvailableResolution } from "./shared/quality";
+import { effectiveSubtitleSourceForAnalysis } from "./shared/subtitles";
 import {
   ChimePlayer,
   TERMINAL_JOB_STATUSES,
@@ -51,7 +51,7 @@ import {
   useCompletionToasts,
   wantsSound,
   wantsToast
-} from "./notifications";
+} from "./notifications/notifications";
 import type {
   AnalyzeResponse,
   BiliGroupMode,
@@ -63,7 +63,7 @@ import type {
   Job,
   JobBatchAction,
   Settings
-} from "./types";
+} from "./contracts/types";
 
 const INITIAL_OPTIONS: DownloadOptions = {
   mode: "video_subtitles",

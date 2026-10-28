@@ -17,7 +17,7 @@
 
 [refactor.md §4.1](refactor.md#41-后续候选清单登记为本轮三轮不做此后逐项单独一轮) 第 3 项：
 
-> **`openapi.yaml` 与 `frontend/src/types.ts` 是两份手写的同一契约**（28 operations / 206 行类型）。
+> **`openapi.yaml` 与 `frontend/src/contracts/types.ts` 是两份手写的同一契约**（28 operations / 206 行类型）。
 > 理想形态是单一来源 + 生成，但生成器会引入工具链与 npm 依赖，违反 §3.1 第 6 条，需单独决策。
 
 同一个契约有三份表达：
@@ -26,7 +26,7 @@
 | --- | --- | --- | --- |
 | **可执行契约** | `app.openapi()`（运行时生成） | 由 `schemas.py` + 各路由的响应模型推导 | **会** |
 | 人类可读文档 | `docs/openapi.yaml` | 手写 | 不会 |
-| 前端类型 | `frontend/src/types.ts` | 手写 | 不会 |
+| 前端类型 | `frontend/src/contracts/types.ts` | 手写 | 不会 |
 
 三份里只有第一份不会漂。本项要解决的是「后两份悄悄与第一份分叉，直到运行时才炸」。
 
@@ -156,7 +156,7 @@ ApiErrorDetail  → None（错误 detail 不在运行时的 schemas 里）
 | 1 | 在 `types.ts` 的 `JobItem` 里加 `zzz_probe_field: string` | 字段集合不一致 | **EXIT=1**，报 `JobItem ↔ JobItemRead 字段不一致：types.ts 多 ['zzz_probe_field']` |
 | 2 | 把 `openapi.yaml` 的 `/health` 改名 `/health-probe` | 路径集合不一致 | **EXIT=1**，报 `路径 × 方法不一致：文档多 [('/health-probe', 'get')]，文档少 [('/health', 'get')]` |
 
-两次注入后均已还原，`git diff frontend/src/types.ts docs/openapi.yaml` 为空。
+两次注入后均已还原，`git diff frontend/src/contracts/types.ts docs/openapi.yaml` 为空。
 还原后复跑：**EXIT=0**。
 
 ### 4.3 同步的文档

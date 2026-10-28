@@ -23,11 +23,11 @@ B站 投稿完成后，任务卡片里的稿件明细只有一行：「N. 标题
 
 | 文件 | HEAD 里的样子 | 工作区里的样子 |
 | --- | --- | --- |
-| `frontend/src/types.ts` | `subtitle_state: "posted" \| "skipped" \| "failed"` 内联联合类型，没有可复用的名字 | 提取成 `BiliSubtitleState` 并用于 `BiliUpload` |
-| `frontend/src/biliStatus.ts` | 无 `BAD_SUBTITLE_STATES` / `NOTABLE_SUBTITLE_STATES` / `isBadSubtitle` / `isNotableSubtitle` | 有，且 `isNotableUpload` 把「字幕失败」算进「有话要说」 |
-| `frontend/src/components/BiliJobStatus.tsx` | 只渲染稿件那一行 | 多渲染一行 `CC 字幕`：文案 + 失败时的警告图标与「重传字幕」按钮 |
+| `frontend/src/contracts/types.ts` | `subtitle_state: "posted" \| "skipped" \| "failed"` 内联联合类型，没有可复用的名字 | 提取成 `BiliSubtitleState` 并用于 `BiliUpload` |
+| `frontend/src/bilibili/biliStatus.ts` | 无 `BAD_SUBTITLE_STATES` / `NOTABLE_SUBTITLE_STATES` / `isBadSubtitle` / `isNotableSubtitle` | 有，且 `isNotableUpload` 把「字幕失败」算进「有话要说」 |
+| `frontend/src/bilibili/BiliJobStatus.tsx` | 只渲染稿件那一行 | 多渲染一行 `CC 字幕`：文案 + 失败时的警告图标与「重传字幕」按钮 |
 
-`git show HEAD:frontend/src/components/BiliJobStatus.tsx | grep -c subtitle` = **0**。
+`git show HEAD:frontend/src/bilibili/BiliJobStatus.tsx | grep -c subtitle` = **0**。
 也就是说：上一轮把后端与文档都提交了，**前端呈现这一块漏在了工作区**，而且没有任何用例会红
 （`biliStatus.test.ts` 也没覆盖字幕判据）。
 
@@ -49,8 +49,8 @@ B站 投稿完成后，任务卡片里的稿件明细只有一行：「N. 标题
 
 ### 2. 补测试（这才是本条能结项的关键）
 
-新增 [bili-subtitle-line.test.tsx](../frontend/src/bili-subtitle-line.test.tsx) 5 条，
-并在 [biliStatus.test.ts](../frontend/src/biliStatus.test.ts) 补 2 条判据。断言的是
+新增 [bili-subtitle-line.test.tsx](../frontend/src/bilibili/bili-subtitle-line.test.tsx) 5 条，
+并在 [biliStatus.test.ts](../frontend/src/bilibili/biliStatus.test.ts) 补 2 条判据。断言的是
 「用户看到什么、点了发生什么」，不是「函数返回 true」：
 
 | 用例 | 断言什么 |

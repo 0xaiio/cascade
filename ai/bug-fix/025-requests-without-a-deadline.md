@@ -9,7 +9,7 @@
 
 ## 问题
 
-`frontend/src/api.ts` 的 `request()` 直接 `await fetch(...)`，没有任何超时：
+`frontend/src/shared/api.ts` 的 `request()` 直接 `await fetch(...)`，没有任何超时：
 
 ```ts
 const response = await fetch(url, { ...init });

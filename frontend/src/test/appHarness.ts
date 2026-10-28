@@ -1,7 +1,7 @@
 import { cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, vi } from "vitest";
-import type { BiliJobUploads, Job } from "../types";
+import type { BiliJobUploads, Job } from "../contracts/types";
 import {
   analyzePayload,
   biliJobUploadsPayload,
@@ -32,7 +32,7 @@ import {
  * 用法（测试文件顶层，收集阶段调用一次）：
  *
  * ```ts
- * import { installAppHarness, mockState } from "./test/appHarness";
+ * import { installAppHarness, mockState } from "../test/appHarness";
  * installAppHarness();
  * ```
  *

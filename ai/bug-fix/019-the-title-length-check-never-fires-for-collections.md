@@ -18,7 +18,7 @@
 
 ### 1. 合集预检量错了对象
 
-`frontend/src/biliForm.ts` 的 `localPreflight`（HEAD，`147` 行）：
+`frontend/src/bilibili/biliForm.ts` 的 `localPreflight`（HEAD，`147` 行）：
 
 ```ts
 ...(metadata.title.length > limits.title ? [`标题超出 ${...} 个字`] : []),
@@ -37,7 +37,7 @@
 「超没超」要用户自己做一次减法才能知道：
 
 ```
-$ git show HEAD:frontend/src/components/BiliUploadDialog.tsx | grep -n 'className="char-count"'
+$ git show HEAD:frontend/src/bilibili/BiliUploadDialog.tsx | grep -n 'className="char-count"'
 257:            <span className="char-count">
 424:            <span className="char-count">
 439:            <span className="char-count">

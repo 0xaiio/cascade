@@ -94,45 +94,69 @@
 
 ## 前端组件边界
 
-`App.tsx` 只负责状态编排（解析、建任务、设置回灌、SSE 订阅）与整体布局；展示职责全部在 `components/` 下，
-纯计算在 `formatting.ts` / `quality.ts` / `subtitles.ts` / `cookieLock.ts` / `biliForm.ts` / `biliStatus.ts` / `biliProgress.ts` / `biliHealth.ts` / `errors.ts` / `notifications.ts`。
-判断新代码放哪：**需要 `useState` 或发请求吗？**
-需要就留在 `App.tsx`（或抽成 hook），只把 props 变成界面就进 `components/`，只看数据变换就进纯模块。
+`App.tsx` 只负责状态编排（解析、建任务、设置回灌、SSE 订阅）与整体布局。其余按**功能**分目录 ——
+与后端的切法一致：目录回答「服务于谁」，不回答「是什么类型」。组件、判定与文案放在同一个功能目录里，
+因为它们改起来的原因通常是同一个（B站 上传改一次，`BiliUploadDialog` 与 `biliForm` 往往要一起改）。
+
+| 目录 | 内容 | 依赖方向 |
+| --- | --- | --- |
+| [App.tsx](../frontend/src/App.tsx) / [main.tsx](../frontend/src/main.tsx) | 编排根与入口，留在 `src/` 根：`index.html` 与 `main.tsx` 按 `./App` 取它 | 向下装配一切 |
+| [contracts/](../frontend/src/contracts/types.ts) | 线上契约 `types.ts`，与后端 `contracts/schemas.py` 一一对应，由 `check_api_contract.py` 逐接口对照 | 被任何目录 import 都正常 |
+| [shared/](../frontend/src/shared/) | 跨功能复用：`api`（HTTP 边界 + 超时看门狗）、`errors` / `formatting` / `quality` / `subtitles`；[ui/](../frontend/src/shared/ui/) 放**无业务判断**的基础件（`HelpPopover` / `Toggle` / `StatusPill`） | 不依赖任何功能目录 |
+| [download-request/](../frontend/src/download-request/) | 发起下载：解析链接（`UrlAnalyzer`）、解析结果（`AnalysisPanel`）、下载选项（`DownloadOptionsPanel` / `SearchableLanguageSelect`） | 依赖 `shared` / `cookies` |
+| [cookies/](../frontend/src/cookies/) | 浏览器 cookies 的导入、校验与锁库映射（`CookieSection` / `cookieLock`） | 依赖 `shared` |
+| [task-center/](../frontend/src/task-center/) | 任务中心：控制 / 删除 / 展开、进度与明细、本地文件操作、清晰度降级的重启（`JobQueue` / `SubtitleOpenButton`） | 依赖 `shared` / `bilibili` |
+| [settings/](../frontend/src/settings/) | 设置、代理检测与运行环境自检（`SettingsPanel` / `ProxySection`） | 依赖 `shared` / `bilibili`（登录区） |
+| [bilibili/](../frontend/src/bilibili/) | B站 上传：入口、表单、进度、状态明细、登录区，以及 `biliForm` / `biliStatus` / `biliProgress` / `biliHealth` 四块判定与文案 | 依赖 `shared` / `contracts` |
+| [notifications/](../frontend/src/notifications/) | 任务完成提醒：终态判定与浮层队列（`notifications`）、右下角浮层（`CompletionToasts`） | 依赖 `contracts` |
+| [test/](../frontend/src/test/) | 共享夹具 `appFixtures` / `appHarness` / `cssRules` / `setup`，不含业务判断 | 只被测试 import |
+
+两条与「按功能分目录」配套的约定：
+
+1. **测试跟着它测的能力走，不跟它 `render` 谁走**。多数 `*.test.tsx` 都 `render(<App/>)`（这是有意的集成口径：
+   路由与编排之间的接线最容易错），但归属看**断言描述的是谁的行为** —— 例如
+   [task-center/resolution-fallback.test.tsx](../frontend/src/task-center/resolution-fallback.test.tsx) 断言的是任务卡上的
+   「以 720p 重启」，所以它属于任务中心，不属于下载选项。
+2. **只有「一份」的东西才进 `shared/`**：一个模块被两个以上功能目录 import，才说明它不属于某个功能。
+   只被一个功能用的判定（如 `biliStatus`）留在该功能目录里，别提前「抽象」出去。
+
+判断新代码放哪：**需要 `useState` 或发请求吗？** 需要就留在 `App.tsx`（或抽成 hook）；
+只把 props 变成界面就进对应功能目录；是一段跨功能复用的纯计算就进 `shared/`。
 
 | 组件 / 模块 | 职责 | 不负责 |
 | --- | --- | --- |
-| [UrlAnalyzer.tsx](../frontend/src/components/UrlAnalyzer.tsx#L29) | 解析面板：链接输入、cookies 行（状态 + 上传/清除 + 浏览器导入）、锁库提示、解析按钮。只持有「选了哪个浏览器」这类纯界面状态。 | 不发请求（回调交 `App`），不决定用哪份 cookies。 |
-| [AnalysisPanel.tsx](../frontend/src/components/AnalysisPanel.tsx#L12) | 解析结果：缩略图/标题/时长、playlist 条目勾选表、单视频汇总行。 | 不持有选中集合（状态归 `App`，提交要用同一份）。 |
-| [DownloadOptionsPanel.tsx](../frontend/src/components/DownloadOptionsPanel.tsx#L19) | 下载选项：模式、清晰度、字幕语言/来源/格式、开关项、限速与重试、提交按钮。 | 不持有状态：所有值来自 `options`，改动经 `onOptionChange` 回到 `App`。 |
-| [SearchableLanguageSelect.tsx](../frontend/src/components/SearchableLanguageSelect.tsx#L16) | 可搜索的字幕语言多选。标签里 join 的是**语言代码**，项数无上界 —— 不许 `nowrap`，见 [ai/ui/003](../ai/ui/003-language-trigger-label-overflows-the-page.md)。 | 不拉取可用语言（由 `App` 从解析结果里汇总）。 |
-| [SettingsPanel.tsx](../frontend/src/components/SettingsPanel.tsx#L69) | 设置：下载目录、并发、单视频并发下载数（aria2c）、代理（含连通性检测）。持有一份 `draft`，**失焦即保存**；单视频并发下载数旁挂一个说明浮层（`Aria2cHelpPopover`）。 | 不解析代理来源（后端回传 `proxy_source`），不决定代理语义（留空=自动、`direct`=直连由后端定义）；也不判断「aria2c 此刻是否真的在用」——那由后端的 profile 链决定，界面只解释怎么启用。 |
-| [Toggle.tsx](../frontend/src/components/Toggle.tsx#L4) / [StatusPill.tsx](../frontend/src/components/StatusPill.tsx#L4) | 基础件：勾选行、顶栏状态点。 | 不含业务判断（`ok === undefined` 一律按警告渲染）。 |
-| [CookieSection.tsx](../frontend/src/components/CookieSection.tsx#L121) | cookies 状态、校验按钮与结论展示；两个说明浮层（[获取方式](../frontend/src/components/CookieSection.tsx#L53)、[结论解读](../frontend/src/components/CookieSection.tsx#L96)）就近挂在这里。 | 不决定用哪份 cookies（后端决定），不构造请求体。 |
-| [ProxySection.tsx](../frontend/src/components/ProxySection.tsx#L140) | 代理检测结果展示与「真的发一次请求」的入口；[常用端口](../frontend/src/components/ProxySection.tsx#L75)与[排查顺序](../frontend/src/components/ProxySection.tsx#L112)两个说明浮层。 | 不解析代理来源（后端回传 `proxy_source`），不保存设置（保存由 `SettingsPanel` 触发）。 |
-| [HelpPopover.tsx](../frontend/src/components/HelpPopover.tsx#L42) | **通用非模态说明浮层**：定位、钉住、关闭、记忆，以及窄屏抽屉形态。所有辅助说明共用它。 | 不含任何业务文案（文案由调用方以 children 传入）。 |
-| [JobQueue.tsx](../frontend/src/components/JobQueue.tsx#L23) | 任务中心展示与本地文件操作入口（播放 / 打开文件夹 / 打开字幕 / 删除）。 | 不直接访问本机文件系统（一律走后端受控打开/删除接口）。 |
-| [SubtitleOpenButton.tsx](../frontend/src/components/SubtitleOpenButton.tsx#L19) | 「打开字幕」的**一颗**按钮：点它弹系统的「打开方式」，由用户当场挑程序。 | 不维护编辑器清单、不记住「上次用的程序」（那是系统的职责，见 [technical.md](technical.md#打开字幕文件)），不发请求（`onOpen` 归 `App`）。 |
-| [BiliIcon.tsx](../frontend/src/components/BiliIcon.tsx#L12) | B站 图标：圆角机身 + 两根天线 + 两只眼睛的**手绘** SVG，描边走 `currentColor` 由调用方决定颜色。 | 不含任何布局与文案；品牌色只落在这个图标上，不扩散成按钮配色。 |
-| [BiliUploadButton.tsx](../frontend/src/components/BiliUploadButton.tsx#L42) | 任务行/条目行上的上传入口：**图标 + 一句人话**。`idle` 档显示动作词（「上传到 B站」），其余档原样显示后端徽标文案 —— 前端不自己造一套状态文案，两处必然会漂移。**改的是「点下去做什么」，不是「长什么样」**：`uploaded` → 打开稿件页；`unverified` / `partial` → 只补没成功的那几条；`uploading` → 灰着不动；只有 `failed` 打开上传表单。 | 不请求、不判断能不能传（`disabledReason` 由 `App` 给），不决定上传什么，也不判「哪条该重投、哪条只该核对」（那是服务端按每条终态决定的）；「打开哪一个页面」由 [`uploadedTargetUrl`](../frontend/src/biliStatus.ts#L129) 算，要补哪几条由 [`retryableUploadIds`](../frontend/src/biliStatus.ts#L147) 算。 |
-| [BiliUploadProgress.tsx](../frontend/src/components/BiliUploadProgress.tsx#L15) | 任务卡片里的**上传进度**：四段轨迹（排队/传输/提交/核对）+ 当前段动效 + 每秒推进的「已用/已提交」。只在需要等的时候渲染（在跑或审核中）。 | 不判「算不算成功」（那是后端徽标）、不画百分比（`biliup` 没有字节进度，见下）；不请求。 |
-| [BiliUploadDialog.tsx](../frontend/src/components/BiliUploadDialog.tsx#L65) | 上传表单模态框，**单视频与合集共用**：单视频填的就是最终内容，合集填的是模板（`{index}` `{title}` `{count}` `{job}` 占位符）并带一张逐条预览表。硬限数字来自 `prefill.limits`，超限只报错不截断，未就绪的条目先标出来。**标题框旁边就能看出超没超**：超限时追加「超出 N 个字」并加 `is-over` / `aria-invalid`；合集另给一行「渲染后最长 N/上限（第 X 条…）」。`prefill.reused` 时明说「已填入上一次投稿的内容」，合集名也优先用上次填的那个。预览表还有一列**字幕**，显示服务端算好的 `item.subtitle`。 | 不渲染模板（渲染在后端 `bili_meta`，前端只显示服务端给的结果），不校验硬限（判据在 `biliForm.localPreflight`，这里只显示结论），不拼字幕文案（那句由后端 `subtitle_summary` 给），不发请求（`onSubmit` 归 `App`）；**不自己决定复用什么**（复用来源在服务端 `build_prefill`）。 |
-| [BiliJobStatus.tsx](../frontend/src/components/BiliJobStatus.tsx#L19) | 任务卡片里的上传明细与「下一步」：失败原因 + 服务端给的 advice、合集归集结论、重试入口。**只在有话说时渲染一行**。 | 不决定重试动作（后端按终态三选一），不给已成功的条目放重试按钮。 |
-| [BiliLoginSection.tsx](../frontend/src/components/BiliLoginSection.tsx#L32) | 设置面板里的 B站 区：环境体检（**点「重新体检」会变「体检中…」并禁用，结束后写「上次体检 HH:MM:SS」**）、扫码登录（含轮询，1.5s）、导入登录文件、修复投稿工具。**凭据一个字符都不显示**（只给「已保存 N 项 / 缺 SESSDATA」的摘要与账号名）。 | 不显示 cookies 值或掩码前缀；「登录文件被 git 跟踪」单独红字，不由本组件自动修复；**超时/降级策略不在这里**（在 `biliHealth`），也不发请求（走 `api.ts`）。 |
-| [subtitles.ts](../frontend/src/subtitles.ts#L12) | 字幕文案与来源归一：`formatSubtitleInfo`（那行「字幕：来源 X · 格式 Y」）、`effectiveSubtitleSourceForAnalysis`（提交前把「两者都要」收敛成该视频真有的那一类）。 | 不做请求、不读存储。 |
-| [cookieLock.ts](../frontend/src/cookieLock.ts#L20) | 把后端 `browser_locked` 错误映射成界面状态（含 `pendingAnalyzeUrl`，用于「关闭 Edge 并导入」后自动补一次解析）。判据是 `detail.code`，不是文案。 | 不渲染界面（渲染在 `UrlAnalyzer`）。 |
-| [biliForm.ts](../frontend/src/biliForm.ts#L129) | 投稿表单的**词汇表与预检**：版权/归集方式的取值、标签计数与最长标签、三种说明与回执文案、提交前的本地预检、**字符预算**（`charBudget`：`length/limit/over/label/warning` 一起算出来，单看数字看不出超没超）与**合集渲染后的标题长度**（`collectionTitleBudget`：量的是渲染后的每一条，不是模板本身）。硬限数字一律取自 `prefill.limits`，**不写死**（含「报超长标签时回显多少个字」，那是 `limits.tag_preview`）。 | 不改 `input`（报错而不是修好再提交，与服务端 `bili_meta.validate` 同一条约定）；不渲染、不发请求；**不是权威校验**（服务端 `bili_meta.validate` / `bili_upload.validate_collection` 才是，这里报的它一定报、它报的这里尽量也报）。 |
-| [biliStatus.ts](../frontend/src/biliStatus.ts#L24) | 稿件/合集状态的**判定**：能不能重试、算不算出问题、哪一档徽标是「还没上传」，以及两件「点这一下该去哪儿」的事：`uploaded` 打开哪个页面（`uploadedTargetUrl`）、`unverified`/`partial` 该补哪几条记录（`retryableUploadIds`）。判据一律是「用户此刻该做什么」，取值本身在 [types.ts](../frontend/src/types.ts#L266)。 | 不造文案（徽标文案来自服务端 `badge_text`）；不决定重试动作（后端按终态三选一）；不拼 URL（`video_url` 由后端给）。 |
-| [biliProgress.ts](../frontend/src/biliProgress.ts#L23) | 上传进度的**判定**：一条记录处在哪一段、在等什么（`uploadStageView`）、一个任务该显示哪一条与多少条已确认（`jobUploadProgress`）、「已用 01:23」（`uploadElapsedLabel`）。四段是四个**步骤**，不代表四段时间。 | 不造文案之外的状态、不请求、不决定是否显示（由 `waiting` 决定）。 |
-| [biliHealth.ts](../frontend/src/biliHealth.ts#L48) | 「重新体检」的**策略**：先带 12 秒时限探账号，超时就退回**离线**体检（工具/登录文件存在性）并标记 `timedOut`；网络错误照旧抛出。 | 不渲染界面、不拼文案（文案在 `BiliLoginSection`）、不决定探什么（两个 loader 由调用方注入）。 |
-| [errors.ts](../frontend/src/errors.ts#L15) | 异常 → 一句可显示的话（`errorMessage`）。收口原先散在十几处的 `err instanceof Error ? err.message : fallback`——重写一遍的代价不是行数，而是**语义各自漂移**（有的在 `message` 为空时兜到 fallback，有的不兜）。 | 不看 `ApiError.detail`：把 `advice` 拼进文案只在 `App.biliMessage`，只有那条链路会带 `advice`。 |
-| [notifications.ts](../frontend/src/notifications.ts) | 「任务跑完了」的提醒**判定**：哪些状态算终态（`succeeded`/`failed`，`cancelled` 不算——取消是用户自己点的）、一条提醒写成什么话（`describeCompletion`）、浮层队列的生命周期（`useCompletionToasts`：自动缩回、悬停暂停、**后台标签页不倒计时**）。提示音参数与下拉选项也是常量。 | 不发声、不渲染（声音在 `CompletionToasts` 里用 Web Audio 现场合成）；不决定「要不要提醒」（那是逐任务的 `notify_on_complete`）与「用什么方式」（那是全局 `completion_notification`）。 |
-| [CompletionToasts.tsx](../frontend/src/components/CompletionToasts.tsx#L21) | 右下角**浮层容器**：渲染 `notifications.ts` 给出的队列，悬停暂停缩回、可手动关。同时是提示音的出口（Web Audio 现场合成 C6→G6，没有任何音频文件跟着仓库走）。 | 不判断谁该被提醒（判定在 `notifications.ts`）；不读设置（方式由 `App` 传入）。 |
+| [UrlAnalyzer.tsx](../frontend/src/download-request/UrlAnalyzer.tsx#L29) | 解析面板：链接输入、cookies 行（状态 + 上传/清除 + 浏览器导入）、锁库提示、解析按钮。只持有「选了哪个浏览器」这类纯界面状态。 | 不发请求（回调交 `App`），不决定用哪份 cookies。 |
+| [AnalysisPanel.tsx](../frontend/src/download-request/AnalysisPanel.tsx#L12) | 解析结果：缩略图/标题/时长、playlist 条目勾选表、单视频汇总行。 | 不持有选中集合（状态归 `App`，提交要用同一份）。 |
+| [DownloadOptionsPanel.tsx](../frontend/src/download-request/DownloadOptionsPanel.tsx#L19) | 下载选项：模式、清晰度、字幕语言/来源/格式、开关项、限速与重试、提交按钮。 | 不持有状态：所有值来自 `options`，改动经 `onOptionChange` 回到 `App`。 |
+| [SearchableLanguageSelect.tsx](../frontend/src/download-request/SearchableLanguageSelect.tsx#L16) | 可搜索的字幕语言多选。标签里 join 的是**语言代码**，项数无上界 —— 不许 `nowrap`，见 [ai/ui/003](../ai/ui/003-language-trigger-label-overflows-the-page.md)。 | 不拉取可用语言（由 `App` 从解析结果里汇总）。 |
+| [SettingsPanel.tsx](../frontend/src/settings/SettingsPanel.tsx#L69) | 设置：下载目录、并发、单视频并发下载数（aria2c）、代理（含连通性检测）。持有一份 `draft`，**失焦即保存**；单视频并发下载数旁挂一个说明浮层（`Aria2cHelpPopover`）。 | 不解析代理来源（后端回传 `proxy_source`），不决定代理语义（留空=自动、`direct`=直连由后端定义）；也不判断「aria2c 此刻是否真的在用」——那由后端的 profile 链决定，界面只解释怎么启用。 |
+| [Toggle.tsx](../frontend/src/shared/ui/Toggle.tsx#L4) / [StatusPill.tsx](../frontend/src/shared/ui/StatusPill.tsx#L4) | 基础件：勾选行、顶栏状态点。 | 不含业务判断（`ok === undefined` 一律按警告渲染）。 |
+| [CookieSection.tsx](../frontend/src/cookies/CookieSection.tsx#L121) | cookies 状态、校验按钮与结论展示；两个说明浮层（[获取方式](../frontend/src/cookies/CookieSection.tsx#L53)、[结论解读](../frontend/src/cookies/CookieSection.tsx#L96)）就近挂在这里。 | 不决定用哪份 cookies（后端决定），不构造请求体。 |
+| [ProxySection.tsx](../frontend/src/settings/ProxySection.tsx#L140) | 代理检测结果展示与「真的发一次请求」的入口；[常用端口](../frontend/src/settings/ProxySection.tsx#L75)与[排查顺序](../frontend/src/settings/ProxySection.tsx#L112)两个说明浮层。 | 不解析代理来源（后端回传 `proxy_source`），不保存设置（保存由 `SettingsPanel` 触发）。 |
+| [HelpPopover.tsx](../frontend/src/shared/ui/HelpPopover.tsx#L42) | **通用非模态说明浮层**：定位、钉住、关闭、记忆，以及窄屏抽屉形态。所有辅助说明共用它。 | 不含任何业务文案（文案由调用方以 children 传入）。 |
+| [JobQueue.tsx](../frontend/src/task-center/JobQueue.tsx#L23) | 任务中心展示与本地文件操作入口（播放 / 打开文件夹 / 打开字幕 / 删除）。 | 不直接访问本机文件系统（一律走后端受控打开/删除接口）。 |
+| [SubtitleOpenButton.tsx](../frontend/src/task-center/SubtitleOpenButton.tsx#L19) | 「打开字幕」的**一颗**按钮：点它弹系统的「打开方式」，由用户当场挑程序。 | 不维护编辑器清单、不记住「上次用的程序」（那是系统的职责，见 [technical.md](technical.md#打开字幕文件)），不发请求（`onOpen` 归 `App`）。 |
+| [BiliIcon.tsx](../frontend/src/bilibili/BiliIcon.tsx#L12) | B站 图标：圆角机身 + 两根天线 + 两只眼睛的**手绘** SVG，描边走 `currentColor` 由调用方决定颜色。 | 不含任何布局与文案；品牌色只落在这个图标上，不扩散成按钮配色。 |
+| [BiliUploadButton.tsx](../frontend/src/bilibili/BiliUploadButton.tsx#L42) | 任务行/条目行上的上传入口：**图标 + 一句人话**。`idle` 档显示动作词（「上传到 B站」），其余档原样显示后端徽标文案 —— 前端不自己造一套状态文案，两处必然会漂移。**改的是「点下去做什么」，不是「长什么样」**：`uploaded` → 打开稿件页；`unverified` / `partial` → 只补没成功的那几条；`uploading` → 灰着不动；只有 `failed` 打开上传表单。 | 不请求、不判断能不能传（`disabledReason` 由 `App` 给），不决定上传什么，也不判「哪条该重投、哪条只该核对」（那是服务端按每条终态决定的）；「打开哪一个页面」由 [`uploadedTargetUrl`](../frontend/src/bilibili/biliStatus.ts#L129) 算，要补哪几条由 [`retryableUploadIds`](../frontend/src/bilibili/biliStatus.ts#L147) 算。 |
+| [BiliUploadProgress.tsx](../frontend/src/bilibili/BiliUploadProgress.tsx#L15) | 任务卡片里的**上传进度**：四段轨迹（排队/传输/提交/核对）+ 当前段动效 + 每秒推进的「已用/已提交」。只在需要等的时候渲染（在跑或审核中）。 | 不判「算不算成功」（那是后端徽标）、不画百分比（`biliup` 没有字节进度，见下）；不请求。 |
+| [BiliUploadDialog.tsx](../frontend/src/bilibili/BiliUploadDialog.tsx#L65) | 上传表单模态框，**单视频与合集共用**：单视频填的就是最终内容，合集填的是模板（`{index}` `{title}` `{count}` `{job}` 占位符）并带一张逐条预览表。硬限数字来自 `prefill.limits`，超限只报错不截断，未就绪的条目先标出来。**标题框旁边就能看出超没超**：超限时追加「超出 N 个字」并加 `is-over` / `aria-invalid`；合集另给一行「渲染后最长 N/上限（第 X 条…）」。`prefill.reused` 时明说「已填入上一次投稿的内容」，合集名也优先用上次填的那个。预览表还有一列**字幕**，显示服务端算好的 `item.subtitle`。 | 不渲染模板（渲染在后端 `bili_meta`，前端只显示服务端给的结果），不校验硬限（判据在 `biliForm.localPreflight`，这里只显示结论），不拼字幕文案（那句由后端 `subtitle_summary` 给），不发请求（`onSubmit` 归 `App`）；**不自己决定复用什么**（复用来源在服务端 `build_prefill`）。 |
+| [BiliJobStatus.tsx](../frontend/src/bilibili/BiliJobStatus.tsx#L19) | 任务卡片里的上传明细与「下一步」：失败原因 + 服务端给的 advice、合集归集结论、重试入口。**只在有话说时渲染一行**。 | 不决定重试动作（后端按终态三选一），不给已成功的条目放重试按钮。 |
+| [BiliLoginSection.tsx](../frontend/src/bilibili/BiliLoginSection.tsx#L32) | 设置面板里的 B站 区：环境体检（**点「重新体检」会变「体检中…」并禁用，结束后写「上次体检 HH:MM:SS」**）、扫码登录（含轮询，1.5s）、导入登录文件、修复投稿工具。**凭据一个字符都不显示**（只给「已保存 N 项 / 缺 SESSDATA」的摘要与账号名）。 | 不显示 cookies 值或掩码前缀；「登录文件被 git 跟踪」单独红字，不由本组件自动修复；**超时/降级策略不在这里**（在 `biliHealth`），也不发请求（走 `api.ts`）。 |
+| [subtitles.ts](../frontend/src/shared/subtitles.ts#L12) | 字幕文案与来源归一：`formatSubtitleInfo`（那行「字幕：来源 X · 格式 Y」）、`effectiveSubtitleSourceForAnalysis`（提交前把「两者都要」收敛成该视频真有的那一类）。 | 不做请求、不读存储。 |
+| [cookieLock.ts](../frontend/src/cookies/cookieLock.ts#L20) | 把后端 `browser_locked` 错误映射成界面状态（含 `pendingAnalyzeUrl`，用于「关闭 Edge 并导入」后自动补一次解析）。判据是 `detail.code`，不是文案。 | 不渲染界面（渲染在 `UrlAnalyzer`）。 |
+| [biliForm.ts](../frontend/src/bilibili/biliForm.ts#L129) | 投稿表单的**词汇表与预检**：版权/归集方式的取值、标签计数与最长标签、三种说明与回执文案、提交前的本地预检、**字符预算**（`charBudget`：`length/limit/over/label/warning` 一起算出来，单看数字看不出超没超）与**合集渲染后的标题长度**（`collectionTitleBudget`：量的是渲染后的每一条，不是模板本身）。硬限数字一律取自 `prefill.limits`，**不写死**（含「报超长标签时回显多少个字」，那是 `limits.tag_preview`）。 | 不改 `input`（报错而不是修好再提交，与服务端 `bili_meta.validate` 同一条约定）；不渲染、不发请求；**不是权威校验**（服务端 `bili_meta.validate` / `bili_upload.validate_collection` 才是，这里报的它一定报、它报的这里尽量也报）。 |
+| [biliStatus.ts](../frontend/src/bilibili/biliStatus.ts#L24) | 稿件/合集状态的**判定**：能不能重试、算不算出问题、哪一档徽标是「还没上传」，以及两件「点这一下该去哪儿」的事：`uploaded` 打开哪个页面（`uploadedTargetUrl`）、`unverified`/`partial` 该补哪几条记录（`retryableUploadIds`）。判据一律是「用户此刻该做什么」，取值本身在 [types.ts](../frontend/src/contracts/types.ts#L266)。 | 不造文案（徽标文案来自服务端 `badge_text`）；不决定重试动作（后端按终态三选一）；不拼 URL（`video_url` 由后端给）。 |
+| [biliProgress.ts](../frontend/src/bilibili/biliProgress.ts#L23) | 上传进度的**判定**：一条记录处在哪一段、在等什么（`uploadStageView`）、一个任务该显示哪一条与多少条已确认（`jobUploadProgress`）、「已用 01:23」（`uploadElapsedLabel`）。四段是四个**步骤**，不代表四段时间。 | 不造文案之外的状态、不请求、不决定是否显示（由 `waiting` 决定）。 |
+| [biliHealth.ts](../frontend/src/bilibili/biliHealth.ts#L48) | 「重新体检」的**策略**：先带 12 秒时限探账号，超时就退回**离线**体检（工具/登录文件存在性）并标记 `timedOut`；网络错误照旧抛出。 | 不渲染界面、不拼文案（文案在 `BiliLoginSection`）、不决定探什么（两个 loader 由调用方注入）。 |
+| [errors.ts](../frontend/src/shared/errors.ts#L15) | 异常 → 一句可显示的话（`errorMessage`）。收口原先散在十几处的 `err instanceof Error ? err.message : fallback`——重写一遍的代价不是行数，而是**语义各自漂移**（有的在 `message` 为空时兜到 fallback，有的不兜）。 | 不看 `ApiError.detail`：把 `advice` 拼进文案只在 `App.biliMessage`，只有那条链路会带 `advice`。 |
+| [notifications.ts](../frontend/src/notifications/notifications.ts) | 「任务跑完了」的提醒**判定**：哪些状态算终态（`succeeded`/`failed`，`cancelled` 不算——取消是用户自己点的）、一条提醒写成什么话（`describeCompletion`）、浮层队列的生命周期（`useCompletionToasts`：自动缩回、悬停暂停、**后台标签页不倒计时**）。提示音参数与下拉选项也是常量。 | 不发声、不渲染（声音在 `CompletionToasts` 里用 Web Audio 现场合成）；不决定「要不要提醒」（那是逐任务的 `notify_on_complete`）与「用什么方式」（那是全局 `completion_notification`）。 |
+| [CompletionToasts.tsx](../frontend/src/notifications/CompletionToasts.tsx#L21) | 右下角**浮层容器**：渲染 `notifications.ts` 给出的队列，悬停暂停缩回、可手动关。同时是提示音的出口（Web Audio 现场合成 C6→G6，没有任何音频文件跟着仓库走）。 | 不判断谁该被提醒（判定在 `notifications.ts`）；不读设置（方式由 `App` 传入）。 |
 
 说明浮层的设计约束（这几条是界面改版时最容易破坏的，改之前先读）：
 
-1. **默认收起，且同一时刻最多展开一块**：说明是次要信息，不允许常驻版面。钉住状态写 `localStorage`（键前缀 `cascade.help.open.v1.`），关闭时一并清除记忆 —— 所以刷新后最多只有一块保持展开，见 [rememberOpen](../frontend/src/components/HelpPopover.tsx#L29)。
+1. **默认收起，且同一时刻最多展开一块**：说明是次要信息，不允许常驻版面。钉住状态写 `localStorage`（键前缀 `cascade.help.open.v1.`），关闭时一并清除记忆 —— 所以刷新后最多只有一块保持展开，见 [rememberOpen](../frontend/src/shared/ui/HelpPopover.tsx#L29)。
 2. **不抢焦点、不阻塞操作**：面板 `aria-modal=false`、打开时不 `autoFocus`、没有遮罩层，触发按钮在 `mousedown` 时阻止默认行为。这样在点开「常用端口」时，代理输入框里的光标和未保存的输入都不会被打断。
-3. **窄屏改形态而不是改内容**：`≤640px` 或设备无 hover 能力时渲染为贴底抽屉（`is-sheet`），左右各留 8px、高度上限 62vh，见 [SHEET_QUERY](../frontend/src/components/HelpPopover.tsx#L18)。
+3. **窄屏改形态而不是改内容**：`≤640px` 或设备无 hover 能力时渲染为贴底抽屉（`is-sheet`），左右各留 8px、高度上限 62vh，见 [SHEET_QUERY](../frontend/src/shared/ui/HelpPopover.tsx#L18)。
 4. **浮层内部不允许横向溢出**：面板宽度上限 440px，三列表格会在浮层内撑出滚动条并把列截掉 —— 代理端口对照因此用两列网格而不是表格。浮层挂在 `white-space: nowrap` 的宿主元素（例如状态文字）内时，必须显式重置 `white-space` 与字重，否则说明文字会继承成一行粗体。
 5. **固定宽度的轨道里，文本必须能断行**：`.grid` 的右栏是写死的 `390px`（[styles.css](../frontend/src/styles.css#L104)），内容区只剩 352px，而 grid item 的 `min-width: auto` 不允许它被压窄 —— 因此「放不进一行的长 token」（自检回显的 Windows 路径、URL、后端错误原文）会让面板的 min-content 超过轨道，把整页撑出横向滚动条。右栏因此整体声明 `overflow-wrap: anywhere`（[styles.css](../frontend/src/styles.css#L124)，靠继承覆盖全部后代），见 [ai/ui/002](../ai/ui/002-side-column-overflow-breaks-the-page.md)。**必须用 `anywhere`**：`overflow-wrap: break-word` 不改变 min-content，挡不住这一类溢出。
 6. **会随数据变长的标签必须允许换行，不得用 `nowrap` 把它锁成一行**：字幕语言选择器的标签是 `已选 N 项：en, zh-Hans, …`（join 的是**语言代码**，N 无上界）。它曾经是 `white-space: nowrap` + `overflow: hidden; text-overflow: ellipsis`，意图是「太长就省略号」—— 但 nowrap 之下没有断行机会，`overflow-wrap` 对它**无效**，标签的 min-content 就等于整段文字，而它是 flex item、父级按它的 min-content 算宽度 → 放不下时不是被裁，是把右栏轨道和整个网格一路顶宽（12 种语言实测 84px），见 [ai/ui/003](../ai/ui/003-language-trigger-label-overflows-the-page.md)。判据：**`ellipsis` 只在元素真的被约束时才会出现** —— 先看 `scrollWidth > clientWidth` 成不成立；不成立就说明「省下来的空间」并没有省下来，只是换了个样子出问题。
@@ -307,7 +331,7 @@ B站 上传有**自己的两套状态**，与 `JobStatus` 无关：
 | 进度聚合 | `DownloadProgressAggregator` 按子流分别累计已下载字节，分母取"各子流已知总和的较大者"并以下限钳制。 | 字幕/chunk/分离音视频都会各自回调；不能让小文件或当前 chunk 的 100% 冒充整体完成，也不能把已下载字节归零。 |
 | B站 上传两张表 | `bili_upload`（一条稿件一行）与 `bili_season`（一个任务的合集一行）。前者存投稿入参（标题/简介/标签/分区/视频路径/是否做封面/评论）+ 结果（`bvid`/`aid`/`cid`/`verified_state`/`progress`/`attempt`/`log_tail`），后者存 `season_id` 与归集状态。 | **入参也落库**：投稿是异步的，worker 必须能在用户关掉页面之后照着重投；只存结果会让重试变成「拿当前表单再猜一次」。`attempt` 让重投复用同一行，界面不出现重复条目。 |
 | 合集模板另存一列 | `bili_season.template_json` 存**模板原文**（[template_to_json](../backend/app/bilibili/bili_meta.py#L407)），老行补列时是空串。 | `bili_upload` 每行存的是**渲染后**的元数据；重投时想从那些行反推模板只能猜哪些字是占位符，猜错的后果是「重投一次，每条标题都变了」。存原文是最便宜也最准的做法。单视频投稿走同一个归集记录时**不清空**这一列（见 `_upsert_season`）。 |
-| 跨接口的时间一律带时区 | 所有对外的 `started_at` / `finished_at` / `created_at` 都是 **UTC 且以 `Z` 结尾**（[UtcDateTime](../backend/app/contracts/schemas.py#L31)）。SQLite 不存时区，读回来是 naive 的墙上时间；原样发出时前端 `Date.parse` 按**本地**时间解析（ECMAScript 规定），本机 UTC+8 上每个时长凭空多 8 小时（实测 52 秒显示成「已提交 8:00:52」，见 [020](../ai/bug-fix/020-the-progress-clock-is-eight-hours-off.md)）。前端解析收敛到 [parseServerTime](../frontend/src/formatting.ts#L48)，界面显示时刻时按本地时区渲染。 | `docs/openapi.yaml` 里这些字段本来就写着 `format: date-time`（RFC 3339 要求偏移量）—— 实现一直在违反自己的契约，而契约闸门只比字段名不看格式。 |
+| 跨接口的时间一律带时区 | 所有对外的 `started_at` / `finished_at` / `created_at` 都是 **UTC 且以 `Z` 结尾**（[UtcDateTime](../backend/app/contracts/schemas.py#L31)）。SQLite 不存时区，读回来是 naive 的墙上时间；原样发出时前端 `Date.parse` 按**本地**时间解析（ECMAScript 规定），本机 UTC+8 上每个时长凭空多 8 小时（实测 52 秒显示成「已提交 8:00:52」，见 [020](../ai/bug-fix/020-the-progress-clock-is-eight-hours-off.md)）。前端解析收敛到 [parseServerTime](../frontend/src/shared/formatting.ts#L48)，界面显示时刻时按本地时区渲染。 | `docs/openapi.yaml` 里这些字段本来就写着 `format: date-time`（RFC 3339 要求偏移量）—— 实现一直在违反自己的契约，而契约闸门只比字段名不看格式。 |
 | B站 凭据不入库 | 登录态只以文件形式放 `data/bilibili/cookies.json`（gitignored），API 只回传名字与计数。 | 凭据落库会被 `GET` 读模型、备份与 SQL 转储带出去；文件形态还能直接被 `biliup` 复用，不必在两层之间搬运凭据。 |
 | 字幕结论分两处记 | 下载侧在 `JobItem`（`subtitle_language` 族名 / `subtitle_source` / `subtitle_path`），上传侧在 `BiliUpload`（`subtitle_state` / `subtitle_lan` / `subtitle_message`）。**上传侧不复制字幕路径**，只存这一次的结论。 | 下载与上传是两条链路；路径复制一份会让「记录里有路径」与「磁盘上有文件」脱钩。`subtitle_state` 独立于 `status`，是为了让「字幕失败」不翻掉「稿件已发布」。历史行的补列默认 `skipped`（改动前从不传字幕，写 `failed` 等于给旧记录凭空编一个失败）。 |
 

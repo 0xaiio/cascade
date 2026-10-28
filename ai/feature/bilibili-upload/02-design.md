@@ -192,7 +192,7 @@ pending ──► grouping ──┬─► grouped   已提交归集（含平台
 
 ## 6. HTTP API
 
-单一来源仍是运行时 `app.openapi()`；`frontend/src/types.ts` 与 `docs/openapi.yaml` 是手写副本，
+单一来源仍是运行时 `app.openapi()`；`frontend/src/contracts/types.ts` 与 `docs/openapi.yaml` 是手写副本，
 由 `scripts/check_api_contract.py` 校验无漂移。新增接口必须同时更新三处。
 
 | 方法 | 路径 | 用途 |

@@ -5,28 +5,28 @@ skinparam shadowing false
 
 package "frontend/src" {
   [App.tsx] as App
-  [components/UrlAnalyzer.tsx] as UrlAnalyzer
-  [components/AnalysisPanel.tsx] as AnalysisPanel
-  [components/DownloadOptionsPanel.tsx] as OptionsPanel
-  [components/SettingsPanel.tsx] as SettingsPanel
-  [components/SearchableLanguageSelect.tsx] as LanguageSelect
-  [components/Toggle.tsx] as Toggle
-  [components/StatusPill.tsx] as StatusPill
-  [components/JobQueue.tsx] as JobQueue
-  [components/ProxySection.tsx] as ProxySection
-  [components/CookieSection.tsx] as CookieSection
-  [components/HelpPopover.tsx] as HelpPopover
-  [components/BiliIcon.tsx] as BiliIcon
-  [components/BiliUploadButton.tsx] as BiliButton
-  [components/BiliUploadDialog.tsx] as BiliDialog
-  [components/BiliJobStatus.tsx] as BiliJobStatus
-  [components/BiliLoginSection.tsx] as BiliLoginSection
-  [api.ts] as ApiClient
-  [types.ts] as FrontendTypes
-  [quality.ts] as Quality
-  [formatting.ts] as Formatting
-  [subtitles.ts] as Subtitles
-  [cookieLock.ts] as CookieLock
+  [download-request/UrlAnalyzer.tsx] as UrlAnalyzer
+  [download-request/AnalysisPanel.tsx] as AnalysisPanel
+  [download-request/DownloadOptionsPanel.tsx] as OptionsPanel
+  [settings/SettingsPanel.tsx] as SettingsPanel
+  [download-request/SearchableLanguageSelect.tsx] as LanguageSelect
+  [shared\ui/Toggle.tsx] as Toggle
+  [shared\ui/StatusPill.tsx] as StatusPill
+  [task-center/JobQueue.tsx] as JobQueue
+  [settings/ProxySection.tsx] as ProxySection
+  [cookies/CookieSection.tsx] as CookieSection
+  [shared\ui/HelpPopover.tsx] as HelpPopover
+  [bilibili/BiliIcon.tsx] as BiliIcon
+  [bilibili/BiliUploadButton.tsx] as BiliButton
+  [bilibili/BiliUploadDialog.tsx] as BiliDialog
+  [bilibili/BiliJobStatus.tsx] as BiliJobStatus
+  [bilibili/BiliLoginSection.tsx] as BiliLoginSection
+  [shared/api.ts] as ApiClient
+  [contracts/types.ts] as FrontendTypes
+  [shared/quality.ts] as Quality
+  [shared/formatting.ts] as Formatting
+  [shared/subtitles.ts] as Subtitles
+  [cookies/cookieLock.ts] as CookieLock
 }
 
 package "backend/app" {

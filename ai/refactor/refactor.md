@@ -50,7 +50,7 @@ cookies 导入、格式工具、前端工具、任务中心、测试夹具陆续
 | `frontend/src/App.test.tsx`            | 1521 | 单文件 69 个用例                 |
 | `frontend/src/App.tsx`                 | 1128 | 见 §1                       |
 | `backend/app/main.py`                  | 722  | 见 §1                       |
-| `frontend/src/components/JobQueue.tsx` | 512  | 已是独立组件，边界清楚                |
+| `frontend/src/task-center/JobQueue.tsx` | 512  | 已是独立组件，边界清楚                |
 | `backend/tests/test_api.py`            | 2208 | —                          |
 | `backend/app/contracts/schemas.py`               | 256  | 线上契约，**不动**                |
 
@@ -69,6 +69,8 @@ cookies 导入、格式工具、前端工具、任务中心、测试夹具陆续
 | 后端测试                         | 289 passed          | 289 passed                                          | **320 passed**                   | 见上表命令                                                              |
 | 前端测试                         | 69 passed           | 69 passed                                           | **69 passed**                    | 见上表命令                                                              |
 | 文档锚点                         | 无漂移 / 111 处待复核      | 无漂移 / 148 处待复核                                      | **无漂移 / 153 处待复核**               | `python scripts/check_doc_anchors.py`                              |
+
+> 2026-10-28（[011](011-flat-modules-into-feature-packages.md)~[013](013-frontend-feature-directories.md) 之后）的实测值：后端 **53 个模块 / 1223 passed**；前端 **21 文件 / 286 passed**（`tsc --noEmit` 与 `vite build` 通过）；文档锚点**无漂移 / 219 处待复核**。三行都没加进上表 —— 表停在 R3，再插一列只会让「当时长什么样」更难读。
 
 ---
 
@@ -126,7 +128,7 @@ cookies 导入、格式工具、前端工具、任务中心、测试夹具陆续
 2. **`job_manager.py` 的「安全删除」白名单**（`_delete_output_files` / `_is_under_allowed_root`）     
    是路径安全的承重逻辑，却只能靠跑任务来验 —— 它应该和 R3 同类地纯函数化，但属另一个主题。     
    **✅ 已完成 → [005](005-safe-delete.md)（2026-10-02）**
-3. **`openapi.yaml` 与 `frontend/src/types.ts` 是两份手写的同一契约**（28 operations / 206 行类型）。     
+3. **`openapi.yaml` 与 `frontend/src/contracts/types.ts` 是两份手写的同一契约**（28 operations / 206 行类型）。
    理想形态是单一来源 + 生成，但生成器会引入工具链与 npm 依赖，违反 §3.1 第 6 条，需单独决策。     
    **✅ 已完成（次优形态：单一来源 + 漂移校验，未生成）→ [006](006-api-contract-drift.md)（2026-10-02）**
 4. **没有 lint / format / CI 门槛**：仓库无 `.github/`、无 ruff/eslint/prettier 配置。     
@@ -188,6 +190,7 @@ hash 只能在**下一次触碰本目录时**回填；查某条改动用 `git lo
 | [010](010-baseline-sync-and-hash-backfill.md) | 收尾：回填提交 hash、同步基线、`ai/` 链接自查 | 待回填 | 六轮 hash 回填进记录与索引；总纲基线表换成 R9 实测值；`ai/**` 人工扫链修掉 9 处断链（`docs.py check` 不覆盖 `ai/`）；不改任何源码 |
 | [011](011-flat-modules-into-feature-packages.md) | 平铺模块按功能分包：46 个平铺文件 → 7 个能力包 | 回填        | `api/` `contracts/` `download/` `bilibili/` `host/` `infra/` `common/` 七个包，52 个文件 `git mv` 且**不改名**；`check_layers.py` 升级为按 `level` 解析多级相对导入、层号回退到最近的已登记祖先；后端 1223 passed、行锚 0 漂移 |
 | [012](012-make-the-dependency-diagram-true.md) | 让依赖图说真话：补 6 个模块、改 40 条边，并纳入机器校验 | 回填        | `module-dependencies.puml` 105 边里 10 条是拆分后留下的死箭头、另缺 30 条（连带 5 个模块没画）；边集改由代码生成（125 条，逐边一致），新增 `scripts/check_diagram_edges.py` + CI 一步 —— `docs.py check` 只管 SVG 与源同源，管不了图与代码同构 |
+| [013](013-frontend-feature-directories.md) | 前端按功能分目录：19 组件 + 21 测试拆出两个平铺桶 | 本次        | `components/` 与 `src/` 根两个桶重排成 `contracts/` `shared/` `shared/ui/` `download-request/` `cookies/` `task-center/` `settings/` `bilibili/` `notifications/`；50 个文件只挪不改名，**21 文件 / 286 用例**前后逐数相同；定下「测试跟能力走、只有一份才进 shared」两条约定并写进设计文档 |
 
 ---
 

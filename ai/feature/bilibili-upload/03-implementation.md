@@ -357,7 +357,7 @@ id（实测合集 `9343273` → 「正片」`10455347`）。拿到手就设 `sec
 
 ## 11. 「重新体检」：把策略挪出组件（004）
 
-组件只显示文案，判定在 [`biliHealth.runHealthCheck`](../../../frontend/src/biliHealth.ts#L48)：
+组件只显示文案，判定在 [`biliHealth.runHealthCheck`](../../../frontend/src/bilibili/biliHealth.ts#L48)：
 先 `probe_account=true` 探账号，超时（12 秒）就退回 `probe_account=false` 的离线结论并标记 `timedOut`；
 **网络错误照旧抛出** —— 超时能降级，真读不到不能装作读到了。这样三条分支都能用 20ms 时限单测，
 不必在界面测试里摆弄假定时器（上一版就是那样，把同文件其它用例一起拖进了 5 秒超时）。

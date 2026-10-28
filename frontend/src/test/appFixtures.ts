@@ -8,7 +8,7 @@
   Job,
   ProxyTestResult,
   Settings
-} from "../types";
+} from "../contracts/types";
 
 export const analyzePayload = {
   url: "https://youtube.com/playlist?list=abc",

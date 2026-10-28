@@ -5,27 +5,27 @@ skinparam shadowing false
 
 package "Frontend" {
   [App.tsx\nstate + SSE + layout] as App
-  [UrlAnalyzer.tsx\nlink + cookies row] as UrlAnalyzer
-  [AnalysisPanel.tsx\nentries + summary] as AnalysisPanel
-  [DownloadOptionsPanel.tsx\nmode/quality/subtitles] as OptionsPanel
-  [SettingsPanel.tsx\npaths, concurrency, proxy] as SettingsPanel
-  [JobQueue.tsx\ntask center] as Queue
-  [ProxySection.tsx\nproxy result + probe] as ProxySection
-  [CookieSection.tsx\ncookie state + verify] as CookieSection
-  [HelpPopover.tsx\nnon-modal help overlay] as HelpPopover
-  [SearchableLanguageSelect.tsx] as LanguageSelect
-  [Toggle.tsx / StatusPill.tsx\nprimitives] as Primitives
-  [BiliIcon.tsx\nbilibili logo] as BiliIcon
-  [BiliUploadButton.tsx\njob row entry] as BiliButton
-  [BiliUploadDialog.tsx\nsingle + collection form] as BiliDialog
-  [BiliJobStatus.tsx\nbadge + detail rows] as BiliJobStatus
-  [BiliLoginSection.tsx\npreflight + login] as BiliLogin
-  [api.ts\nHTTP boundary] as ApiClient
-  [types.ts] as Types
-  [quality.ts] as Quality
-  [formatting.ts] as Formatting
-  [subtitles.ts\nsubtitle labels + source] as Subtitles
-  [cookieLock.ts\nbrowser-locked mapping] as CookieLock
+  [download-request/UrlAnalyzer.tsx\nlink + cookies row] as UrlAnalyzer
+  [download-request/AnalysisPanel.tsx\nentries + summary] as AnalysisPanel
+  [download-request/DownloadOptionsPanel.tsx\nmode/quality/subtitles] as OptionsPanel
+  [settings/SettingsPanel.tsx\npaths, concurrency, proxy] as SettingsPanel
+  [task-center/JobQueue.tsx\ntask center] as Queue
+  [settings/ProxySection.tsx\nproxy result + probe] as ProxySection
+  [cookies/CookieSection.tsx\ncookie state + verify] as CookieSection
+  [shared\ui/HelpPopover.tsx\nnon-modal help overlay] as HelpPopover
+  [download-request/SearchableLanguageSelect.tsx] as LanguageSelect
+  [shared/ui/Toggle.tsx / StatusPill.tsx\nprimitives] as Primitives
+  [bilibili/BiliIcon.tsx\nbilibili logo] as BiliIcon
+  [bilibili/BiliUploadButton.tsx\njob row entry] as BiliButton
+  [bilibili/BiliUploadDialog.tsx\nsingle + collection form] as BiliDialog
+  [bilibili/BiliJobStatus.tsx\nbadge + detail rows] as BiliJobStatus
+  [bilibili/BiliLoginSection.tsx\npreflight + login] as BiliLogin
+  [shared/api.ts\nHTTP boundary] as ApiClient
+  [contracts/types.ts] as Types
+  [shared/quality.ts] as Quality
+  [shared/formatting.ts] as Formatting
+  [shared/subtitles.ts\nsubtitle labels + source] as Subtitles
+  [cookies/cookieLock.ts\nbrowser-locked mapping] as CookieLock
 }
 
 package "Backend / entry" {

@@ -85,7 +85,7 @@ Linux/macOS：bash init/start.sh dev
 这里的两个端口是**两件不同的事**，不要混为一谈：
 
 - **后端端口可配**，来源是 `YTDL_API_PORT`；`--port` 可临时覆盖。
-- **前端 dev server 端口不在配置里**，就是命令行 `--port 5173` 给的值。CORS 中间件只放行 `http://127.0.0.1:5173` 与 `http://localhost:5173`（见 [main.py](../backend/app/main.py#L106)）—— 但开发模式下 [api.ts](../frontend/src/api.ts) 用的是相对路径 `/api`，浏览器只与 Vite 同源通信、由 Vite 服务端转发，所以正常流程**不会触发 CORS**。把 dev server 换到别的端口后，只要仍走 Vite 代理也照样能用；CORS 白名单只在某处改成直连后端时才起作用。
+- **前端 dev server 端口不在配置里**，就是命令行 `--port 5173` 给的值。CORS 中间件只放行 `http://127.0.0.1:5173` 与 `http://localhost:5173`（见 [main.py](../backend/app/main.py#L106)）—— 但开发模式下 [api.ts](../frontend/src/shared/api.ts) 用的是相对路径 `/api`，浏览器只与 Vite 同源通信、由 Vite 服务端转发，所以正常流程**不会触发 CORS**。把 dev server 换到别的端口后，只要仍走 Vite 代理也照样能用；CORS 白名单只在某处改成直连后端时才起作用。
 
 ### 端口被占用时
 
@@ -206,7 +206,7 @@ git diff --check
 | 脚本 | 检查什么 | 什么时候必须跑 |
 | --- | --- | --- |
 | `python scripts/check_layers.py` | 模块依赖方向是否符合 [设计文档](design.md#模块职责矩阵) 的分层（L0→L5 只向下），以及**有没有模块忘了登记进矩阵** | 新增 / 移动模块，或改了模块间的 import |
-| `python scripts/check_api_contract.py` | 运行时契约 `app.openapi()` 与 [types.ts](../frontend/src/types.ts)、[openapi.yaml](openapi.yaml) 有没有分叉 | 改了 `schemas.py`、路由的响应模型，或 `types.ts` / `openapi.yaml` |
+| `python scripts/check_api_contract.py` | 运行时契约 `app.openapi()` 与 [types.ts](../frontend/src/contracts/types.ts)、[openapi.yaml](openapi.yaml) 有没有分叉 | 改了 `schemas.py`、路由的响应模型，或 `types.ts` / `openapi.yaml` |
 | `python scripts/check_doc_anchors.py` | 文档里的 `文件.py#LNN` 锚点有没有随代码改动漂移（加 `--fix` 自动重算） | 改动 `backend/app/**` 或 `frontend/src/**` 之后 |
 | `python scripts/check_diagram_edges.py` | [依赖图](design.md#依赖方向与分层规则)的**边集**与 `backend/app` 的实际 import 是否一致（缺边、多边、图上有没画的模块，都算错） | 新增 / 移动模块，或改了模块间的 import；改完 `module-dependencies.puml` 之后 |
 

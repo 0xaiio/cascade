@@ -119,15 +119,15 @@
 | [schemas.py](../../../backend/app/contracts/schemas.py#L524) | `BiliUploadRead.subtitle_state` / `subtitle_lan` / `subtitle_message` |
 | [job_read_model.py](../../../backend/app/download/job_read_model.py#L87) | 投影 `JobItem` 那两列 |
 | [bili_read_model.py](../../../backend/app/bilibili/bili_read_model.py#L121) | 投影 `BiliUpload` 那三列（带 `or ""` / `or "skipped"` 兜底） |
-| [types.ts](../../../frontend/src/types.ts#L110) | `JobItem.subtitle_language` / `subtitle_source`；`SubtitleOrigin` 与 `SubtitleSource` **是两个类型**（前者有 `none`） |
-| [types.ts](../../../frontend/src/types.ts#L435) | `BiliUpload.subtitle_state`（字面量联合 `"posted" \| "skipped" \| "failed"`） |
+| [types.ts](../../../frontend/src/contracts/types.ts#L110) | `JobItem.subtitle_language` / `subtitle_source`；`SubtitleOrigin` 与 `SubtitleSource` **是两个类型**（前者有 `none`） |
+| [types.ts](../../../frontend/src/contracts/types.ts#L435) | `BiliUpload.subtitle_state`（字面量联合 `"posted" \| "skipped" \| "failed"`） |
 | [docs/openapi.yaml](../../../docs/openapi.yaml) | 上述字段；`subtitle_lan` 一处注明平台白名单不是 `zh-CN` / `en-US` |
 
 契约漂移由 `scripts/check_api_contract.py` 把住（只比字段名集合与路径×方法，不比类型）。
 
 ### 前端
 
-[BiliUploadDialog.tsx](../../../frontend/src/components/BiliUploadDialog.tsx#L492)：预览表新增一列「字幕」，
+[BiliUploadDialog.tsx](../../../frontend/src/bilibili/BiliUploadDialog.tsx#L492)：预览表新增一列「字幕」，
 渲染 `item.subtitle || "—"`。**文案由服务端给**，组件里的注释写明了「前端拼一遍就会出现两套说法」。
 
 ## 三、日志
@@ -178,15 +178,15 @@
 
 | 落点 | 位置 | 做什么 |
 | --- | --- | --- |
-| `SubtitleOpenButton` | [L17](../../../frontend/src/components/SubtitleOpenButton.tsx#L17) | 新增组合控件：主段 + 右段小箭头，两段都只发一个 `mode` |
-| `JobQueue` | [L276](../../../frontend/src/components/JobQueue.tsx#L276) / [L453](../../../frontend/src/components/JobQueue.tsx#L453) | 单视频任务行与条目行，紧跟在文件夹按钮之后 |
-| `api.openJobSubtitle` / `openJobItemSubtitle` | [L131](../../../frontend/src/api.ts#L131) / [L135](../../../frontend/src/api.ts#L135) | 总带 `?mode=…`，URL 稳定可断言 |
-| `SubtitleOpenMode` | [L15](../../../frontend/src/types.ts#L15) | 与后端枚举同名同值，注释写明「不表示具体程序」 |
+| `SubtitleOpenButton` | [L17](../../../frontend/src/task-center/SubtitleOpenButton.tsx#L17) | 新增组合控件：主段 + 右段小箭头，两段都只发一个 `mode` |
+| `JobQueue` | [L276](../../../frontend/src/task-center/JobQueue.tsx#L276) / [L453](../../../frontend/src/task-center/JobQueue.tsx#L453) | 单视频任务行与条目行，紧跟在文件夹按钮之后 |
+| `api.openJobSubtitle` / `openJobItemSubtitle` | [L131](../../../frontend/src/shared/api.ts#L131) / [L135](../../../frontend/src/shared/api.ts#L135) | 总带 `?mode=…`，URL 稳定可断言 |
+| `SubtitleOpenMode` | [L15](../../../frontend/src/contracts/types.ts#L15) | 与后端枚举同名同值，注释写明「不表示具体程序」 |
 | `.split-button` | [L858](../../../frontend/src/styles.css#L858) | 两段共用一个外框：圆角只留外侧，中间留**一条** 1px 分隔线（主段右框；右段 `border-left:0` 防叠成 2px） |
 
 ### 契约
 
-`JobItemRead` 加 `subtitle_path` ⇒ 三处同步：`schemas.py` ↔ [types.ts](../../../frontend/src/types.ts) ↔
+`JobItemRead` 加 `subtitle_path` ⇒ 三处同步：`schemas.py` ↔ [types.ts](../../../frontend/src/contracts/types.ts) ↔
 [openapi.yaml](../../../docs/openapi.yaml)（两条新路径 + `mode` 参数）。`check_api_contract.py` 现在比对
 **76 个条目**（上一轮 74）。
 

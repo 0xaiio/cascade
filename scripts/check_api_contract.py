@@ -3,7 +3,7 @@
 单一来源是**运行时的 `app.openapi()`** —— 它由 `backend/app/contracts/schemas.py` 与各路由的响应模型生成，
 是唯一「改代码就跟着变」的那份。另外两份是手写的副本，本脚本把它们与运行时对照：
 
-- `frontend/src/types.ts`：按 `SCHEMA_PAIRS` 逐接口校验**字段名集合完全相同**；
+- `frontend/src/contracts/types.ts`：按 `SCHEMA_PAIRS` 逐接口校验**字段名集合完全相同**；
 - `docs/openapi.yaml`：校验**路径 × 方法**集合与 **paths 引用到的 schema** 集合。
 
 **为什么不生成？** 生成 `types.ts` 或 `openapi.yaml` 需要引入代码生成工具链（连带 npm 依赖），
@@ -55,7 +55,7 @@ SCHEMA_PAIRS: dict[str, str | None] = {
     "CookieHealth": "CookieHealthRead",
     # 运行时里 `sanitized_environment` 是 `array of object(str→str)`，没有具名 schema。
     "EnvironmentRisk": None,
-    # 错误响应的 detail 不在运行时的 schemas 里（见 frontend/src/api.ts 的手写解析）。
+    # 错误响应的 detail 不在运行时的 schemas 里（见 frontend/src/shared/api.ts 的手写解析）。
     "ApiErrorDetail": None,
     # 任务完成提醒的一条浮层。它是**前端内部结构**（提醒在浏览器里发生，后端只存偏好），
     # 运行时没有对应 schema；登记为 None 仍然要求它不许被悄悄删掉。
@@ -244,11 +244,11 @@ def main(argv: list[str] | None = None) -> int:
 
     problems: list[str] = []
 
-    types_path = repo / "frontend" / "src" / "types.ts"
+    types_path = repo / "frontend" / "src" / "contracts" / "types.ts"
     interfaces = parse_typescript(types_path.read_text(encoding="utf-8"))
     type_problems, compared = check_types(runtime, interfaces)
     problems += type_problems
-    print(f"[1/2] frontend/src/types.ts ↔ app.openapi()：比对了 {compared} 个接口")
+    print(f"[1/2] frontend/src/contracts/types.ts ↔ app.openapi()：比对了 {compared} 个接口")
     for item in type_problems:
         print(f"      ✗ {item}")
 

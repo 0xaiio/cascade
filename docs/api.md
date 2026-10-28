@@ -1,6 +1,6 @@
 # API 文档
 
-适用读者：前端开发者、后端维护者和需要调试接口的测试者。所有 schema 定义以 [backend/app/contracts/schemas.py](../backend/app/contracts/schemas.py) 为准，前端类型以 [frontend/src/types.ts](../frontend/src/types.ts) 为准。
+适用读者：前端开发者、后端维护者和需要调试接口的测试者。所有 schema 定义以 [backend/app/contracts/schemas.py](../backend/app/contracts/schemas.py) 为准，前端类型以 [frontend/src/contracts/types.ts](../frontend/src/contracts/types.ts) 为准。
 
 ## 机器可读规范
 
@@ -24,7 +24,7 @@
 
 上面那一步靠自觉。而**运行时契约**（`create_app().openapi()`，由 [schemas.py](../backend/app/contracts/schemas.py)
 与各路由的响应模型生成）才是唯一「改代码就跟着变」的那一份 —— `openapi.yaml` 与
-[types.ts](../frontend/src/types.ts) 都只是它的**手写副本**。两者有没有分叉，可以直接跑：
+[types.ts](../frontend/src/contracts/types.ts) 都只是它的**手写副本**。两者有没有分叉，可以直接跑：
 
 ```bash
 .venv/Scripts/python.exe scripts/check_api_contract.py
@@ -32,7 +32,7 @@
 
 以运行时契约为单一来源，校验两件事：
 
-- `frontend/src/types.ts`：每个接口的**字段名集合**与对应运行时 schema 完全相同（当前 33 个接口）；
+- `frontend/src/contracts/types.ts`：每个接口的**字段名集合**与对应运行时 schema 完全相同（当前 33 个接口）；
 - `docs/openapi.yaml`：**路径 × 方法**集合与 **paths 引用的 schema** 集合（当前 72 个条目）。
 
 有意不跟随运行时命名的两类（文档用领域化的 `Error` / `CookieImportError`，运行时用 `HTTPValidationError`；
@@ -44,11 +44,11 @@
 
 - 后端应用由 [create_app](../backend/app/main.py#L40) 创建；API 默认绑定 `127.0.0.1:8000`（可用仓库根 `.env` 的 `YTDL_API_PORT` 或 `python -m app --port` 覆盖，见 [开发文档](development.md#端口被占用时)），单端口模式下同时托管 `frontend/dist`。
 - API 返回 JSON；`DELETE /api/jobs/{id}` 与四个本地打开接口成功时返回 `204`。
-- 前端统一请求封装在 [request](../frontend/src/api.ts#L70)，非 2xx 响应会抛出 `ApiError`，并保留结构化 `detail`。
+- 前端统一请求封装在 [request](../frontend/src/shared/api.ts#L70)，非 2xx 响应会抛出 `ApiError`，并保留结构化 `detail`。
 - Cookies 导入锁库错误使用结构化 `detail`，字段见 [BrowserCookieImportError.to_detail](../backend/app/host/browser_cookies.py#L58)。
 - **所有时间字段是 UTC，且以 `Z` 结尾**（`started_at` / `finished_at` / `created_at` / `updated_at`）。
   SQLite 不存时区，读回来是 naive 的墙上时间，读模型补成 aware 之后才发出 —— 少了这个 `Z`，消费方 `Date.parse` 会把同一串数字按**本地**时间解析（ECMAScript 规定），于是每个时长都凭空多出一个时区偏移（本机 UTC+8 上实测 52 秒显示成 8 小时，见 [020](../ai/bug-fix/020-the-progress-clock-is-eight-hours-off.md)）。
-  前端解析统一走 [parseServerTime](../frontend/src/formatting.ts#L48)，不要直接 `Date.parse`。
+  前端解析统一走 [parseServerTime](../frontend/src/shared/formatting.ts#L48)，不要直接 `Date.parse`。
 - `/api/bilibili/*` 用的是**另一套**凭据（`data/bilibili/cookies.json`），与 `data/cookies.txt` 互不影响；接口只回传凭据的**名字与计数**，不回传值，也不回传掩码前缀。详见下面「B站 上传」。
 
 ## Endpoint
@@ -105,7 +105,7 @@
 
 ### AnalyzeRequest
 
-`url` 是待解析链接；`cookies_enabled` 控制解析时是否使用本地 cookies。前端默认传 `true`，见 [analyzeUrl](../frontend/src/api.ts#L118)。
+`url` 是待解析链接；`cookies_enabled` 控制解析时是否使用本地 cookies。前端默认传 `true`，见 [analyzeUrl](../frontend/src/shared/api.ts#L118)。
 
 ### DownloadOptions
 

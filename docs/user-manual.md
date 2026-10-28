@@ -50,11 +50,11 @@ YouTube Downloader 是本机单用户工具。前端提供链接解析、下载�
 2. Playlist 会展示条目列表，可选择要下载的子视频；后端会根据选择生成 `JobItem`，见 [创建任务路由](../backend/app/api/routers/jobs.py#L28)。
 3. 在下载选项中选择下载模式、清晰度、字幕语言、字幕来源、字幕格式、metadata、缩略图、限速、重试和通知；默认清晰度为 `1440p`，默认字幕来源为“两者都要”。
 4. 点击加入下载队列，在任务中心观察进度、速度、预计剩余时间、实际分辨率和实际格式。
-5. 对任务执行暂停、重启、仅删除任务，或删除任务并删除已下载文件；前端 API 调用见 [api.ts](../frontend/src/api.ts#L56)。
+5. 对任务执行暂停、重启、仅删除任务，或删除任务并删除已下载文件；前端 API 调用见 [api.ts](../frontend/src/shared/api.ts#L56)。
 
 ## 下载选项
 
-下载选项的数据结构由 [DownloadOptions](../backend/app/contracts/schemas.py#L113) 定义，前端对应类型见 [types.ts](../frontend/src/types.ts#L43)。
+下载选项的数据结构由 [DownloadOptions](../backend/app/contracts/schemas.py#L113) 定义，前端对应类型见 [types.ts](../frontend/src/contracts/types.ts#L43)。
 
 | 选项 | 行为 |
 | --- | --- |
@@ -94,7 +94,7 @@ YouTube Downloader 是本机单用户工具。前端提供链接解析、下载�
 
 ## 任务中心
 
-任务中心展示任务级和子视频级状态。后端 API 返回的字段见 [JobRead](../backend/app/contracts/schemas.py#L199) 和 [JobItemRead](../backend/app/contracts/schemas.py#L160)，前端展示组件见 [JobQueue](../frontend/src/components/JobQueue.tsx#L24)。
+任务中心展示任务级和子视频级状态。后端 API 返回的字段见 [JobRead](../backend/app/contracts/schemas.py#L199) 和 [JobItemRead](../backend/app/contracts/schemas.py#L160)，前端展示组件见 [JobQueue](../frontend/src/task-center/JobQueue.tsx#L24)。
 Playlist 展开后会用浅色分组背景承载子视频列表，便于区分合集任务行和单个视频任务。
 
 | 信息 | 说明 |

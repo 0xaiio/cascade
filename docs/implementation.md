@@ -135,13 +135,13 @@ yt-dlp 对字幕、缩略图、HTTP chunk 和分离视频/音频流会多次发�
 
 视频大小复用 `JobItem.total_bytes`：下载前由 `prepare_download()` 从所选格式的 `filesize/filesize_approx` 写入，下载中由 progress payload 校准，下载完成后继续保留，前端在任务行和 playlist 子视频行展示。
 
-视频时长走的是另一条路，因为它**不需要等选出格式**：`POST /api/jobs` 建任务时就把解析结果里每个条目的 `duration` 写进 `JobItem.duration`（[routers/jobs.py](../backend/app/api/routers/jobs.py#L57)），任务一进队列就能显示。`duration` 这一列是后补的，补列之前建的旧任务重启时由 [_apply_download_preparation](../backend/app/download/job_manager.py#L1032) 从预检的同一份 `info` 里补上（预检反正要取一次元数据，不为时长多发一次请求）。前端格式化见 [formatMediaDuration](../frontend/src/formatting.ts#L15)：固定 `时:分:秒`，与「已用/剩余」用的 `formatClock` 刻意不同 —— 后者不到一小时时省掉时位，而时长是视频的固有属性，三段位数固定更好扫读。任务行的时长由 [formatJobDuration](../frontend/src/components/JobQueue.tsx#L610) 按子视频求和，与「大小」同一套折法（有子视频未知时前缀「已知」）。
+视频时长走的是另一条路，因为它**不需要等选出格式**：`POST /api/jobs` 建任务时就把解析结果里每个条目的 `duration` 写进 `JobItem.duration`（[routers/jobs.py](../backend/app/api/routers/jobs.py#L57)），任务一进队列就能显示。`duration` 这一列是后补的，补列之前建的旧任务重启时由 [_apply_download_preparation](../backend/app/download/job_manager.py#L1032) 从预检的同一份 `info` 里补上（预检反正要取一次元数据，不为时长多发一次请求）。前端格式化见 [formatMediaDuration](../frontend/src/shared/formatting.ts#L15)：固定 `时:分:秒`，与「已用/剩余」用的 `formatClock` 刻意不同 —— 后者不到一小时时省掉时位，而时长是视频的固有属性，三段位数固定更好扫读。任务行的时长由 [formatJobDuration](../frontend/src/task-center/JobQueue.tsx#L610) 按子视频求和，与「大小」同一套折法（有子视频未知时前缀「已知」）。
 
 平均速度由 [TransferStats](../backend/app/download/transfer_stats.py#L5) 根据聚合下载字节和时间计算。运行中 `speed` 是 yt-dlp 当前瞬时速度，终态 `speed` 是平均速度，终态聚合见 [_terminal_job_speed](../backend/app/download/job_manager.py#L925)。
 
 ### B站 上传的进度
 
-**下载有字节级进度，上传没有**：`biliup` 在管道模式（非 TTY）下不输出已传字节数，只在三个节点各打一行（`pre_upload` / `Upload completed` / `APP接口投稿成功`），[_PROGRESS_STAGES](../backend/app/bilibili/bili_bin.py#L196) 把它们折成 0.2 / 0.6 / 0.95。所以界面上给的是**四段轨迹**（排队 / 传输 / 提交 / 核对）与「已用时间」，不是百分比条 —— 一个停在 20% 不动的数字比没有数字更糟。阶段映射与聚合在 [biliProgress.ts](../frontend/src/biliProgress.ts#L23)。
+**下载有字节级进度，上传没有**：`biliup` 在管道模式（非 TTY）下不输出已传字节数，只在三个节点各打一行（`pre_upload` / `Upload completed` / `APP接口投稿成功`），[_PROGRESS_STAGES](../backend/app/bilibili/bili_bin.py#L196) 把它们折成 0.2 / 0.6 / 0.95。所以界面上给的是**四段轨迹**（排队 / 传输 / 提交 / 核对）与「已用时间」，不是百分比条 —— 一个停在 20% 不动的数字比没有数字更糟。阶段映射与聚合在 [biliProgress.ts](../frontend/src/bilibili/biliProgress.ts#L23)。
 
 事件侧有一条与下载不同的约定：[_store_progress](../backend/app/bilibili/bili_manager.py#L1326) **只在进度值真的变大时才发 `bili_upload_progress`**。`on_progress` 是每读一行输出回调一次，不判「变没变」会往 SSE 里灌几百条同值事件；判了之后，一次投稿最多 3 条。前端沿用「收到任何一条事件就重拉」的既有口径，因此不需要为进度维护第二份状态。
 
@@ -206,22 +206,22 @@ B站 上传是一条与下载完全解耦的链路，模块划分（详见 [设�
 
 ## 前端实现
 
-前端 API 调用集中在 [api.ts](../frontend/src/api.ts#L40)。共享类型集中在 [types.ts](../frontend/src/types.ts)。[App.tsx](../frontend/src/App.tsx#L68) 只做状态编排与布局，展示拆成解析面板 [UrlAnalyzer](../frontend/src/components/UrlAnalyzer.tsx#L29)、解析结果 [AnalysisPanel](../frontend/src/components/AnalysisPanel.tsx#L12)、下载选项 [DownloadOptionsPanel](../frontend/src/components/DownloadOptionsPanel.tsx#L26)、任务中心 [JobQueue](../frontend/src/components/JobQueue.tsx#L24)、设置 [SettingsPanel](../frontend/src/components/SettingsPanel.tsx#L70)，基础件是 [SearchableLanguageSelect](../frontend/src/components/SearchableLanguageSelect.tsx#L16) / [Toggle](../frontend/src/components/Toggle.tsx#L9) / [StatusPill](../frontend/src/components/StatusPill.tsx#L4)；cookies 区域与代理区域分别是 [CookieSection](../frontend/src/components/CookieSection.tsx#L121) 和 [ProxySection](../frontend/src/components/ProxySection.tsx#L140)。字幕文案与来源归一是纯模块 [subtitles.ts](../frontend/src/subtitles.ts#L12)，cookies 锁库错误到界面状态的映射是 [cookieLock.ts](../frontend/src/cookieLock.ts#L20)。
+前端 API 调用集中在 [api.ts](../frontend/src/shared/api.ts#L40)。共享类型集中在 [types.ts](../frontend/src/contracts/types.ts)。[App.tsx](../frontend/src/App.tsx#L68) 只做状态编排与布局，展示拆成解析面板 [UrlAnalyzer](../frontend/src/download-request/UrlAnalyzer.tsx#L29)、解析结果 [AnalysisPanel](../frontend/src/download-request/AnalysisPanel.tsx#L12)、下载选项 [DownloadOptionsPanel](../frontend/src/download-request/DownloadOptionsPanel.tsx#L26)、任务中心 [JobQueue](../frontend/src/task-center/JobQueue.tsx#L24)、设置 [SettingsPanel](../frontend/src/settings/SettingsPanel.tsx#L70)，基础件是 [SearchableLanguageSelect](../frontend/src/download-request/SearchableLanguageSelect.tsx#L16) / [Toggle](../frontend/src/shared/ui/Toggle.tsx#L9) / [StatusPill](../frontend/src/shared/ui/StatusPill.tsx#L4)；cookies 区域与代理区域分别是 [CookieSection](../frontend/src/cookies/CookieSection.tsx#L121) 和 [ProxySection](../frontend/src/settings/ProxySection.tsx#L140)。字幕文案与来源归一是纯模块 [subtitles.ts](../frontend/src/shared/subtitles.ts#L12)，cookies 锁库错误到界面状态的映射是 [cookieLock.ts](../frontend/src/cookies/cookieLock.ts#L20)。
 
-B站 上传的界面由四个组件加一个图标组成：[BiliIcon](../frontend/src/components/BiliIcon.tsx#L12)（手绘 SVG，品牌色只落在图标本身）、[BiliUploadButton](../frontend/src/components/BiliUploadButton.tsx#L42)（图标 + 一句人话，`idle` 档显示动作词，其余档原样显示后端徽标文案；**点下去做什么按档位分流**：已上传打开稿件页、待核对只核对、部分失败只补没成功的、上传中不给点，见 [FR-39](requirements.md#功能需求) / [FR-40](requirements.md#功能需求)）、[BiliUploadDialog](../frontend/src/components/BiliUploadDialog.tsx#L65)（单视频与合集**共用**一个模态表单，合集显示逐条预览；表单里的值是服务端预填的，**投过就复用上一次提交的那一份**并明说，见 [FR-45](requirements.md#功能需求)）、[BiliJobStatus](../frontend/src/components/BiliJobStatus.tsx#L41)（任务卡片里的明细与重试入口，**只在有话说时才渲染**）、[BiliLoginSection](../frontend/src/components/BiliLoginSection.tsx#L32)（设置面板里的体检 / 扫码 / 导入 / 修复工具）。硬限数字与状态文案全部来自服务端，前端只负责显示成 `12/80` 与选颜色 —— 自己写一份常量迟早出现「界面说没超、提交回来 400」。
+B站 上传的界面由四个组件加一个图标组成：[BiliIcon](../frontend/src/bilibili/BiliIcon.tsx#L12)（手绘 SVG，品牌色只落在图标本身）、[BiliUploadButton](../frontend/src/bilibili/BiliUploadButton.tsx#L42)（图标 + 一句人话，`idle` 档显示动作词，其余档原样显示后端徽标文案；**点下去做什么按档位分流**：已上传打开稿件页、待核对只核对、部分失败只补没成功的、上传中不给点，见 [FR-39](requirements.md#功能需求) / [FR-40](requirements.md#功能需求)）、[BiliUploadDialog](../frontend/src/bilibili/BiliUploadDialog.tsx#L65)（单视频与合集**共用**一个模态表单，合集显示逐条预览；表单里的值是服务端预填的，**投过就复用上一次提交的那一份**并明说，见 [FR-45](requirements.md#功能需求)）、[BiliJobStatus](../frontend/src/bilibili/BiliJobStatus.tsx#L41)（任务卡片里的明细与重试入口，**只在有话说时才渲染**）、[BiliLoginSection](../frontend/src/bilibili/BiliLoginSection.tsx#L32)（设置面板里的体检 / 扫码 / 导入 / 修复工具）。硬限数字与状态文案全部来自服务端，前端只负责显示成 `12/80` 与选颜色 —— 自己写一份常量迟早出现「界面说没超、提交回来 400」。
 
-辅助说明统一走 [HelpPopover](../frontend/src/components/HelpPopover.tsx#L42)：它是**非模态浮层**，默认收起；桌面端悬停即看、点击钉住，窄屏（`≤640px`）渲染为贴底抽屉。三条实现约定值得单独记住：
+辅助说明统一走 [HelpPopover](../frontend/src/shared/ui/HelpPopover.tsx#L42)：它是**非模态浮层**，默认收起；桌面端悬停即看、点击钉住，窄屏（`≤640px`）渲染为贴底抽屉。三条实现约定值得单独记住：
 
-- **钉住会记忆、关闭会清掉**：`rememberOpen` 把 `cascade.help.open.v1.<id>` 写进 `localStorage`，关闭时 `removeItem`；因此刷新后最多只有一块说明保持展开，见 [rememberOpen](../frontend/src/components/HelpPopover.tsx#L29)。
+- **钉住会记忆、关闭会清掉**：`rememberOpen` 把 `cascade.help.open.v1.<id>` 写进 `localStorage`，关闭时 `removeItem`；因此刷新后最多只有一块说明保持展开，见 [rememberOpen](../frontend/src/shared/ui/HelpPopover.tsx#L29)。
 - **不抢输入框焦点**：触发按钮在 `mousedown` 上阻止默认行为，面板 `aria-modal=false` 且没有遮罩。点开「常用端口」时，代理输入框里没保存的地址不会因失焦被提前写进设置。
 - **定位在打开时算一次**：面板用 `fixed` 定位并夹进视口（下方空间不足则上翻），因此它不占版面、展开前后主功能区位置不变；窗口尺寸变化会重新计算。
 
 辅助函数职责：
 
-- [formatting.ts](../frontend/src/formatting.ts)：时长、百分比、日期、文件大小、分辨率和速度格式化。
-- [quality.ts](../frontend/src/quality.ts)：清晰度选项、可用高度、降级按钮标签和选中清晰度显示。
+- [formatting.ts](../frontend/src/shared/formatting.ts)：时长、百分比、日期、文件大小、分辨率和速度格式化。
+- [quality.ts](../frontend/src/shared/quality.ts)：清晰度选项、可用高度、降级按钮标签和选中清晰度显示。
 
-任务完成提醒同样分成**判定**与**呈现**两层：[notifications.ts](../frontend/src/notifications.ts) 是纯逻辑（哪些状态算终态、一条提醒写成什么话、浮层队列的 `useCompletionToasts` hook），[CompletionToasts.tsx](../frontend/src/components/CompletionToasts.tsx#L21) 只渲染队列，并用 Web Audio **现场合成**提示音（C6→G6 两个正弦音，第二个轻一点晚一点；仓库里没有任何音频文件）。三条实现约束值得单独记住：
+任务完成提醒同样分成**判定**与**呈现**两层：[notifications.ts](../frontend/src/notifications/notifications.ts) 是纯逻辑（哪些状态算终态、一条提醒写成什么话、浮层队列的 `useCompletionToasts` hook），[CompletionToasts.tsx](../frontend/src/notifications/CompletionToasts.tsx#L21) 只渲染队列，并用 Web Audio **现场合成**提示音（C6→G6 两个正弦音，第二个轻一点晚一点；仓库里没有任何音频文件）。三条实现约束值得单独记住：
 
 - **触发条件是状态跃迁，不是「当前状态」**：必须比对上一次状态，否则一进来就已跑完的历史任务会被反复播报；`cancelled` 不算终态（取消是用户自己点的）。
 - **标签页在后台时浮层不倒计时**：只记「还剩多久」，等 `visibilitychange` 说可见了再接着走 —— 否则「右下角弹窗」这种方式在后台等于没选。
@@ -250,8 +250,8 @@ B站 上传的界面由四个组件加一个图标组成：[BiliIcon](../fronten
 `mode` 取其它值一律 `422`。为什么没有编辑器清单、也没有应用侧「上次用的查看器」，见
 [technical.md](technical.md#打开字幕文件)。
 
-播放、打开文件夹、打开字幕这类本地文件操作失败时，前端在 [JobQueue](../frontend/src/components/JobQueue.tsx) 的对应任务行或子视频行附近显示错误，而不是只放在页面顶部的全局提示区。
-「打开字幕」按钮本身是**一颗**图标按钮 [SubtitleOpenButton](../frontend/src/components/SubtitleOpenButton.tsx#L19)：
+播放、打开文件夹、打开字幕这类本地文件操作失败时，前端在 [JobQueue](../frontend/src/task-center/JobQueue.tsx) 的对应任务行或子视频行附近显示错误，而不是只放在页面顶部的全局提示区。
+「打开字幕」按钮本身是**一颗**图标按钮 [SubtitleOpenButton](../frontend/src/task-center/SubtitleOpenButton.tsx#L19)：
 `title="打开字幕文件；可选择打开方式"`，点它就是「弹选择器」那一条请求（不带 `mode`）；能不能点**只看**读模型给的
 `subtitle_path`（`null` 就灰着，悬停说「字幕文件尚不可用」），所以界面上不存在「点得下去但必然 409」的按钮。
 
