@@ -132,7 +132,7 @@ backend/app/
    它收尾时写 `finished_at`；用例紧接着手工写入固定时刻，谁的写在后谁生效。
    夹具里本来就有 [`wait_until_finished`](../tests/test_api_bilibili.py#L139)，这条用例漏了调用。
 
-修复单独成一个提交（[bug-fix/025](../bug-fix/025-upload-timestamp-test-races-the-worker.md)），不混进本轮。
+修复单独成一个提交（[bug-fix/025](../bug-fix/028-upload-timestamp-test-races-the-worker.md)），不混进本轮。
 
 ### 4.2 取证：校验脚本抓得住（不是「恰好绿」）
 

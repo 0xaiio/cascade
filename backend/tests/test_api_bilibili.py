@@ -414,7 +414,11 @@ def test_upload_timestamps_carry_a_timezone(client):
     """
     client.seed_job("job1", "任务", 1)
     items = client.seed_job("job2", "任务", 1)
-    client.client.post("/api/bilibili/uploads", json=single_payload(client))
+    created = client.client.post("/api/bilibili/uploads", json=single_payload(client)).json()
+    # **先等 worker 把这条跑完**再动手改库（[025](../../ai/bug-fix/028-upload-timestamp-test-races-the-worker.md)）：
+    # 这条用的是真的 `BiliManager`，POST 返回时上传还在跑；它收尾时会写 `finished_at`，
+    # 与下面手工写值抢时序的话，断言读到的就是「现在」而不是钉住的那个时刻。
+    client.wait_until_finished(created["uploads"][0]["id"])
     # 把状态推到等审核，`started_at` / `finished_at` 才都有值。
     with Session(client.engine) as session:
         row = session.exec(select(BiliUpload).where(BiliUpload.job_id == "job1")).one()

@@ -55,6 +55,7 @@
 | [025](025-requests-without-a-deadline.md) | 一条挂起的连接 = 一句永不消失的「正在读取…」 | `5c4511d` | `request()` 直接 `await fetch(...)`，而 `fetch` **没有超时**：后端接了连接却不回话时 Promise 永不 settle，界面停在 loading 上、没有异常也没有日志（此前只有 B站 体检那一处补过 12 s 计时器）。改为统一挂 `AbortController` 看门狗（默认 60 s / 解析 180 s），超时给一句可照做的话并真的掐掉请求 |
 | [026](026-a-resolution-that-silently-means-best.md) | 清晰度写成 `1440P`，静默下了最高画质 | `5d5b228` | `DownloadOptions.resolution` 没有任何校验，而 `format_selector()` 认不出大小写/漏 `p` 的写法时会回落成 `bv*+ba/b`（最佳可用），`should_look_for_fallback()` 同样认不出、连降级都不介入 ⇒ **不按用户要求做，也不告诉任何人**。三个入口（建任务 / 重启 / 默认清晰度）加归一化与校验，重启那条必须单独挡（`model_copy` 不触发校验） |
 | [027](027-sse-disconnect-keeps-the-listener.md) | SSE 断开后订阅者没注销，每个关掉的标签页留一个无界队列 | `ba10f37` | `async for` **不会**关闭子异步生成器（PEP 525 老坑）⇒ `EventBroker.subscribe()` 的 `finally` 要等 GC 才跑，期间断开的订阅者仍被逐个喂消息。路由里显式 `aclose()` 订阅对象，注销判据仍只在 `EventBroker` 一处 |
+| [028](028-upload-timestamp-test-races-the-worker.md) | 时间戳用例与 worker 抢时序，同一份代码跑三次两种结果 | 本次 | 用例用的是**真的** `BiliManager`，`POST` 返回时上传还在跑；worker 收尾写 `finished_at`，与用例手工写值抢先后 —— 谁在后谁生效。证据是只有 `finished_at` 被改成「现在」而 `started_at` 没动。夹具里本来就有 `wait_until_finished`，这条漏了调用；改后整文件 3/3 绿、全量 2/2 绿 |
 
 ## 本轮（2026-10-01）背景
 
