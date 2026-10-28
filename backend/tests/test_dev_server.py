@@ -14,8 +14,8 @@ from collections.abc import Iterator
 import pytest
 
 from app.__main__ import _resolve_port
-from app.config import AppSettings
-from app.dev_server import (
+from app.contracts.config import AppSettings
+from app.host.dev_server import (
     PortOccupant,
     describe_occupant,
     find_available_port,
@@ -155,7 +155,7 @@ def test_api_port_can_be_overridden_by_the_shared_env_var(monkeypatch) -> None:
 
 def test_env_file_is_anchored_to_the_repository_root() -> None:
     """`.env` 必须是绝对路径：相对路径按 cwd 解析，而用户是 `cd backend` 之后启动的。"""
-    from app.config import REPO_ROOT
+    from app.contracts.config import REPO_ROOT
 
     assert AppSettings.model_config["env_file"] == REPO_ROOT / ".env"
 

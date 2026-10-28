@@ -2,9 +2,9 @@ from pathlib import Path
 
 import pytest
 
-from app.schemas import DownloadOptions
-from app.stall_guard import DownloadStalled, StallGuard
-from app.ytdlp_service import YtDlpService
+from app.contracts.schemas import DownloadOptions
+from app.download.stall_guard import DownloadStalled, StallGuard
+from app.download.ytdlp_service import YtDlpService
 
 
 def downloading(downloaded_bytes: int | None) -> dict:

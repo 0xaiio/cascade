@@ -10,11 +10,11 @@ from yt_dlp.cookies import YoutubeDLCookieJar
 from yt_dlp.networking.impersonate import ImpersonateTarget
 from yt_dlp.utils import DownloadError
 
-from app.browser_cookies import BrowserCookieImporter
-from app.config import AppSettings
-from app.schemas import DownloadOptions, FormatOption
-from app import ytdlp_service
-from app.ytdlp_service import BrowserCookieImportError, YtDlpService
+from app.host.browser_cookies import BrowserCookieImporter
+from app.contracts.config import AppSettings
+from app.contracts.schemas import DownloadOptions, FormatOption
+from app.download import ytdlp_service
+from app.download.ytdlp_service import BrowserCookieImportError, YtDlpService
 
 
 def reset_js_runtime_probe(monkeypatch, service: YtDlpService, failure: str | None = None) -> None:
@@ -193,8 +193,8 @@ def test_default_download_options_do_not_force_anti403_profile(monkeypatch, tmp_
 def test_download_options_apply_resolved_system_proxy(monkeypatch, tmp_path: Path) -> None:
     """系统代理必须真的进 ydl_opts —— 否则「浏览器能上网、应用不能」还是会发生。"""
 
-    monkeypatch.setattr("app.proxy.read_system_proxy", lambda: "127.0.0.1:7890")
-    monkeypatch.setattr("app.proxy.read_environment_proxy", lambda: None)
+    monkeypatch.setattr("app.host.proxy.read_system_proxy", lambda: "127.0.0.1:7890")
+    monkeypatch.setattr("app.host.proxy.read_environment_proxy", lambda: None)
     service = YtDlpService(download_dir=tmp_path)
     monkeypatch.setattr(service, "_ffmpeg_executable", lambda: str(tmp_path / "ffmpeg.exe"))
 
@@ -208,8 +208,8 @@ def test_download_options_apply_resolved_system_proxy(monkeypatch, tmp_path: Pat
 
 
 def test_download_options_omit_proxy_when_nothing_is_configured(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr("app.proxy.read_system_proxy", lambda: None)
-    monkeypatch.setattr("app.proxy.read_environment_proxy", lambda: None)
+    monkeypatch.setattr("app.host.proxy.read_system_proxy", lambda: None)
+    monkeypatch.setattr("app.host.proxy.read_environment_proxy", lambda: None)
     service = YtDlpService(download_dir=tmp_path)
     monkeypatch.setattr(service, "_ffmpeg_executable", lambda: str(tmp_path / "ffmpeg.exe"))
 
@@ -222,8 +222,8 @@ def test_download_options_omit_proxy_when_nothing_is_configured(monkeypatch, tmp
 
 
 def test_explicit_direct_proxy_is_written_to_download_options(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr("app.proxy.read_system_proxy", lambda: "127.0.0.1:7890")
-    monkeypatch.setattr("app.proxy.read_environment_proxy", lambda: None)
+    monkeypatch.setattr("app.host.proxy.read_system_proxy", lambda: "127.0.0.1:7890")
+    monkeypatch.setattr("app.host.proxy.read_environment_proxy", lambda: None)
     service = YtDlpService(download_dir=tmp_path, proxy="direct")
     monkeypatch.setattr(service, "_ffmpeg_executable", lambda: str(tmp_path / "ffmpeg.exe"))
 
@@ -239,8 +239,8 @@ def test_extract_metadata_applies_resolved_proxy(monkeypatch, tmp_path: Path) ->
     """元数据提取同样是网络请求，也必须带代理（否则解析链接这一步就卡住）。"""
 
     captured_opts: dict = {}
-    monkeypatch.setattr("app.proxy.read_system_proxy", lambda: "127.0.0.1:7890")
-    monkeypatch.setattr("app.proxy.read_environment_proxy", lambda: None)
+    monkeypatch.setattr("app.host.proxy.read_system_proxy", lambda: "127.0.0.1:7890")
+    monkeypatch.setattr("app.host.proxy.read_environment_proxy", lambda: None)
 
     class FakeYoutubeDL:
         def __init__(self, opts):
@@ -255,7 +255,7 @@ def test_extract_metadata_applies_resolved_proxy(monkeypatch, tmp_path: Path) ->
         def extract_info(self, url, download=False):
             return {"id": "x", "title": "X", "webpage_url": url, "formats": []}
 
-    monkeypatch.setattr("app.ytdlp_service.yt_dlp.YoutubeDL", FakeYoutubeDL)
+    monkeypatch.setattr("app.download.ytdlp_service.yt_dlp.YoutubeDL", FakeYoutubeDL)
 
     YtDlpService(download_dir=tmp_path).extract_metadata("https://youtu.be/x")
 
@@ -287,7 +287,7 @@ def test_prepare_download_reports_unselectable_instead_of_raising(monkeypatch, t
                 "Use --list-formats for a list of available formats"
             )
 
-    monkeypatch.setattr("app.ytdlp_service.yt_dlp.YoutubeDL", FakeYoutubeDL)
+    monkeypatch.setattr("app.download.ytdlp_service.yt_dlp.YoutubeDL", FakeYoutubeDL)
     service = YtDlpService(download_dir=tmp_path)
     monkeypatch.setattr(service, "_ffmpeg_executable", lambda: str(tmp_path / "ffmpeg.exe"))
 
@@ -317,7 +317,7 @@ def test_prepare_download_reraises_errors_that_are_not_about_format_selection(
         def extract_info(self, url, download=False):
             raise DownloadError("ERROR: [youtube] x: The page needs to be reloaded.")
 
-    monkeypatch.setattr("app.ytdlp_service.yt_dlp.YoutubeDL", FakeYoutubeDL)
+    monkeypatch.setattr("app.download.ytdlp_service.yt_dlp.YoutubeDL", FakeYoutubeDL)
     service = YtDlpService(download_dir=tmp_path)
     monkeypatch.setattr(service, "_ffmpeg_executable", lambda: str(tmp_path / "ffmpeg.exe"))
 
@@ -353,7 +353,7 @@ class _InfoYoutubeDL:
 
 def _prepare(monkeypatch, service, options, info):
     monkeypatch.setattr(
-        "app.ytdlp_service.yt_dlp.YoutubeDL", lambda opts: _InfoYoutubeDL(opts, info)
+        "app.download.ytdlp_service.yt_dlp.YoutubeDL", lambda opts: _InfoYoutubeDL(opts, info)
     )
     return service.prepare_download("https://youtu.be/x", options)
 
@@ -451,7 +451,7 @@ def test_subtitles_only_prepare_survives_a_metadata_failure(monkeypatch, tmp_pat
         def extract_info(self, url, download=False):
             raise DownloadError("ERROR: [youtube] x: Sign in to confirm you're not a bot.")
 
-    monkeypatch.setattr("app.ytdlp_service.yt_dlp.YoutubeDL", Broken)
+    monkeypatch.setattr("app.download.ytdlp_service.yt_dlp.YoutubeDL", Broken)
     service = YtDlpService(download_dir=tmp_path)
 
     preparation = service.prepare_download("https://youtu.be/x", DownloadOptions(mode="subtitles_only"))
@@ -461,8 +461,8 @@ def test_subtitles_only_prepare_survives_a_metadata_failure(monkeypatch, tmp_pat
 
 
 def test_dependency_status_exposes_proxy_source_and_redacts_credentials(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr("app.proxy.read_system_proxy", lambda: "127.0.0.1:7890")
-    monkeypatch.setattr("app.proxy.read_environment_proxy", lambda: "http://user:pw@127.0.0.1:54109")
+    monkeypatch.setattr("app.host.proxy.read_system_proxy", lambda: "127.0.0.1:7890")
+    monkeypatch.setattr("app.host.proxy.read_environment_proxy", lambda: "http://user:pw@127.0.0.1:54109")
 
     status = YtDlpService(download_dir=tmp_path).get_dependency_status()
 
@@ -777,7 +777,7 @@ def test_settings_env_can_restore_throttled_rate(tmp_path: Path, monkeypatch) ->
 def test_aria2c_is_not_used_by_default_even_when_available(monkeypatch, tmp_path: Path) -> None:
     aria2c = tmp_path / "aria2c.exe"
     aria2c.write_text("", encoding="utf-8")
-    monkeypatch.setattr("app.ytdlp_service.shutil.which", lambda name: str(aria2c) if name == "aria2c" else None)
+    monkeypatch.setattr("app.download.ytdlp_service.shutil.which", lambda name: str(aria2c) if name == "aria2c" else None)
     service = YtDlpService(download_dir=tmp_path)
 
     opts = service.build_download_options(
@@ -926,7 +926,7 @@ def test_dependency_status_reports_po_token_provider_without_secret_values(monke
             return "1.2.3"
         raise importlib.metadata.PackageNotFoundError(package_name)
 
-    monkeypatch.setattr("app.ytdlp_service.importlib.metadata.version", fake_version)
+    monkeypatch.setattr("app.download.ytdlp_service.importlib.metadata.version", fake_version)
     service = YtDlpService(
         download_dir=tmp_path,
         youtube_po_token="SECRET_TOKEN",
@@ -952,7 +952,7 @@ def test_dependency_status_reports_po_token_provider_without_secret_values(monke
 
 def test_bundled_ffmpeg_is_used_when_system_ffmpeg_is_missing(monkeypatch, tmp_path: Path) -> None:
     bundled_ffmpeg = tmp_path / "bundled-ffmpeg.exe"
-    monkeypatch.setattr("app.ytdlp_service.shutil.which", lambda name: None)
+    monkeypatch.setattr("app.download.ytdlp_service.shutil.which", lambda name: None)
     monkeypatch.setitem(
         sys.modules,
         "imageio_ffmpeg",
@@ -1188,7 +1188,7 @@ def test_download_options_default_to_1440p_and_both_subtitle_sources(tmp_path: P
 
 def test_explicit_resolution_uses_single_file_selector_without_any_ffmpeg(monkeypatch, tmp_path: Path) -> None:
     service = YtDlpService(download_dir=tmp_path)
-    monkeypatch.setattr("app.ytdlp_service.shutil.which", lambda name: None)
+    monkeypatch.setattr("app.download.ytdlp_service.shutil.which", lambda name: None)
     monkeypatch.setitem(sys.modules, "imageio_ffmpeg", None)
 
     opts = service.build_download_options(
@@ -1250,7 +1250,7 @@ def test_import_browser_cookies_saves_only_youtube_related_cookies(monkeypatch, 
             raise RuntimeError("edge is not available")
         return jar
 
-    monkeypatch.setattr("app.browser_cookies.extract_cookies_from_browser", fake_extract)
+    monkeypatch.setattr("app.host.browser_cookies.extract_cookies_from_browser", fake_extract)
 
     result = YtDlpService(download_dir=tmp_path).import_browser_cookies("auto", tmp_path / "cookies.txt")
 
@@ -1267,7 +1267,7 @@ def test_import_browser_cookies_reports_locked_edge_database(monkeypatch, tmp_pa
     def fake_extract(browser_name, profile=None, logger=None, *, keyring=None, container=None):
         raise RuntimeError("Could not copy Chrome cookie database. See https://github.com/yt-dlp/yt-dlp/issues/7271")
 
-    monkeypatch.setattr("app.browser_cookies.extract_cookies_from_browser", fake_extract)
+    monkeypatch.setattr("app.host.browser_cookies.extract_cookies_from_browser", fake_extract)
 
     with pytest.raises(BrowserCookieImportError) as exc_info:
         YtDlpService(download_dir=tmp_path).import_browser_cookies("edge", tmp_path / "cookies.txt")
@@ -1292,12 +1292,12 @@ def test_import_browser_cookies_closes_edge_and_retries_when_allowed(monkeypatch
         return jar
 
     service = YtDlpService(download_dir=tmp_path)
-    monkeypatch.setattr("app.browser_cookies.extract_cookies_from_browser", fake_extract)
+    monkeypatch.setattr("app.host.browser_cookies.extract_cookies_from_browser", fake_extract)
     # 打桩要打在**类**上：importer 实例是 service.import_browser_cookies 调用时才 new 的，
     # 而它的 __init__ 会把「关浏览器」这个方法绑定到实例上
     # （`close_browser_for_cookie_import or self._close_browser_for_cookie_import`）。
     monkeypatch.setattr(
-        "app.browser_cookies.BrowserCookieImporter._close_browser_for_cookie_import",
+        "app.host.browser_cookies.BrowserCookieImporter._close_browser_for_cookie_import",
         lambda self, browser: closed.append(browser),
     )
 
@@ -1319,9 +1319,9 @@ def test_import_browser_cookies_uses_edge_cdp_fallback_after_dpapi_failure(monke
         raise RuntimeError("Failed to decrypt with DPAPI. See https://github.com/yt-dlp/yt-dlp/issues/10927")
 
     service = YtDlpService(download_dir=tmp_path)
-    monkeypatch.setattr("app.browser_cookies.extract_cookies_from_browser", fake_extract)
+    monkeypatch.setattr("app.host.browser_cookies.extract_cookies_from_browser", fake_extract)
     monkeypatch.setattr(
-        "app.browser_cookies.BrowserCookieImporter._extract_edge_cookies_via_cdp",
+        "app.host.browser_cookies.BrowserCookieImporter._extract_edge_cookies_via_cdp",
         lambda self: cdp_calls.append(True) or jar,
     )
 
@@ -1343,11 +1343,11 @@ def test_edge_cdp_fallback_never_launches_a_browser(monkeypatch, tmp_path: Path)
         raise AssertionError("CDP fallback must not launch a browser process.")
 
     # 先把服务构造完再打桩：构造时会合法地跑一次 `node --version` 做运行时自检，
-    # 那是产品行为，不该被算成「CDP 启动了进程」。自检走 `app.ytdlp_service`，与这里
-    # 打桩的 `app.browser_cookies.subprocess` 不是同一个模块；保留顺序只是为了不改变前提。
+    # 那是产品行为，不该被算成「CDP 启动了进程」。自检走 `app.download.ytdlp_service`，与这里
+    # 打桩的 `app.host.browser_cookies.subprocess` 不是同一个模块；保留顺序只是为了不改变前提。
     YtDlpService(download_dir=tmp_path)
 
-    monkeypatch.setattr("app.browser_cookies.subprocess.Popen", forbidden_popen)
+    monkeypatch.setattr("app.host.browser_cookies.subprocess.Popen", forbidden_popen)
 
     with pytest.raises(BrowserCookieImportError) as exc_info:
         BrowserCookieImporter()._extract_edge_cookies_via_cdp()
@@ -1362,7 +1362,7 @@ def test_import_browser_cookies_reports_edge_app_bound_after_dpapi_failure(monke
         raise RuntimeError("Failed to decrypt with DPAPI. See https://github.com/yt-dlp/yt-dlp/issues/10927")
 
     service = YtDlpService(download_dir=tmp_path)
-    monkeypatch.setattr("app.browser_cookies.extract_cookies_from_browser", fake_extract)
+    monkeypatch.setattr("app.host.browser_cookies.extract_cookies_from_browser", fake_extract)
 
     with pytest.raises(BrowserCookieImportError) as exc_info:
         service.import_browser_cookies("edge", tmp_path / "cookies.txt")
@@ -1378,7 +1378,7 @@ def test_auto_browser_cookie_import_prioritizes_edge_app_bound(monkeypatch, tmp_
         raise RuntimeError(f"could not find {browser_name} profile")
 
     service = YtDlpService(download_dir=tmp_path)
-    monkeypatch.setattr("app.browser_cookies.extract_cookies_from_browser", fake_extract)
+    monkeypatch.setattr("app.host.browser_cookies.extract_cookies_from_browser", fake_extract)
 
     with pytest.raises(BrowserCookieImportError) as exc_info:
         service.import_browser_cookies("auto", tmp_path / "cookies.txt")
@@ -1396,8 +1396,8 @@ def test_auto_browser_cookie_import_prioritizes_locked_edge_error(monkeypatch, t
             raise RuntimeError("Could not copy Chrome cookie database. See https://github.com/yt-dlp/yt-dlp/issues/7271")
         return empty_jar
 
-    monkeypatch.setattr("app.ytdlp_service.AUTO_BROWSER_COOKIE_CANDIDATES", ["edge", "chrome"])
-    monkeypatch.setattr("app.browser_cookies.extract_cookies_from_browser", fake_extract)
+    monkeypatch.setattr("app.download.ytdlp_service.AUTO_BROWSER_COOKIE_CANDIDATES", ["edge", "chrome"])
+    monkeypatch.setattr("app.host.browser_cookies.extract_cookies_from_browser", fake_extract)
 
     with pytest.raises(BrowserCookieImportError) as exc_info:
         YtDlpService(download_dir=tmp_path).import_browser_cookies("auto", tmp_path / "cookies.txt")
@@ -1446,7 +1446,7 @@ def test_extract_metadata_maps_playlist_entries_formats_and_subtitles(monkeypatc
                 "automatic_captions": {"zh-Hans": [{"ext": "vtt"}]},
             }
 
-    monkeypatch.setattr("app.ytdlp_service.yt_dlp.YoutubeDL", FakeYoutubeDL)
+    monkeypatch.setattr("app.download.ytdlp_service.yt_dlp.YoutubeDL", FakeYoutubeDL)
 
     result = YtDlpService(download_dir=tmp_path).extract_metadata(
         "https://youtube.com/playlist?list=abc",

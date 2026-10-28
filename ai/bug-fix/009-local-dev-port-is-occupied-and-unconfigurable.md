@@ -94,11 +94,11 @@ Coordinator）；同时 `endpointService.exe`（PID 6064）正连着它。它不
 
 ## 修复方案
 
-### a. 端口成为一等配置项（`backend/app/config.py`）
+### a. 端口成为一等配置项（`backend/app/contracts/config.py`）
 
 新增 `api_port`（环境变量 `YTDL_API_PORT`，默认 `8000`，范围 1..65535）。
 
-### b. `.env` 固定指向仓库根（`backend/app/config.py`）
+### b. `.env` 固定指向仓库根（`backend/app/contracts/config.py`）
 
 `env_file=REPO_ROOT / ".env"`：与文档一致，且与 cwd 无关。
 
@@ -109,7 +109,7 @@ Coordinator）；同时 `endpointService.exe`（PID 6064）正连着它。它不
 刻意**默认不自动换端口**：静默换端口会制造「后端在 8001、前端还代理 8000」这类查不出来的错配，
 正是 007 的教训。要自动，得显式加 `--auto-port`。
 
-### d. 端口检查做成可单测的模块（新增 `backend/app/dev_server.py`）
+### d. 端口检查做成可单测的模块（新增 `backend/app/host/dev_server.py`）
 
 - `port_available()`：判据是「**真的绑一下试试**」，不是「netstat 里没看到」——
   被保留/被独占的端口在 `netstat` 里可能很干净，只有绑定时才失败。也刻意**不设**

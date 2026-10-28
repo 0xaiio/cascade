@@ -134,7 +134,7 @@ BrowserCookieImporter(candidates=AUTO_BROWSER_COOKIE_CANDIDATES)
 
 | 指标 | 值 |
 | --- | --- |
-| `backend/app/ytdlp_service.py` | 1182 → **1130 行**（−52）；方法数 72 → **57**（正好 −15） |
+| `backend/app/download/ytdlp_service.py` | 1182 → **1130 行**（−52）；方法数 72 → **57**（正好 −15） |
 | `backend/tests/test_ytdlp_service.py` | 1342 → 1353 行（注入点展开 + 1 个 import） |
 | 删除的 import | `from yt_dlp.cookies import …`（整行）、`ytdlp_formats` 里的 5 个名字 |
 | 文档锚点 | 32 处重算（全因 `ytdlp_service.py` 行号下移） |
@@ -162,7 +162,7 @@ BrowserCookieImporter(candidates=AUTO_BROWSER_COOKIE_CANDIDATES)
 
 ### 4.2 取证一：被删的方法**只有一条转发语句**（无分支 / 无计算 / 无 IO）
 
-探针从 `git show HEAD:backend/app/ytdlp_service.py` 取出每个方法的 AST 体，逐条断言：
+探针从 `git show HEAD:backend/app/download/ytdlp_service.py` 取出每个方法的 AST 体，逐条断言：
 
 ```text
   OK _extract_browser_cookie_jar        语句数=1  已删除=True  return extract_cookies_from_browser(browser)

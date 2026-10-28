@@ -1,6 +1,6 @@
 """校验「可执行契约」与它的两份手写副本没有漂移。
 
-单一来源是**运行时的 `app.openapi()`** —— 它由 `backend/app/schemas.py` 与各路由的响应模型生成，
+单一来源是**运行时的 `app.openapi()`** —— 它由 `backend/app/contracts/schemas.py` 与各路由的响应模型生成，
 是唯一「改代码就跟着变」的那份。另外两份是手写的副本，本脚本把它们与运行时对照：
 
 - `frontend/src/types.ts`：按 `SCHEMA_PAIRS` 逐接口校验**字段名集合完全相同**；
@@ -209,7 +209,7 @@ def runtime_openapi(repo: Path) -> dict:
     """
     import logging
 
-    import app.logging_setup as logging_setup
+    import app.infra.logging_setup as logging_setup
 
     # main.py 用 `from .logging_setup import configure_logging`，在它执行时绑定；
     # 先改模块属性，能让那次绑定的就是 no-op。
@@ -220,7 +220,7 @@ def runtime_openapi(repo: Path) -> dict:
     finally:
         logging.disable(logging.NOTSET)
 
-    from app.config import AppSettings
+    from app.contracts.config import AppSettings
 
     scratch = repo / "tmp_acceptance" / "api_contract_scratch"
     scratch.mkdir(parents=True, exist_ok=True)

@@ -20,9 +20,9 @@ from pathlib import Path
 
 import pytest
 
-from app.bili_bin import CommandResult
-from app.bili_http import HttpError
-from app.bili_meta import (
+from app.bilibili.bili_bin import CommandResult
+from app.bilibili.bili_http import HttpError
+from app.bilibili.bili_meta import (
     COPYRIGHT_SELF,
     VIDEO_NAME_MAX,
     MetadataTemplate,
@@ -30,13 +30,13 @@ from app.bili_meta import (
     default_collection_template,
     default_single,
 )
-from app.bili_policy import (
+from app.bilibili.bili_policy import (
     SEASON_CREATE_FAILED,
     SEASON_EPISODES_FAILED,
     SEASON_SECTION_UNRESOLVED,
     UPLOAD_CDN_DROPPED,
 )
-from app.bili_upload import (
+from app.bilibili.bili_upload import (
     COMMENT_MARKER,
     DEFAULT_COLLECTION_GAP_SECONDS,
     LOG_TAIL_LINES,
@@ -55,7 +55,7 @@ from app.bili_upload import (
     tail_text,
     validate_collection,
 )
-from app.models import BiliSeasonStatus, BiliUploadStatus
+from app.contracts.models import BiliSeasonStatus, BiliUploadStatus
 from bili_fakes import (
     UNSET,
     FakeBiliTransport,
@@ -428,12 +428,12 @@ def test_run_single_writes_the_raw_output_into_the_log_on_failure(tmp_path, capl
     video = write_video(tmp_path / "a.mp4")
     raw = 'Error: {"code":-400,"data":null,"message":"请求错误","ttl":1}'
     runner = command_runner(returncode=1, stdout=raw, lines=(raw, "start pre_upload"))
-    with caplog.at_level(logging.WARNING, logger="app.bili_upload"):
+    with caplog.at_level(logging.WARNING, logger="app.bilibili.bili_upload"):
         result = run_single(
             make_context(transport, runner=runner, tmp_path=tmp_path), UploadTarget(1, TITLE, video), single_meta()
         )
     assert result.status == BiliUploadStatus.failed.value
-    logged = [record.getMessage() for record in caplog.records if record.name == "app.bili_upload"]
+    logged = [record.getMessage() for record in caplog.records if record.name == "app.bilibili.bili_upload"]
     assert any(message.startswith("biliup 输出 | ") and "请求错误" in message for message in logged), logged
 
 
@@ -441,7 +441,7 @@ def test_run_single_never_logs_the_raw_output_of_a_successful_upload(tmp_path, c
     """成功时不必把整段输出刷进日志 —— 那会把排障用的那几行淹掉。"""
     transport = FakeBiliTransport(archives=[archive()])
     video = write_video(tmp_path / "a.mp4")
-    with caplog.at_level(logging.WARNING, logger="app.bili_upload"):
+    with caplog.at_level(logging.WARNING, logger="app.bilibili.bili_upload"):
         run_single(
             make_context(transport, runner=command_runner(), tmp_path=tmp_path),
             UploadTarget(1, TITLE, video),
@@ -1257,7 +1257,7 @@ def test_a_failed_hard_link_falls_back_to_the_original_name(tmp_path, monkeypatc
     def boom(*_args, **_kwargs):
         raise OSError("hard link not supported")
 
-    monkeypatch.setattr("app.bili_upload.os.link", boom)
+    monkeypatch.setattr("app.bilibili.bili_upload.os.link", boom)
     transport = FakeBiliTransport(archives=[archive()])
     video = _long_video(tmp_path, 85)
     runner = _LinkProbeRunner()

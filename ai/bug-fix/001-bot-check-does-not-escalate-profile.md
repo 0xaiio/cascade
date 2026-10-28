@@ -14,7 +14,7 @@ YouTube 返回 `Sign in to confirm you're not a bot.` 时，下载**不会**尝�
 
 ## 原因
 
-`backend/app/ytdlp_service.py` 的 profile 循环里有一道「是否值得换 profile」的闸门：
+`backend/app/download/ytdlp_service.py` 的 profile 循环里有一道「是否值得换 profile」的闸门：
 
 ```python
 if youtube_profile == "default" and not self.is_media_stream_blocked_error(exc):

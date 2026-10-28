@@ -8,13 +8,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlmodel import Session
 
-from app.config import AppSettings
-from app.db import create_app_engine, init_db
+from app.contracts.config import AppSettings
+from app.infra.db import create_app_engine, init_db
 from app.main import create_app
-from app.models import Job, JobItem, Setting
-from app.schemas import DownloadOptions, FormatOption
-from app.transfer_stats import TransferStats
-from app.ytdlp_service import YtDlpService
+from app.contracts.models import Job, JobItem, Setting
+from app.contracts.schemas import DownloadOptions, FormatOption
+from app.download.transfer_stats import TransferStats
+from app.download.ytdlp_service import YtDlpService
 
 from fakes import (
     AverageSpeedYtDlpService,
@@ -993,7 +993,7 @@ def test_restarting_a_job_without_duration_backfills_it(tmp_path: Path) -> None:
 def test_finished_download_keeps_average_speed(tmp_path: Path, monkeypatch) -> None:
     service = AverageSpeedYtDlpService()
     times = iter([10.0, 11.0, 13.0])
-    monkeypatch.setattr("app.job_manager.TransferStats", lambda: TransferStats(clock=lambda: next(times)))
+    monkeypatch.setattr("app.download.job_manager.TransferStats", lambda: TransferStats(clock=lambda: next(times)))
 
     with TestClient(create_app(settings=make_settings(tmp_path), ytdlp_service=service)) as client:
         response = client.post(
@@ -2298,7 +2298,7 @@ def test_proxy_test_endpoint_uses_the_service_setting(tmp_path: Path, monkeypatc
         captured["resolution"] = resolution
         raise AssertionError("stop")
 
-    monkeypatch.setattr("app.routers.diagnostics.test_proxy", fake_test)
+    monkeypatch.setattr("app.api.routers.diagnostics.test_proxy", fake_test)
     service = FakeYtDlpService()
     service.proxy = "127.0.0.1:7890"
 
@@ -2320,7 +2320,7 @@ def test_proxy_test_endpoint_accepts_a_temporary_override(tmp_path: Path, monkey
         captured["resolution"] = resolution
         raise AssertionError("stop")
 
-    monkeypatch.setattr("app.routers.diagnostics.test_proxy", fake_test)
+    monkeypatch.setattr("app.api.routers.diagnostics.test_proxy", fake_test)
     service = FakeYtDlpService()
     service.proxy = "127.0.0.1:7890"
 
@@ -2334,10 +2334,10 @@ def test_proxy_test_endpoint_accepts_a_temporary_override(tmp_path: Path, monkey
 
 
 def test_proxy_test_endpoint_returns_the_probe_result(tmp_path: Path, monkeypatch) -> None:
-    from app.connectivity import ProxyTestResult
+    from app.host.connectivity import ProxyTestResult
 
     monkeypatch.setattr(
-        "app.routers.diagnostics.test_proxy",
+        "app.api.routers.diagnostics.test_proxy",
         lambda resolution: ProxyTestResult(
             ok=True,
             source=resolution.source,
@@ -2392,7 +2392,7 @@ def test_cookies_verify_endpoint_deep_mode_uses_the_network(tmp_path: Path, monk
 
     with make_client(tmp_path) as client:
         client.post("/api/cookies", files={"file": ("cookies.txt", jar, "text/plain")})
-        monkeypatch.setattr("app.cookie_health.probe_logged_in", lambda *_a, **_k: (True, "page says true"))
+        monkeypatch.setattr("app.host.cookie_health.probe_logged_in", lambda *_a, **_k: (True, "page says true"))
         response = client.post("/api/cookies/verify", json={"deep": True})
 
     payload = response.json()

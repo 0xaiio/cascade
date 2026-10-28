@@ -10,16 +10,16 @@
 
 | 模块 | 层 | 职责 | 不做什么 |
 | --- | --- | --- | --- |
-| `backend/app/bili_policy.py` | L5 纯工具 | 文案表、状态折合、失败分类 | 不含任何判定逻辑 |
-| `backend/app/bili_meta.py` | L5 纯工具 | 模板渲染、标签派生、**版权与来源的收口（`normalize_copyright` / `effective_source`）**、平台硬限校验 | 不碰进程、不碰网络 |
-| `backend/app/bili_http.py` | L4 基础设施 | 唯一 HTTP 接缝（`Transport` 协议 + 标准库实现） | 不含业务码判断 |
-| `backend/app/bili_auth.py` | L3 领域 | 扫码登录会话、**TV 端三步令牌交换**、cookie 文件读写与摘要 | 不落盘策略（由 manager 决定） |
-| `backend/app/bili_api.py` | L3 领域 | 会员态接口：对账、稿件详情、合集、置顶评论 | 不实现上传封面（见 §5.2） |
-| `backend/app/bili_bin.py` | L4 基础设施 | `biliup` 探测/命令组装/执行、ffmpeg 抽帧 | 不判断「投稿成功没成功」 |
-| `backend/app/bili_upload.py` | L3 领域 | 单次上传的领域逻辑（纯函数式） | **不写库、不发事件、不读全局配置** |
-| `backend/app/bili_read_model.py` | L2 编排 | 两张表 → 界面形状；徽标聚合 | 不写库、不改状态 |
-| `backend/app/bili_manager.py` | L2 编排 | 队列、串行与间隔、状态落账、事件、重启收敛 | 不直接调 `biliup`，不解析平台结构 |
-| `backend/app/routers/bilibili.py` | L0 入口 | 取参 → 调辅助 → 定状态码 | 不含领域规则 |
+| `backend/app/bilibili/bili_policy.py` | L5 纯工具 | 文案表、状态折合、失败分类 | 不含任何判定逻辑 |
+| `backend/app/bilibili/bili_meta.py` | L5 纯工具 | 模板渲染、标签派生、**版权与来源的收口（`normalize_copyright` / `effective_source`）**、平台硬限校验 | 不碰进程、不碰网络 |
+| `backend/app/bilibili/bili_http.py` | L4 基础设施 | 唯一 HTTP 接缝（`Transport` 协议 + 标准库实现） | 不含业务码判断 |
+| `backend/app/bilibili/bili_auth.py` | L3 领域 | 扫码登录会话、**TV 端三步令牌交换**、cookie 文件读写与摘要 | 不落盘策略（由 manager 决定） |
+| `backend/app/bilibili/bili_api.py` | L3 领域 | 会员态接口：对账、稿件详情、合集、置顶评论 | 不实现上传封面（见 §5.2） |
+| `backend/app/bilibili/bili_bin.py` | L4 基础设施 | `biliup` 探测/命令组装/执行、ffmpeg 抽帧 | 不判断「投稿成功没成功」 |
+| `backend/app/bilibili/bili_upload.py` | L3 领域 | 单次上传的领域逻辑（纯函数式） | **不写库、不发事件、不读全局配置** |
+| `backend/app/bilibili/bili_read_model.py` | L2 编排 | 两张表 → 界面形状；徽标聚合 | 不写库、不改状态 |
+| `backend/app/bilibili/bili_manager.py` | L2 编排 | 队列、串行与间隔、状态落账、事件、重启收敛 | 不直接调 `biliup`，不解析平台结构 |
+| `backend/app/api/routers/bilibili.py` | L0 入口 | 取参 → 调辅助 → 定状态码 | 不含领域规则 |
 
 分层由 `scripts/check_layers.py` 强制（解析 `docs/design.md` 的模块职责矩阵）。
 
@@ -343,7 +343,7 @@ id（实测合集 `9343273` → 「正片」`10455347`）。拿到手就设 `sec
 | Ep 105 | **71** | **85** | `21104 标题过长` |
 
 标题长度与成败无关，`stem ≤ 80` 与成败完全吻合。修法在
-[`_short_name_video`](../../../backend/app/bili_upload.py#L228)：stem 超限时在**同一目录**建一个
+[`_short_name_video`](../../../backend/app/bilibili/bili_upload.py#L228)：stem 超限时在**同一目录**建一个
 `cascade-<8 hex>.mp4` 的硬链接交给 biliup，`finally` 删掉 —— 同目录 ⇒ 同卷 ⇒ 零字节开销，原文件不动。
 硬链接失败（exFAT/网络盘/权限）退回原名并记 warning：宁可让平台用 21104 拒掉（那条错误的下一步已经
 写明「把源文件改名短一点」），也不去复制一个几 GB 的文件。

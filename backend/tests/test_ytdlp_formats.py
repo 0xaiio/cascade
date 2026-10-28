@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from app.schemas import DownloadOptions, FormatOption
-from app.ytdlp_formats import (
+from app.contracts.schemas import DownloadOptions, FormatOption
+from app.download.ytdlp_formats import (
     DEFAULT_MIN_AUTO_FALLBACK_HEIGHT,
     actual_format_from_info_dict,
     duration_from_info_dict,

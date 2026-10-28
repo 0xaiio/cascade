@@ -50,7 +50,7 @@
 
 ## 2. 实施方案
 
-### 2.1 新模块：`backend/app/resolution_decisions.py`（L3 领域，247 行）
+### 2.1 新模块：`backend/app/download/resolution_decisions.py`（L3 领域，247 行）
 
 只做四件事，全是纯函数，全部可用 0.1 秒量级的单测覆盖：
 
@@ -108,8 +108,8 @@
 
 | 指标 | 重构前 | 重构后 |
 | --- | --- | --- |
-| `backend/app/job_manager.py` | **1174** | **1142**（−32） |
-| `backend/app/resolution_decisions.py` | — | **247**（新增） |
+| `backend/app/download/job_manager.py` | **1174** | **1142**（−32） |
+| `backend/app/download/resolution_decisions.py` | — | **247**（新增） |
 | `backend/app/*.py` 模块数 | 32 | **33** |
 | `job_manager` 里降级相关的私有方法 | **9** | **4**（其中 2 个是 IO / 写状态） |
 | 后端测试用例 | 289 | **320**（+31，全在新模块） |

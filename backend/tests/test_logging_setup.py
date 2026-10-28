@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from app import logging_setup
+from app.infra import logging_setup
 
 
 @pytest.fixture(autouse=True)

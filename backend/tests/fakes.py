@@ -4,9 +4,9 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
-from app.proxy import resolve_proxy
-from app.schemas import AnalyzeResponse, DownloadOptions, FormatOption, SubtitleOption, VideoEntry
-from app.ytdlp_service import BrowserCookieImportError, DownloadCancelled
+from app.host.proxy import resolve_proxy
+from app.contracts.schemas import AnalyzeResponse, DownloadOptions, FormatOption, SubtitleOption, VideoEntry
+from app.download.ytdlp_service import BrowserCookieImportError, DownloadCancelled
 from yt_dlp.utils import DownloadError
 class FakeYtDlpService:
     def __init__(self):

@@ -1,4 +1,4 @@
-from app.error_advice import advise, exception_chain
+from app.download.error_advice import advise, exception_chain
 
 
 class DownloadError(RuntimeError):

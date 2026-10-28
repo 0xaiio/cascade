@@ -1,4 +1,4 @@
-from app.download_progress import DownloadProgressAggregator, MAX_RUNNING_PROGRESS
+from app.download.download_progress import DownloadProgressAggregator, MAX_RUNNING_PROGRESS
 
 
 def test_sidecar_finish_does_not_lock_progress_when_expected_total_is_known() -> None:

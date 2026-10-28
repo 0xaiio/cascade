@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.subtitle_plan import (
+from app.download.subtitle_plan import (
     CHINESE,
     ENGLISH,
     SubtitleOrigin,

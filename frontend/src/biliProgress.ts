@@ -7,7 +7,7 @@ import type { BiliUpload, BiliUploadStatus } from "./types";
  *
  * 为什么不做百分比条：`biliup` 在管道模式（非 TTY）下**不输出字节进度**，
  * 只吐三类可用的行 —— `pre_upload`（准备）、`Upload completed`（传完）、`APP接口投稿成功`（提交完），
- * 服务端把它们折成 0.2 / 0.6 / 0.95（见 `backend/app/bili_bin.py` 的 `_PROGRESS_STAGES`）。
+ * 服务端把它们折成 0.2 / 0.6 / 0.95（见 `backend/app/bilibili/bili_bin.py` 的 `_PROGRESS_STAGES`）。
  * 实测一次 14 MB 的投稿，传输这一段跑了 **481 秒**（`Upload completed … cost 481.85s`），
  * 期间没有任何中间信号 —— 画一根停在 20% 的进度条，用户只会以为它卡死了。
  *

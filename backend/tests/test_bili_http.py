@@ -18,7 +18,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.bili_http import DEFAULT_TIMEOUT, HttpError, HttpResult, UrllibTransport
+from app.bilibili.bili_http import DEFAULT_TIMEOUT, HttpError, HttpResult, UrllibTransport
 
 
 class _State(SimpleNamespace):

@@ -24,16 +24,16 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
-from app.bili_auth import TvToken, write_cookie_file
-from app.bili_bin import is_pe
-from app.bili_manager import BiliManager
-from app.bili_meta import COPYRIGHT_REPRINT, COPYRIGHT_SELF
-from app.config import AppSettings
-from app.db import create_app_engine, init_db
-from app.events import EventBroker
+from app.bilibili.bili_auth import TvToken, write_cookie_file
+from app.bilibili.bili_bin import is_pe
+from app.bilibili.bili_manager import BiliManager
+from app.bilibili.bili_meta import COPYRIGHT_REPRINT, COPYRIGHT_SELF
+from app.contracts.config import AppSettings
+from app.infra.db import create_app_engine, init_db
+from app.infra.events import EventBroker
 from app.main import create_app
-from app.models import BiliUpload, Job, JobItem
-from app.bili_read_model import IN_FLIGHT_STATUSES
+from app.contracts.models import BiliUpload, Job, JobItem
+from app.bilibili.bili_read_model import IN_FLIGHT_STATUSES
 from bili_fakes import FakeBiliTransport, RecordingSleeper, command_runner
 from fakes import FakeYtDlpService
 

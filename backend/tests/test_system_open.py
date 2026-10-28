@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app import system_open
+from app.host import system_open
 
 
 def test_windows_directory_opens_new_explorer_window(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

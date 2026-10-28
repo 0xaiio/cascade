@@ -90,7 +90,7 @@ def run_round(
 ) -> dict:
     from fastapi.testclient import TestClient
 
-    from app.config import AppSettings
+    from app.contracts.config import AppSettings
     from app.main import create_app
 
     settings_kwargs = dict(

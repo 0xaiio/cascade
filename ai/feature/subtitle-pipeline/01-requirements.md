@@ -30,14 +30,14 @@
 
 | 编号 | 需求 | 落到哪 | 判据 |
 | --- | --- | --- | --- |
-| R-1 | 只处理中英，忽略其他语种 | [`language_family`](../../../backend/app/subtitle_plan.py#L109) 是**唯一**的族判定入口；界面列字幕与下载选语言共用同一份过滤（`YtDlpService._map_subtitles`） | 传入 `ja` / `ko` / `yue` 返回 `None`；`yue`（粤语）**不算**中文 |
-| R-2 | 按主语言决定下载目标 | [`detect_primary_language`](../../../backend/app/subtitle_plan.py#L140) | 判据是 yt-dlp 的 `-orig` ASR 轨（平台标出的原始语音语言），不是标题/频道 |
-| R-3 | 人工优先 → 降级 ASR → 跳过不中断 | [`resolve_subtitle_plan`](../../../backend/app/subtitle_plan.py#L200) + 把 `subtitleslangs` 收敛成一条 | 同一语言的人工轨存在时绝不选 ASR；都没有时 `origin=none` 且**下载照常完成** |
+| R-1 | 只处理中英，忽略其他语种 | [`language_family`](../../../backend/app/download/subtitle_plan.py#L109) 是**唯一**的族判定入口；界面列字幕与下载选语言共用同一份过滤（`YtDlpService._map_subtitles`） | 传入 `ja` / `ko` / `yue` 返回 `None`；`yue`（粤语）**不算**中文 |
+| R-2 | 按主语言决定下载目标 | [`detect_primary_language`](../../../backend/app/download/subtitle_plan.py#L140) | 判据是 yt-dlp 的 `-orig` ASR 轨（平台标出的原始语音语言），不是标题/频道 |
+| R-3 | 人工优先 → 降级 ASR → 跳过不中断 | [`resolve_subtitle_plan`](../../../backend/app/download/subtitle_plan.py#L200) + 把 `subtitleslangs` 收敛成一条 | 同一语言的人工轨存在时绝不选 ASR；都没有时 `origin=none` 且**下载照常完成** |
 | R-4 | 记录语言与来源 | `JobItem.subtitle_language` / `subtitle_source` / `subtitle_path` | 来源是 `human` / `auto` / `none` 三值之一，不是「有没有」的布尔 |
-| R-5 | 投稿成功后一并提交字幕 | [`_attach_subtitle`](../../../backend/app/bili_upload.py#L305)（`run_single` 的最后一步） | 必须在拿到 `aid` / `cid` 之后；拿不到就跳过 |
-| R-6 | 必须是可关闭的 CC 字幕 | `POST /x/v2/dm/subtitle/draft/save`（[`save_subtitle`](../../../backend/app/bili_api.py#L366)），BCC 走 `oid=cid` | 字幕是**字幕轨**而非烧进画面；播放器里可关 |
+| R-5 | 投稿成功后一并提交字幕 | [`_attach_subtitle`](../../../backend/app/bilibili/bili_upload.py#L305)（`run_single` 的最后一步） | 必须在拿到 `aid` / `cid` 之后；拿不到就跳过 |
+| R-6 | 必须是可关闭的 CC 字幕 | `POST /x/v2/dm/subtitle/draft/save`（[`save_subtitle`](../../../backend/app/bilibili/bili_api.py#L366)），BCC 走 `oid=cid` | 字幕是**字幕轨**而非烧进画面；播放器里可关 |
 | R-7 | 无字幕时只跳字幕、视频流程照完 | `SubtitleOutcome(state="skipped")` | 稿件状态**不因字幕而变**；`skipped` 是默认态 |
-| R-8 | 格式转换 / 命名 / 语言标识 | [`bili_subtitle.py`](../../../backend/app/bili_subtitle.py)（SRT/VTT → BCC）+ [`find_subtitle_file`](../../../backend/app/output_paths.py#L162)（命名发现）+ [`bilibili_language`](../../../backend/app/bili_subtitle.py#L83)（标识） | 见下节的**一处与需求文字冲突的实测** |
+| R-8 | 格式转换 / 命名 / 语言标识 | [`bili_subtitle.py`](../../../backend/app/bilibili/bili_subtitle.py)（SRT/VTT → BCC）+ [`find_subtitle_file`](../../../backend/app/download/output_paths.py#L162)（命名发现）+ [`bilibili_language`](../../../backend/app/bilibili/bili_subtitle.py#L83)（标识） | 见下节的**一处与需求文字冲突的实测** |
 
 ## 一处与需求文字冲突的实测（重要）
 

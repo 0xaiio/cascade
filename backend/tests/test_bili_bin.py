@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from app.bili_bin import (
+from app.bilibili.bili_bin import (
     DEFAULT_UPLOAD_TIMEOUT_SECONDS,
     CommandResult,
     _first_valid,
@@ -35,8 +35,8 @@ from app.bili_bin import (
     run_command,
     upload,
 )
-from app.bili_meta import COPYRIGHT_REPRINT, COPYRIGHT_SELF, UploadMetadata
-from app.bili_policy import TIMEOUT_MARKER
+from app.bilibili.bili_meta import COPYRIGHT_REPRINT, COPYRIGHT_SELF, UploadMetadata
+from app.bilibili.bili_policy import TIMEOUT_MARKER
 
 # ---------------------------------------------------------------- 夹具
 # 一份真实 PE 的开头两字节就是 MZ；`is_pe` 只读这两个字节，所以不必造一个完整可执行文件。
@@ -78,11 +78,11 @@ def _no_host_biliup(monkeypatch):
     真货。开发机上恰好装了 biliup 时它会返回那个 11 MB 的真二进制，于是「应该用我造的
     替身来修」变成「用本机那个来修」—— 断言跟着开发机走，换台机器就翻车。
 
-    这里改的是 `app.bili_bin` 模块里对 `find_biliup` 的引用（也就是 `detect_broken_stub`
-    实际会看到的那一个）；本文件顶层 `from app.bili_bin import find_biliup` 拿到的仍是原函数，
+    这里改的是 `app.bilibili.bili_bin` 模块里对 `find_biliup` 的引用（也就是 `detect_broken_stub`
+    实际会看到的那一个）；本文件顶层 `from app.bilibili.bili_bin import find_biliup` 拿到的仍是原函数，
     所以 `test_find_biliup_*` 那几条**不受影响**，它们各自显式打了 `shutil.which` 与包目录的桩。
     """
-    monkeypatch.setattr("app.bili_bin.find_biliup", lambda explicit=None: None)
+    monkeypatch.setattr("app.bilibili.bili_bin.find_biliup", lambda explicit=None: None)
 
 
 # ---------------------------------------------------------------- is_pe
@@ -123,7 +123,7 @@ def test_first_valid_returns_none_when_nothing_is_usable(tmp_path):
 
 def test_find_biliup_prefers_the_explicit_path(monkeypatch, tmp_path):
     explicit = write_pe(tmp_path / "explicit.exe")
-    monkeypatch.setattr("app.bili_bin.shutil.which", lambda name: str(write_pe(tmp_path / "path.exe")))
+    monkeypatch.setattr("app.bilibili.bili_bin.shutil.which", lambda name: str(write_pe(tmp_path / "path.exe")))
     assert find_biliup(str(explicit)) == str(explicit)
 
 
@@ -131,17 +131,17 @@ def test_find_biliup_refuses_an_explicit_path_that_is_a_stub(monkeypatch, tmp_pa
     """显式配置了但指向空壳时返回 `None`，**不是**原样返回 —— 否则调用方会拿着一个
     必然执行失败的文件去投稿，错误发生在几分钟后的子进程里，比在这里说清楚贵得多。"""
     stub = write_stub(tmp_path / "stub.exe")
-    monkeypatch.setattr("app.bili_bin.shutil.which", lambda name: None)
+    monkeypatch.setattr("app.bilibili.bili_bin.shutil.which", lambda name: None)
     assert find_biliup(str(stub)) is None
 
 
 def test_find_biliup_falls_back_to_path_then_package_dir(monkeypatch, tmp_path):
     on_path = write_pe(tmp_path / "path" / "biliup.exe")
     monkeypatch.setattr(
-        "app.bili_bin.shutil.which",
+        "app.bilibili.bili_bin.shutil.which",
         lambda name: str(on_path) if name == "biliup" else None,
     )
-    monkeypatch.setattr("app.bili_bin.WINGET_PACKAGE_GLOB", str(tmp_path / "empty"))
+    monkeypatch.setattr("app.bilibili.bili_bin.WINGET_PACKAGE_GLOB", str(tmp_path / "empty"))
     assert find_biliup() == str(on_path)
 
 
@@ -149,14 +149,14 @@ def test_find_biliup_skips_a_stub_on_path_and_falls_through_to_the_package(monke
     """**这就是那个坑的回归用例**：PATH 上有空壳时必须继续往下找，而不是返回它。"""
     stub = write_stub(tmp_path / "links" / "biliup.exe")
     in_package = write_pe(tmp_path / "packages" / "ForgQi.biliup-rs_abc" / "biliup.exe")
-    monkeypatch.setattr("app.bili_bin.shutil.which", lambda name: str(stub))
-    monkeypatch.setattr("app.bili_bin.WINGET_PACKAGE_GLOB", str(tmp_path / "packages"))
+    monkeypatch.setattr("app.bilibili.bili_bin.shutil.which", lambda name: str(stub))
+    monkeypatch.setattr("app.bilibili.bili_bin.WINGET_PACKAGE_GLOB", str(tmp_path / "packages"))
     assert find_biliup() == str(in_package)
 
 
 def test_find_biliup_returns_none_when_nothing_usable_exists(monkeypatch, tmp_path):
-    monkeypatch.setattr("app.bili_bin.shutil.which", lambda name: None)
-    monkeypatch.setattr("app.bili_bin.WINGET_PACKAGE_GLOB", str(tmp_path / "empty"))
+    monkeypatch.setattr("app.bilibili.bili_bin.shutil.which", lambda name: None)
+    monkeypatch.setattr("app.bilibili.bili_bin.WINGET_PACKAGE_GLOB", str(tmp_path / "empty"))
     assert find_biliup() is None
 
 

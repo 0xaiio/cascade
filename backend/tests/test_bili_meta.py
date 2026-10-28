@@ -9,7 +9,7 @@
 
 import pytest
 
-from app.bili_meta import (
+from app.bilibili.bili_meta import (
     COMMENT_MAX,
     COPYRIGHT_REPRINT,
     COPYRIGHT_SELF,

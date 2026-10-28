@@ -131,7 +131,7 @@ Linux/macOS：bash init/start.sh dev
 
 ## 环境变量
 
-配置类定义见 [AppSettings](../backend/app/config.py#L19)，前缀为 `YTDL_`，并会读取仓库根目录的 `.env`。`env_file` 用的是**绝对路径**（`REPO_ROOT / ".env"`），所以与你从哪个目录启动无关 —— 相对路径会按当前工作目录解析，而文档里的命令都是 `cd backend` 之后执行的。`.env` 已被 Git 忽略。下表列出 `AppSettings` 的全部 27 个字段及其当前默认值；另有 `YTDL_LOG_LEVEL`（默认 `INFO`）不经过 `AppSettings`，由 [configure_logging](../backend/app/logging_setup.py#L48) 直接读取。
+配置类定义见 [AppSettings](../backend/app/contracts/config.py#L19)，前缀为 `YTDL_`，并会读取仓库根目录的 `.env`。`env_file` 用的是**绝对路径**（`REPO_ROOT / ".env"`），所以与你从哪个目录启动无关 —— 相对路径会按当前工作目录解析，而文档里的命令都是 `cd backend` 之后执行的。`.env` 已被 Git 忽略。下表列出 `AppSettings` 的全部 27 个字段及其当前默认值；另有 `YTDL_LOG_LEVEL`（默认 `INFO`）不经过 `AppSettings`，由 [configure_logging](../backend/app/infra/logging_setup.py#L48) 直接读取。
 
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -149,7 +149,7 @@ Linux/macOS：bash init/start.sh dev
 | `YTDL_YOUTUBE_VISITOR_DATA` | 空 | 与 PO token 配套的 visitor data。 |
 | `YTDL_YOUTUBE_PO_BROWSER_PATH` | 空 | PO-token provider 使用的浏览器路径。 |
 | `YTDL_JS_RUNTIME_PATH` | 空 | JS 运行时（Deno / Node）可执行文件路径，用于解 YouTube 的 nsig。留空时按「PATH → 常见安装目录」自动探测，探测不到会直接导致提取失败。见 [技术文档](technical.md#js-运行时与-n-challenge)。 |
-| `YTDL_PROXY` | 空 | 代理。留空 = 自动（优先 Windows 系统代理，其次 `HTTP_PROXY`/`HTTPS_PROXY` 环境变量）；`direct`/`none`/`off` = 强制直连；其余按代理 URL 处理，缺 scheme 时补 `http://`（`127.0.0.1:7890` 可直接写）。解析逻辑见 [proxy.py](../backend/app/proxy.py#L169)。 |
+| `YTDL_PROXY` | 空 | 代理。留空 = 自动（优先 Windows 系统代理，其次 `HTTP_PROXY`/`HTTPS_PROXY` 环境变量）；`direct`/`none`/`off` = 强制直连；其余按代理 URL 处理，缺 scheme 时补 `http://`（`127.0.0.1:7890` 可直接写）。解析逻辑见 [proxy.py](../backend/app/host/proxy.py#L169)。 |
 | `YTDL_YOUTUBE_MAX_PARALLEL_DOWNLOADS` | `5` | YouTube 同时下载的视频数；若追求稳定，可设为 `1`。 |
 | `YTDL_ANTI403_HTTP_CHUNK_SIZE_MB` | `16` | HTTP chunk 大小，按块重开请求以降低 403 概率。 |
 | `YTDL_THROTTLED_RATE_KBPS` | `0`（关闭） | 单条流低速重取阈值。`> 0` 时会写入 yt-dlp 的 `throttledratelimit`，见 [技术文档](technical.md#稳定下载策略)。 |
@@ -163,7 +163,7 @@ Linux/macOS：bash init/start.sh dev
 | `YTDL_BILI_COOKIE_FILENAME` | `bili_cookies.json` | B站 登录态文件名，落在 `data/` 下。 |
 | `YTDL_BILI_UPLOAD_GAP_SECONDS` | `20.0` | 合集逐个投稿之间强制留的间隔，用于规避 B站 账号级频控（错误码 601）。 |
 
-运行时可在设置面板修改的字段（下载目录、并发、默认清晰度、字幕语言、限速、重试次数、`aria2c_connections` —— 界面上叫「单视频并发下载数」）会写入 `Setting` 表并在下次启动时覆盖环境变量，见 [_apply_stored_settings](../backend/app/api_support.py#L141)。
+运行时可在设置面板修改的字段（下载目录、并发、默认清晰度、字幕语言、限速、重试次数、`aria2c_connections` —— 界面上叫「单视频并发下载数」）会写入 `Setting` 表并在下次启动时覆盖环境变量，见 [_apply_stored_settings](../backend/app/api/api_support.py#L141)。
 
 ## PlantUML 图更新
 

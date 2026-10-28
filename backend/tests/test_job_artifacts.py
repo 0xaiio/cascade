@@ -13,9 +13,9 @@ import pytest
 from fastapi import HTTPException
 from sqlmodel import Session
 
-from app.config import AppSettings
-from app.db import create_app_engine, init_db
-from app.job_artifacts import (
+from app.contracts.config import AppSettings
+from app.infra.db import create_app_engine, init_db
+from app.download.job_artifacts import (
     item_folder,
     job_folder,
     open_local_path,
@@ -23,8 +23,8 @@ from app.job_artifacts import (
     output_file,
     subtitle_file,
 )
-from app.models import Job, JobItem
-from app.system_open import LocalOpenError
+from app.contracts.models import Job, JobItem
+from app.host.system_open import LocalOpenError
 
 
 def make_item(**kwargs) -> JobItem:
@@ -81,7 +81,7 @@ def test_output_file_is_409_when_the_file_disappears_after_it_was_resolved(
     而不是指望在两步之间插进去。
     """
     gone = tmp_path / "Video [abc].mp4"
-    monkeypatch.setattr("app.job_artifacts.existing_output_file", lambda *args, **kwargs: gone)
+    monkeypatch.setattr("app.download.job_artifacts.existing_output_file", lambda *args, **kwargs: gone)
 
     with pytest.raises(HTTPException) as excinfo:
         output_file(make_item())

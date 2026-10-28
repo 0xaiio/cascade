@@ -83,9 +83,9 @@
 
 | 指标 | 重构前 | 重构后 |
 | --- | --- | --- |
-| `backend/app/output_paths.py` | 119 行 | **182 行**（+63） |
-| `backend/app/job_artifacts.py` | 98 行 | **94 行**（−4） |
-| `backend/app/job_manager.py` | 1142 行 | **1132 行**（−10） |
+| `backend/app/download/output_paths.py` | 119 行 | **182 行**（+63） |
+| `backend/app/download/job_artifacts.py` | 98 行 | **94 行**（−4） |
+| `backend/app/download/job_manager.py` | 1142 行 | **1132 行**（−10） |
 | `backend/app/*.py` 模块数 | 33 | 33（无新增） |
 | 后端测试用例 | 320 | **338**（+18，全在新文件 `test_output_paths.py`） |
 | 前端测试用例 | 69 | 69（未动前端） |

@@ -15,9 +15,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from app.bili_api import DEFAULT_VERIFY_ATTEMPTS
-from app.bili_bin import CommandResult, LineSink, Runner
-from app.bili_http import HttpError, HttpResult
+from app.bilibili.bili_api import DEFAULT_VERIFY_ATTEMPTS
+from app.bilibili.bili_bin import CommandResult, LineSink, Runner
+from app.bilibili.bili_http import HttpError, HttpResult
 
 DEFAULT_ARCHIVE = {
     "aid": 111,

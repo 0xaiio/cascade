@@ -1,10 +1,10 @@
 import urllib.error
 import urllib.request
 
-from app import connectivity
-from app.connectivity import ProxyTestResult, build_opener
-from app.connectivity import test_proxy as probe_proxy
-from app.proxy import PROXY_SOURCE_DIRECT, PROXY_SOURCE_SETTING, resolve_proxy
+from app.host import connectivity
+from app.host.connectivity import ProxyTestResult, build_opener
+from app.host.connectivity import test_proxy as probe_proxy
+from app.host.proxy import PROXY_SOURCE_DIRECT, PROXY_SOURCE_SETTING, resolve_proxy
 
 
 class FakeResponse:

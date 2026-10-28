@@ -27,9 +27,9 @@ self._queue: asyncio.Queue[str | None] | None = None      # job_manager.py:57
 ```
 
 进程一退，这个队列连同里面的 id 一起消失；而 `jobitem.status` 仍然是 `queued` / `running`。
-把这些 id 重新放回队列的代码**只有三处**：新建任务（[enqueue](../backend/app/job_manager.py#L220)）、
-整任务重启（[restart](../backend/app/job_manager.py#L220)）、单条重启（[restart_item](../backend/app/job_manager.py#L271)）。
-三处都由**用户动作**触发，启动路径上一处也没有 —— [start()](../backend/app/job_manager.py#L68)
+把这些 id 重新放回队列的代码**只有三处**：新建任务（[enqueue](../backend/app/download/job_manager.py#L220)）、
+整任务重启（[restart](../backend/app/download/job_manager.py#L220)）、单条重启（[restart_item](../backend/app/download/job_manager.py#L271)）。
+三处都由**用户动作**触发，启动路径上一处也没有 —— [start()](../backend/app/download/job_manager.py#L68)
 只做了两件事：建队列、按并发起 worker。
 
 于是这些条目既不在队列里（没人会来取），也不在终态（界面不会把它们算成结束）：
@@ -58,13 +58,13 @@ async def cancel(self, job_id: str) -> None:
 
 ## 修复方案
 
-新增 [orphan_recovery.py](../backend/app/orphan_recovery.py)（L2 编排），由
-[recover_orphaned_work](../backend/app/job_manager.py#L83) 在 lifespan 里、`start()` **之前**调用：
+新增 [orphan_recovery.py](../backend/app/download/orphan_recovery.py)（L2 编排），由
+[recover_orphaned_work](../backend/app/download/job_manager.py#L83) 在 lifespan 里、`start()` **之前**调用：
 
 1. **先改库、再启动 worker**。扫描跑在 `asyncio.to_thread` 里，此刻一个 worker 都不存在，
    不存在「worker 与该行并发读写」的窗口 —— 用顺序消掉风险，而不是加锁。
 2. **只让 `orphan_recovery` 改条目状态**，任务终态回到运行期同一个
-   [_maybe_finish_job](../backend/app/job_manager.py#L541)。否则「什么算结束」会出现两份定义。
+   [_maybe_finish_job](../backend/app/download/job_manager.py#L541)。否则「什么算结束」会出现两份定义。
 3. 准入规则全部落在**库里可见的事实**上（内存集合随进程消失，靠不住）：
 
    | 条目所在处 | 结果 |
@@ -181,7 +181,7 @@ tests/test_orphan_recovery.py::test_startup_leaves_paused_work_paused  FAILED
 ## 关联
 
 - 候选池 [D-01](../plan/brainstorming.md)（本次落地并改状态）
-- 与 [B站 上传的中断收敛](../backend/app/bili_manager.py#L375) 是同一问题的两个相反答案，对照见
+- 与 [B站 上传的中断收敛](../backend/app/bilibili/bili_manager.py#L375) 是同一问题的两个相反答案，对照见
   [架构文档](../docs/architecture.md)「进程重启后」两段
 - 与 [008](008-return-in-finally-swallows-the-real-error.md) / [010](010-unselectable-probe-raise-skips-the-fallback.md)
   同属一个主题：**都是「代码什么都没做，而界面/日志看起来已经做过了」**。本轮据此把判据写进验证方法：

@@ -15,7 +15,7 @@
 
 ## 原因
 
-`backend/app/browser_cookies.py` 的 `_extract_edge_cookies_via_cdp()` 有三处硬伤，全部实测：
+`backend/app/host/browser_cookies.py` 的 `_extract_edge_cookies_via_cdp()` 有三处硬伤，全部实测：
 
 | 硬伤 | 实测证据 |
 |---|---|

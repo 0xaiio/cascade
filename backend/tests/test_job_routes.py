@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.config import AppSettings
+from app.contracts.config import AppSettings
 from app.main import create_app
 
 from fakes import FakeYtDlpService

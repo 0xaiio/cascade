@@ -56,7 +56,7 @@ RESULT: 调用后 6 秒内没有出现任何新的可见窗口 —— 系统那�
    它**不需要**我们指定程序 —— 列表仍是系统注册的全部处理器，设计原则（不自建编辑器清单、
    不记「上次用的」）一字未改。
 2. **把「窗口有没有出现」变成判据。** 模态调用放进自己的 daemon 线程，接口只轮询
-   [_open_with_dialog_window](../backend/app/system_open.py#L178)（本进程里有没有 `Shell_Dialog`），
+   [_open_with_dialog_window](../backend/app/host/system_open.py#L178)（本进程里有没有 `Shell_Dialog`），
    2.5s 内没有就抛 `LocalOpenError` → 400 → 前端把原因写在**那一行**：
    「系统没能弹出「打开方式」窗口（HRESULT 0x…）。可以先点「打开视频所在文件夹」，在资源管理器里右键
    那个字幕文件 → 打开方式；或者把该后缀的默认程序在系统设置里指定一次。」
@@ -76,7 +76,7 @@ RESULT: 调用后 6 秒内没有出现任何新的可见窗口 —— 系统那�
 
 解释：窗口刚创建时它自己在激活，这时抢会被拒，**被拒之后它就不再自行激活**。
 所以顺序定为：先给它 1.2s 自己上来；确实没上来，才用
-[_ensure_dialog_foreground](../backend/app/system_open.py#L215) 里 `AttachThreadInput`
+[_ensure_dialog_foreground](../backend/app/host/system_open.py#L215) 里 `AttachThreadInput`
 接管前台线程输入队列再抢。真机连续三次：`DIALOG` / `Chrome_WidgetWin_1 → DIALOG` /
 `Chrome_WidgetWin_1 → DIALOG` —— 第 2、3 次正是兜底那一步在起作用。
 
@@ -180,7 +180,7 @@ RESULT: 调用后 6 秒内没有出现任何新的可见窗口 —— 系统那�
 ### 修复：自己画对话框，但清单仍来自系统
 
 - `_ask_program`：tkinter 对话框（与 `select_directory_with_tkinter` 同一套依赖），标题「打开方式」，
-  列出**系统注册表为该后缀登记的处理器**（[_program_candidates](../backend/app/system_open.py#L274) 读
+  列出**系统注册表为该后缀登记的处理器**（[_program_candidates](../backend/app/host/system_open.py#L274) 读
   `HKCU\...\FileExts\<ext>\OpenWithList`、`HKCR\<ext>\OpenWithList`、`HKCR\<ext>\OpenWithProgids`），
   去重、只留真实存在的 exe；另有「浏览…」由用户在本机对话框里挑一个 exe。
 - **`.vtt` / `.srt` 实测 0 条候选**（`_program_candidates('.vtt') == []`）—— 所以对话框首选「浏览…」，

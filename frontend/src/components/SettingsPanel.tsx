@@ -19,7 +19,7 @@ import type { CompletionNotification, Settings } from "../types";
  *   界面文案必须说明这一点，否则「调了没变化」会被当成 bug（见 [ai/perf/PLAN.md](../../../ai/perf/PLAN.md)）。
  * - `aria2c_connections` 是**单视频内部**的分段并发（aria2c 的 `-x` / `-s`），与上面那个
  *   「并发」是两回事。它还有两个容易被漏掉的生效条件：aria2c 默认关闭
- *   （`YTDL_ARIA2C_ENABLED`，见 [config.py](../../../backend/app/config.py#L61)），而且
+ *   （`YTDL_ARIA2C_ENABLED`，见 [config.py](../../../backend/app/contracts/config.py#L68)），而且
  *   `default_aria2c` 是 profile 链里的**第二个**（`default` 失败后才轮到它），
  *   所以「启用」不等于「每次下载都走」。这两条都写在说明浮层里，别从界面文案里删掉。
  *

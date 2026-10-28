@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from app.bili_auth import (
+from app.bilibili.bili_auth import (
     TV_APPKEY,
     TV_AUTH_CODE_URL,
     TV_CONFIRM_URL,
@@ -37,7 +37,7 @@ from app.bili_auth import (
     read_login_token,
     write_cookie_file,
 )
-from app.bili_http import HttpError, HttpResult
+from app.bilibili.bili_http import HttpError, HttpResult
 
 SECRET = "9f2a%2Csuper-secret-value"
 
@@ -296,7 +296,7 @@ def test_generate_returns_key_url_and_inline_svg():
 
 def test_generate_degrades_when_the_qr_component_is_missing(monkeypatch):
     """缺 `qrcode` 时给一句「改用导入 cookies.json」，而不是让整个设置面板不可用。"""
-    import app.bili_auth as module
+    import app.bilibili.bili_auth as module
 
     monkeypatch.setattr(module, "render_qr_svg", lambda *_a, **_k: None)
     challenge = BiliLoginSession(FakeTransport()).generate()

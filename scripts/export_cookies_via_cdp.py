@@ -64,7 +64,7 @@ from yt_dlp.cookies import YoutubeDLCookieJar
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "backend"))
 
-from app.browser_cookies import BrowserCookieImporter  # noqa: E402
+from app.host.browser_cookies import BrowserCookieImporter  # noqa: E402
 
 # ``_cdp_cookie`` / ``_is_youtube_related_cookie`` are pure helpers that happen to
 # live on the importer class; reuse them so the exported file is byte-compatible

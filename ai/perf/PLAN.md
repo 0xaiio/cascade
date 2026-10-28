@@ -62,8 +62,8 @@ status 分布 : succeeded 70 / failed 143 / queued 332 / running 3
 
 `ai/plan.md` 中 "Download Performance and Stability Implementation Plan" 的 Task 1–4 已落地且已验证在代码中：
 
-- SQLite WAL + `busy_timeout=5000` + `synchronous=NORMAL`（`backend/app/db.py:14-24`）；
-- 进度写入节流 `ProgressPersistGate`（`backend/app/progress_persist.py`，`job_manager.py:520`）；
+- SQLite WAL + `busy_timeout=5000` + `synchronous=NORMAL`（`backend/app/infra/db.py:14-24`）；
+- 进度写入节流 `ProgressPersistGate`（`backend/app/download/progress_persist.py`，`job_manager.py:520`）；
 - 快乐路径只做一次 `prepare_download`（`job_manager.py:849-905`，`_options_for_available_resolution` 已删除）；
 - 下载选项不再设置 `sleep_interval` / `max_sleep_interval`（`ytdlp_service.py:242-260` 中已无这两项）。
 
@@ -77,13 +77,13 @@ status 分布 : succeeded 70 / failed 143 / queued 332 / running 3
 
 证据链：
 
-1. **我们设置了阈值**：`backend/app/config.py:36`
+1. **我们设置了阈值**：`backend/app/contracts/config.py:36`
 
    ```python
    throttled_rate_kbps: int = Field(default=64, ge=0)
    ```
 
-   `backend/app/ytdlp_service.py:270-273`
+   `backend/app/download/ytdlp_service.py:270-273`
 
    ```python
    if options.mode != "subtitles_only":
@@ -209,7 +209,7 @@ concurrency=8: wall=1.26s  peak_parallel_downloads=8
 
 ### P0-1　关闭默认节流守卫（`throttledratelimit`）
 
-- **改动**（1 行）：`backend/app/config.py:36`
+- **改动**（1 行）：`backend/app/contracts/config.py:36`
 
   ```python
   throttled_rate_kbps: int = Field(default=0, ge=0)   # 0 = 关闭；> 0 才写入 yt-dlp
@@ -224,7 +224,7 @@ concurrency=8: wall=1.26s  peak_parallel_downloads=8
 
 ### P0-2　停滞看门狗：让「卡住」可见、可终止
 
-- **改动**：新增 `backend/app/stall_guard.py`（约 40 行），在 `ytdlp_service.py:374-379` 的 `guarded_hook` 中接入：
+- **改动**：新增 `backend/app/download/stall_guard.py`（约 40 行），在 `ytdlp_service.py:374-379` 的 `guarded_hook` 中接入：
 
   ```python
   def guarded_hook(payload):

@@ -75,7 +75,7 @@ longestTag.length > 12 ? `${longestTag.slice(0, 12)}…` : longestTag
 （与 [010](010-unselectable-probe-raise-skips-the-fallback.md) 的失败形状完全同型：
 分支写对了，条件写错了 → 整段成死代码）。同时 40 这个值只在服务端的文案里存在，
 前端拿不到 —— `BiliLimits` 里当时**没有** `tag_preview` 字段
-（`git show HEAD:backend/app/schemas.py | grep tag_preview` 无匹配），
+（`git show HEAD:backend/app/contracts/schemas.py | grep tag_preview` 无匹配），
 所以前端即便想对齐也做不到，只能自己编一个。
 
 ## 修复方案

@@ -22,7 +22,7 @@ yt-dlp 会给**原始语音语言**那条 ASR 轨加 `-orig` 后缀。源码里�
 
 ### 强度排序
 
-[`detect_primary_language`](../../../backend/app/subtitle_plan.py#L140) 按强度只排两级：
+[`detect_primary_language`](../../../backend/app/download/subtitle_plan.py#L140) 按强度只排两级：
 
 1. **ASR 的 `-orig` 轨**（平台标注的原声语言）。绝大多数带自动字幕的视频都命中这一条。
 2. **人工字幕**：出现中文 ⇒ 判中文；否则出现英文 ⇒ 判英文。
@@ -30,7 +30,7 @@ yt-dlp 会给**原始语音语言**那条 ASR 轨加 `-orig` 后缀。源码里�
 第 2 条只在「完全没有自动字幕」时才轮到。中文优先于英文的理由是：人工挂了中文字幕的视频几乎只
 可能面向中文观众。
 
-判不出来时退回 **`en`**（[`FALLBACK_PRIMARY_LANGUAGE`](../../../backend/app/subtitle_plan.py#L42)），
+判不出来时退回 **`en`**（[`FALLBACK_PRIMARY_LANGUAGE`](../../../backend/app/download/subtitle_plan.py#L42)），
 不是「不下字幕」—— 本项目的既有默认就是英文，改成「不下」会让一批老任务悄悄丢掉字幕。这是
 **有界默认**，不是随机猜。
 
@@ -39,7 +39,7 @@ yt-dlp 会给**原始语音语言**那条 ASR 轨加 `-orig` 后缀。源码里�
 ### 粤语不算中文
 
 `yue`（粤语）在 yt-dlp 里是单列的一族，本项目也把它排除出中文族
-（[`language_family`](../../../backend/app/subtitle_plan.py#L109) 用 `-` 前的第一段匹配 `en` / `zh`）。
+（[`language_family`](../../../backend/app/download/subtitle_plan.py#L109) 用 `-` 前的第一段匹配 `en` / `zh`）。
 混进来会让「中文视频」的判定漂到粤语内容上 —— 而粤语视频的 ASR 文本与普通话书面语差异大到
 不能当同一份字幕用。
 
@@ -52,7 +52,7 @@ yt-dlp 的 `process_subtitles` 就是这个顺序：先把 `subtitles`
 
 所以只要把 `subtitleslangs` 收敛成**一条**语言，优先级就是免费的。剩下两件事要在我们自己这边做：
 
-1. **同一族里有多条轨时只挑一条**（[`pick_track`](../../../backend/app/subtitle_plan.py#L188)）。
+1. **同一族里有多条轨时只挑一条**（[`pick_track`](../../../backend/app/download/subtitle_plan.py#L188)）。
    填多条会把 `en` + `en-orig` 都写下来，于是同一条字幕出现两份文件。偏好表：
 
    | 族 | 越靠前越优先 |
@@ -78,7 +78,7 @@ yt-dlp 的 `process_subtitles` 就是这个顺序：先把 `subtitles`
   所以 `SubtitlePlan.languages` 被设计成**永远有界**（0 或 1 条），返回 `["all"]` 在类型上就不可能。
 
 结论：`SubtitlePlan.languages` 返回 `[code]` 或 `[]`；没有可用轨时上层请求**族名**
-（[`_options_with_subtitle_plan`](../../../backend/app/job_manager.py#L1019)），靠 `fullmatch` 落空实现跳过。
+（[`_options_with_subtitle_plan`](../../../backend/app/download/job_manager.py#L1019)），靠 `fullmatch` 落空实现跳过。
 
 ## 语言标识与平台白名单
 
@@ -86,7 +86,7 @@ yt-dlp 的 `process_subtitles` 就是这个顺序：先把 `subtitles`
 白名单只有：`zh` / `en` / `zh-Hant` / `zh-TW` / `zh-HK` / `ja` / `ko` / `yue` / `fr`。
 判据见 [04-testing.md](04-testing.md#语言白名单的实测依据)。
 
-因此 [`bilibili_language`](../../../backend/app/bili_subtitle.py#L83) 的映射是：
+因此 [`bilibili_language`](../../../backend/app/bilibili/bili_subtitle.py#L83) 的映射是：
 
 | 输入 | 输出 | 理由 |
 | --- | --- | --- |
@@ -104,9 +104,9 @@ yt-dlp 的 `process_subtitles` 就是这个顺序：先把 `subtitles`
 
 | 模块 | 层 | 职责 | 不负责 |
 | --- | --- | --- | --- |
-| [subtitle_plan.py](../../../backend/app/subtitle_plan.py) | L3 领域 | 主语言判定、轨偏好、下载计划（`SubtitlePlan`）、来源标签与摘要文案。**纯逻辑：不联网、不读库、不 import yt-dlp**。 | 不写库、不发请求、不知道 `JobItem` 的存在 |
-| [bili_subtitle.py](../../../backend/app/bili_subtitle.py) | L3 领域 | SRT/VTT → BCC 转换、语言标识映射、一次字幕上传（`SubtitleOutcome`）。 | 不参与稿件状态判定，不写库，不重试 |
-| [bili_api.save_subtitle](../../../backend/app/bili_api.py#L366) | L3 领域 | CC 字幕接口的端点与参数封装。 | 不知道 BCC 长什么样（那是 `bili_subtitle`） |
+| [subtitle_plan.py](../../../backend/app/download/subtitle_plan.py) | L3 领域 | 主语言判定、轨偏好、下载计划（`SubtitlePlan`）、来源标签与摘要文案。**纯逻辑：不联网、不读库、不 import yt-dlp**。 | 不写库、不发请求、不知道 `JobItem` 的存在 |
+| [bili_subtitle.py](../../../backend/app/bilibili/bili_subtitle.py) | L3 领域 | SRT/VTT → BCC 转换、语言标识映射、一次字幕上传（`SubtitleOutcome`）。 | 不参与稿件状态判定，不写库，不重试 |
+| [bili_api.save_subtitle](../../../backend/app/bilibili/bili_api.py#L366) | L3 领域 | CC 字幕接口的端点与参数封装。 | 不知道 BCC 长什么样（那是 `bili_subtitle`） |
 
 依赖方向仍然是 `L2 → L3`：
 

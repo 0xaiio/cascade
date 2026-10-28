@@ -24,8 +24,8 @@ from __future__ import annotations
 import argparse
 import sys
 
-from .config import get_settings
-from .dev_server import describe_occupant, find_available_port, port_available
+from .contracts.config import get_settings
+from .host.dev_server import describe_occupant, find_available_port, port_available
 
 _AUTO_PORT_ATTEMPTS = 20
 

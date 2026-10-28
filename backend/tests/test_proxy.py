@@ -1,4 +1,4 @@
-"""代理解析（app/proxy.py）的单元测试。
+"""代理解析（app/host/proxy.py）的单元测试。
 
 这些用例刻意**不触碰真实注册表/环境**：一律 monkeypatch 掉两个「来源」读取函数，
 否则结果会随机器状态变化（本机就有系统代理），测试就失去意义了。
@@ -6,8 +6,8 @@
 
 import pytest
 
-from app import proxy as proxy_module
-from app.proxy import (
+from app.host import proxy as proxy_module
+from app.host.proxy import (
     PROXY_SOURCE_DIRECT,
     PROXY_SOURCE_ENVIRONMENT,
     PROXY_SOURCE_NONE,

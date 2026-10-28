@@ -11,7 +11,7 @@
    而这条警告**只在源码被重新编译时**（`__pycache__` 缺失或失效）才打印。
    所以它时有时无，靠人盯终端并不可靠。
 
-这两条测试把规则钉死：`app/*.py` 里再出现同类写法会立刻失败。
+这两条测试把规则钉死：`app/**/*.py`（含按功能划分的各子包）里再出现同类写法会立刻失败。
 """
 
 from __future__ import annotations
@@ -30,7 +30,17 @@ _NESTED_SCOPE_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.Cl
 
 
 def _app_modules() -> list[Path]:
-    return sorted(APP_DIR.glob("*.py"))
+    """`backend/app` 下**全部**模块（含各功能子包），跳过缓存目录。
+
+    这里必须是 `rglob`：模块按功能分到了 `download/`、`bilibili/` 等子包里，
+    只扫顶层的话 `job_manager` 这类真正要守的文件根本看不到 —— 那会让下面三条
+    测试变成「扫了个空、于是通过」。
+    """
+    return sorted(
+        path
+        for path in APP_DIR.rglob("*.py")
+        if "__pycache__" not in path.parts
+    )
 
 
 def _returns_in(node: ast.AST) -> list[ast.Return]:
@@ -51,9 +61,13 @@ def _returns_in_finally(try_node: ast.AST) -> list[ast.Return]:
 
 
 def test_app_package_is_actually_scanned() -> None:
-    """守卫：如果扫描路径写错，下面两条测试会「0 个模块也通过」。"""
-    names = {path.name for path in _app_modules()}
-    assert {"job_manager.py", "main.py"} <= names
+    """守卫：如果扫描路径写错，下面两条测试会「0 个模块也通过」。
+
+    断言用的是**相对 `backend/app` 的路径**，顺带钉住目录归属：`job_manager.py`
+    必须还在 `download/` 下，`main.py` 必须还在包根（它是 uvicorn 的装配入口）。
+    """
+    names = {path.relative_to(APP_DIR).as_posix() for path in _app_modules()}
+    assert {"download/job_manager.py", "main.py"} <= names
 
 
 def test_app_sources_have_no_syntax_warnings() -> None:
@@ -63,7 +77,7 @@ def test_app_sources_have_no_syntax_warnings() -> None:
             warnings.simplefilter("always")
             compile(path.read_text(encoding="utf-8"), str(path), "exec")
         offenders.extend(
-            f"{path.name}:{warning.lineno} {warning.message}"
+            f"{path.relative_to(APP_DIR).as_posix()}:{warning.lineno} {warning.message}"
             for warning in caught
             if issubclass(warning.category, SyntaxWarning)
         )
@@ -76,7 +90,10 @@ def test_no_return_inside_finally() -> None:
         tree = ast.parse(path.read_text(encoding="utf-8"), str(path))
         for node in ast.walk(tree):
             if isinstance(node, _TRY_NODES):
-                offenders.extend(f"{path.name}:{statement.lineno}" for statement in _returns_in_finally(node))
+                offenders.extend(
+                    f"{path.relative_to(APP_DIR).as_posix()}:{statement.lineno}"
+                    for statement in _returns_in_finally(node)
+                )
     assert offenders == [], "finally 里的 return 会吞掉异常，请改成分支收尾：" + ", ".join(offenders)
 
 

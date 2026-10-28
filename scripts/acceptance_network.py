@@ -62,12 +62,12 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "backend"))
 
-from app.proxy import (  # noqa: E402  (path bootstrap must run first)
+from app.host.proxy import (  # noqa: E402  (path bootstrap must run first)
     PROXY_SOURCE_NONE,
     redact_proxy_credentials,
     resolve_proxy,
 )
-from app.runtime_env import describe_environment_risks, sanitize_environment  # noqa: E402
+from app.host.runtime_env import describe_environment_risks, sanitize_environment  # noqa: E402
 
 PROBE_URL = "https://www.youtube.com/robots.txt"
 LOGGED_IN_URL = "https://www.youtube.com/"
@@ -282,7 +282,7 @@ def run_end_to_end(
     timeout: float,
 ) -> dict:
     """The real product path: YtDlpService.extract_metadata with/without cookies."""
-    from app.ytdlp_service import YtDlpService
+    from app.download.ytdlp_service import YtDlpService
 
     setting = explicit_proxy  # None = auto, same as leaving the field empty in the UI
     resolution = resolve_proxy(setting)
@@ -334,7 +334,7 @@ def run_environment_experiment(video: str, cookies_path: Path, explicit_proxy: s
     ``The page needs to be reloaded.``；随后调用产品里那个 ``sanitize_environment()``
     再跑一次，预期成功。
     """
-    from app.ytdlp_service import YtDlpService
+    from app.download.ytdlp_service import YtDlpService
 
     workdir = REPO_ROOT / "tmp_acceptance" / "network"
     workdir.mkdir(parents=True, exist_ok=True)

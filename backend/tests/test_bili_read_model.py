@@ -18,7 +18,7 @@ import pytest
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
-from app.bili_policy import (
+from app.bilibili.bili_policy import (
     ACCEPTED_STATUSES,
     BADGE_FAILED,
     BADGE_NONE,
@@ -28,7 +28,7 @@ from app.bili_policy import (
     BADGE_UPLOADING,
     REJECTED_STATUSES,
 )
-from app.bili_read_model import (
+from app.bilibili.bili_read_model import (
     IN_FLIGHT_STATUSES,
     bilibili_video_url,
     derive_badge,
@@ -41,7 +41,7 @@ from app.bili_read_model import (
     read_upload,
     season_upload_ids,
 )
-from app.models import BiliSeason, BiliSeasonStatus, BiliUpload, BiliUploadStatus, Job, JobItem
+from app.contracts.models import BiliSeason, BiliSeasonStatus, BiliUpload, BiliUploadStatus, Job, JobItem
 
 
 @pytest.fixture

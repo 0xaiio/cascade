@@ -59,7 +59,7 @@
 
 #### A-01　非 YouTube 链接：明确拒绝，而不是给出莫名报错
 - [ ] **未完成** · 状态：候选　优先级：P2
-- 现状：`POST /api/analyze`（`backend/app/routers/analyze.py:16`）不做任何站点校验，直接交给 yt-dlp；而本项目的下载策略（anti403 profile 链、PO token、分辨率档位、`yt-dlp` 的 `youtube*` 提取器假设）**全部是 YouTube 专属**（`backend/app/ytdlp_service.py:52` 的 profile 链、`ytdlp_formats.py:9` 的选择器）。
+- 现状：`POST /api/analyze`（`backend/app/api/routers/analyze.py:16`）不做任何站点校验，直接交给 yt-dlp；而本项目的下载策略（anti403 profile 链、PO token、分辨率档位、`yt-dlp` 的 `youtube*` 提取器假设）**全部是 YouTube 专属**（`backend/app/download/ytdlp_service.py:52` 的 profile 链、`ytdlp_formats.py:9` 的选择器）。
 - 痛点：用户拿 bilibili / 抖音 / 播客 RSS 的链接进来，会得到一句与 YouTube 策略无关的 yt-dlp 报错，排障手册里查不到。
 - 建议：解析入口加一次轻量站点判定 —— 非 YouTube 域直接返回「本工具只支持 YouTube」的明确错误；YouTube 域下的非视频链接（频道、首页）沿用现有处理。
 - 判据：项目名与全部策略都是 YouTube 专属；**不做站点泛化**（见 §5），但至少要拒绝得体。
@@ -135,8 +135,8 @@
 - 建议：启动时扫描 `queued` / `running` 的 item，按策略处理（重新入队 或 标记为 `cancelled`），并在任务行写明「因上次退出被标记为…」；策略做成设置项，默认保守（`cancelled`）。
 - 判据：有生产数据（332+3）与明确的代码事实，不是想象出来的需求。
 - 风险：① 在途 `.part` 文件能否续传要验，不能续传就必须清理残留；② 重启瞬间可能有并发写库，扫描要在 worker 启动**之前**完成。
-- **落地情况（2026-10-18）**：新增 [`orphan_recovery.py`](../../backend/app/orphan_recovery.py)（L2），
-  [`JobManager.recover_orphaned_work()`](../../backend/app/job_manager.py) 在 lifespan 里
+- **落地情况（2026-10-18）**：新增 [`orphan_recovery.py`](../../backend/app/download/orphan_recovery.py)（L2），
+  [`JobManager.recover_orphaned_work()`](../../backend/app/download/job_manager.py) 在 lifespan 里
   **先改库、再 `start()`** —— 风险 ② 用「worker 还没起来」直接消掉，而不是加锁。
   `paused` 条目保持暂停；有已取消条目的任务视为「正在被取消」并整体取消（`cancel()`
   对运行中任务只在内存里记一笔，进程一退就没了，判据必须落回库里）。

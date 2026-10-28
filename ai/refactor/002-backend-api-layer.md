@@ -57,17 +57,17 @@
 
 | 新文件 | 行数 | 承担什么 |
 | --- | --- | --- |
-| `backend/app/routers/__init__.py` | 29 | `API_ROUTERS`：只声明**挂载顺序**，不声明依赖 |
-| `backend/app/routers/diagnostics.py` | 88 | `/health`、`/api/diagnostics`、`/api/diagnostics/runtime`、`/api/proxy/test` |
-| `backend/app/routers/cookies.py` | 94 | `/api/cookies/verify`、`POST /api/cookies`、`/api/cookies/from-browser`、`DELETE /api/cookies` |
-| `backend/app/routers/analyze.py` | 28 | `POST /api/analyze` |
-| `backend/app/routers/jobs.py` | 190 | 建/列/取/取消/暂停/重启/重启子项/删子项/删任务/批量（10 条） |
-| `backend/app/routers/job_files.py` | 45 | 4 个本地打开接口（播放 / 打开文件夹 × 任务 / 子项） |
-| `backend/app/routers/settings.py` | 98 | `GET`/`PUT /api/settings`、`/api/settings/download-dir/select` |
-| `backend/app/routers/events.py` | 24 | `GET /api/events`（SSE） |
-| `backend/app/api_context.py` | 51 | `ApiContext`（`@dataclass(frozen=True)`）+ `get_context` / `get_session` + `ContextDep` / `SessionDep` 别名 |
-| `backend/app/api_support.py` | 208 | 14 个路由支撑函数：`read_job_or_404` / `require_job` / `require_job_item` / `single_job_item` / `selected_entries` / `job_download_dir` / `extract_metadata_with_cookies` / `cookie_status_from_import` / `is_cookie_required_error` / `cookie_import_status_code` / `set_setting` / `apply_stored_settings` / `settings_response` / `select_directory_with_tkinter` |
-| `backend/app/job_artifacts.py` | 98 | 产物**定位**一条链（`output_file` / `item_folder` / `output_folder` / `job_folder`）+ 本机**打开**（`open_local_path` / `open_video_path`） |
+| `backend/app/api/routers/__init__.py` | 29 | `API_ROUTERS`：只声明**挂载顺序**，不声明依赖 |
+| `backend/app/api/routers/diagnostics.py` | 88 | `/health`、`/api/diagnostics`、`/api/diagnostics/runtime`、`/api/proxy/test` |
+| `backend/app/api/routers/cookies.py` | 94 | `/api/cookies/verify`、`POST /api/cookies`、`/api/cookies/from-browser`、`DELETE /api/cookies` |
+| `backend/app/api/routers/analyze.py` | 28 | `POST /api/analyze` |
+| `backend/app/api/routers/jobs.py` | 190 | 建/列/取/取消/暂停/重启/重启子项/删子项/删任务/批量（10 条） |
+| `backend/app/api/routers/job_files.py` | 45 | 4 个本地打开接口（播放 / 打开文件夹 × 任务 / 子项） |
+| `backend/app/api/routers/settings.py` | 98 | `GET`/`PUT /api/settings`、`/api/settings/download-dir/select` |
+| `backend/app/api/routers/events.py` | 24 | `GET /api/events`（SSE） |
+| `backend/app/api/api_context.py` | 51 | `ApiContext`（`@dataclass(frozen=True)`）+ `get_context` / `get_session` + `ContextDep` / `SessionDep` 别名 |
+| `backend/app/api/api_support.py` | 208 | 14 个路由支撑函数：`read_job_or_404` / `require_job` / `require_job_item` / `single_job_item` / `selected_entries` / `job_download_dir` / `extract_metadata_with_cookies` / `cookie_status_from_import` / `is_cookie_required_error` / `cookie_import_status_code` / `set_setting` / `apply_stored_settings` / `settings_response` / `select_directory_with_tkinter` |
+| `backend/app/download/job_artifacts.py` | 98 | 产物**定位**一条链（`output_file` / `item_folder` / `output_folder` / `job_folder`）+ 本机**打开**（`open_local_path` / `open_video_path`） |
 
 `main.py` 现在只剩：`configure_logging` → 依赖装配 → `ApiContext` 挂 `app.state` →
 `for route_module in API_ROUTERS: app.include_router(...)` → 静态资源 → 1 条内联 `GET /`。

@@ -3,9 +3,9 @@ import time
 from pathlib import Path
 import urllib.request
 
-from app import cookie_health
-from app.cookie_health import inspect_cookies_file, verify_cookies
-from app.proxy import resolve_proxy
+from app.host import cookie_health
+from app.host.cookie_health import inspect_cookies_file, verify_cookies
+from app.host.proxy import resolve_proxy
 
 
 HEADER = "# Netscape HTTP Cookie File\n"

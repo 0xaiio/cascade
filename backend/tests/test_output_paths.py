@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from app.output_paths import (
+from app.download.output_paths import (
     discover_existing_output_path,
     discover_output_file_candidates,
     existing_item_folder,

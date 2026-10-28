@@ -6,7 +6,7 @@
 
 ## 清晰度与格式选择
 
-用户只选择清晰度；后端自动选择格式。选择器实现位于 [ytdlp_formats.py](../backend/app/ytdlp_formats.py#L9)。
+用户只选择清晰度；后端自动选择格式。选择器实现位于 [ytdlp_formats.py](../backend/app/download/ytdlp_formats.py#L9)。
 
 清晰度的取值在**入口**就收敛成 `best` 或 `<高度>p`（`schemas._normalize_resolution`：去空白、转小写，`1080P` → `1080p`），其余写法直接 422。理由：选择器认不出 `1080`/`hd`/`1440p60` 时会回落成 `bv*+ba/b`（最佳可用），而 `resolution_decisions` 也认不出、连降级都不介入 —— **不按用户要求做，也不告诉任何人**，见 [026](../ai/bug-fix/026-a-resolution-that-silently-means-best.md)。
 
@@ -18,11 +18,11 @@
 4. 同高度 HLS 单文件。
 5. 同高度单文件。
 
-`safari_hls` profile 会把同高度 HLS 单文件放到最前，见 [format_selector](../backend/app/ytdlp_formats.py#L9)。如果 ffmpeg 可用，后端允许 video+audio 合并并设置 `merge_output_format=mp4`；ffmpeg 不可用时会退化为单文件选择器，而需要合并的清晰度直接报错，见 [build_download_options](../backend/app/ytdlp_service.py#L496)。
+`safari_hls` profile 会把同高度 HLS 单文件放到最前，见 [format_selector](../backend/app/download/ytdlp_formats.py#L9)。如果 ffmpeg 可用，后端允许 video+audio 合并并设置 `merge_output_format=mp4`；ffmpeg 不可用时会退化为单文件选择器，而需要合并的清晰度直接报错，见 [build_download_options](../backend/app/download/ytdlp_service.py#L496)。
 
 ## 下载前预检测
 
-在实际下载前，`JobManager` 先调用 [prepare_download](../backend/app/ytdlp_service.py#L395) 让 yt-dlp 按当前 selector 选择计划下载格式。源视频清晰度匹配时不再额外 `extract_metadata`——这是上一轮性能修复的成果，见 [PLAN.md](../ai/perf/PLAN.md)。只有计划格式不可选时，才会再解析元数据并按降级原因分类。结果通过 [_apply_download_preparation](../backend/app/job_manager.py#L1032) 写入：
+在实际下载前，`JobManager` 先调用 [prepare_download](../backend/app/download/ytdlp_service.py#L395) 让 yt-dlp 按当前 selector 选择计划下载格式。源视频清晰度匹配时不再额外 `extract_metadata`——这是上一轮性能修复的成果，见 [PLAN.md](../ai/perf/PLAN.md)。只有计划格式不可选时，才会再解析元数据并按降级原因分类。结果通过 [_apply_download_preparation](../backend/app/download/job_manager.py#L1032) 写入：
 
 - `actual_width`
 - `actual_height`
@@ -42,9 +42,9 @@
 ### 只处理中英，并按主语言挑一条
 
 上面那条是**界面**上的「来源偏好」。真正决定「这次下哪一条」的是后端算出的
-[`SubtitlePlan`](../backend/app/subtitle_plan.py#L59)（不联网、不读库，纯逻辑）：
+[`SubtitlePlan`](../backend/app/download/subtitle_plan.py#L59)（不联网、不读库，纯逻辑）：
 
-1. **只认中文与英文两族**。[`language_family`](../backend/app/subtitle_plan.py#L109) 是唯一入口，
+1. **只认中文与英文两族**。[`language_family`](../backend/app/download/subtitle_plan.py#L109) 是唯一入口，
    其余语种返回 `None`（= 忽略）。粤语 `yue` **不算**中文 —— yt-dlp 也单列它，混进来会让「中文视频」
    的判定漂到粤语内容上。界面列出字幕与下载选取共用同一份过滤，避免「界面能选 20 种、下载只认两种」。
 2. **主语言是平台给的，不是猜的**。yt-dlp 给**原始语音语言**那条 ASR 轨加 `-orig` 后缀
@@ -53,7 +53,7 @@
    再退化为英文 —— **有界默认，不是随机猜**。
 3. **人工优先 → 降级 ASR → 跳过不中断**，这条优先级是**免费的**：yt-dlp 的 `process_subtitles`
    本来就是「先把人工字幕放进候选，再用自动字幕补没被占掉的语言」。我们只要把 `subtitleslangs`
-   收敛成**一条**语言即可；同一族有多条轨时由 [`pick_track`](../backend/app/subtitle_plan.py#L188)
+   收敛成**一条**语言即可；同一族有多条轨时由 [`pick_track`](../backend/app/download/subtitle_plan.py#L188)
    只挑一条（简体优先繁体、基础码优先地区变体、`-orig` 排后），否则会落下 `en` + `en-orig` 两份。
 
 **「跳过」不能用空语言列表表达。** yt-dlp 用 `fullmatch` 匹配语言代码，而真实轨是 `zh-Hans` /
@@ -64,7 +64,7 @@
 
 ### 落库信磁盘，不信计划
 
-[`_record_subtitle_result`](../backend/app/job_manager.py#L1062) 用**字幕文件是否真的在磁盘上**判定：
+[`_record_subtitle_result`](../backend/app/download/job_manager.py#L1062) 用**字幕文件是否真的在磁盘上**判定：
 yt-dlp 对「请求的语言不存在」是静默跳过（不报错），所以「计划说有」与「写出来了」是两件事。
 存一个不存在的文件路径，等于让一次上传在最后一刻才发现没有字幕。
 
@@ -74,7 +74,7 @@ yt-dlp 对「请求的语言不存在」是静默跳过（不报错），所以�
 
 ## 分辨率降级原因
 
-降级原因常量在 [fallback_policy.py](../backend/app/fallback_policy.py#L4)，**决策**（降到哪、为什么、降不了时报哪句话）在 [resolution_decisions.py](../backend/app/resolution_decisions.py#L87) —— 后者是纯函数，不联网、不读库，所以每条规则都能在 `backend/tests/test_resolution_decisions.py` 里单独验。降级策略分为下载前自动处理和媒体流失败提示两类。
+降级原因常量在 [fallback_policy.py](../backend/app/download/fallback_policy.py#L4)，**决策**（降到哪、为什么、降不了时报哪句话）在 [resolution_decisions.py](../backend/app/download/resolution_decisions.py#L87) —— 后者是纯函数，不联网、不读库，所以每条规则都能在 `backend/tests/test_resolution_decisions.py` 里单独验。降级策略分为下载前自动处理和媒体流失败提示两类。
 
 | 原因 | 含义 | 是否自动降级 |
 | --- | --- | --- |
@@ -83,11 +83,11 @@ yt-dlp 对「请求的语言不存在」是静默跳过（不报错），所以�
 | `requested_resolution_unselectable` | 元数据显示目标清晰度存在，但当前 selector 选不出可下载组合。 | 是，只降到 720p 或更高的安全清晰度。 |
 | `media_stream_blocked` | 目标清晰度媒体流被 403、连接重置、超时或 TLS 错误阻断。 | 否，只提供较低清晰度重启建议。 |
 
-720p 底线由 [DEFAULT_MIN_AUTO_FALLBACK_HEIGHT](../backend/app/ytdlp_formats.py#L6) 定义，`resolution_decisions` 以 `MIN_AUTO_FALLBACK_HEIGHT` 暴露同一常量。候选计算见 [suggest_lower_resolution](../backend/app/ytdlp_formats.py#L175)；「要不要放弃自动降级、以及为什么」的判定不在那里，在 `resolution_decisions` 的四个 `decide_*` 函数里。
+720p 底线由 [DEFAULT_MIN_AUTO_FALLBACK_HEIGHT](../backend/app/download/ytdlp_formats.py#L6) 定义，`resolution_decisions` 以 `MIN_AUTO_FALLBACK_HEIGHT` 暴露同一常量。候选计算见 [suggest_lower_resolution](../backend/app/download/ytdlp_formats.py#L175)；「要不要放弃自动降级、以及为什么」的判定不在那里，在 `resolution_decisions` 的四个 `decide_*` 函数里。
 
 ## 稳定下载策略
 
-默认策略是稳定优先，而不是并发优先。核心参数在 [ytdlp_service.py](../backend/app/ytdlp_service.py#L42) 和 [build_download_options](../backend/app/ytdlp_service.py#L496)：
+默认策略是稳定优先，而不是并发优先。核心参数在 [ytdlp_service.py](../backend/app/download/ytdlp_service.py#L42) 和 [build_download_options](../backend/app/download/ytdlp_service.py#L496)：
 
 - `continuedl=True`，保留 `.part` 断点续传。
 - `fragment_retries=20`、`file_access_retries=5`、`extractor_retries=5`。
@@ -96,8 +96,8 @@ yt-dlp 对「请求的语言不存在」是静默跳过（不报错），所以�
 - `concurrent_fragment_downloads=1`。
 - `http_chunk_size=16 MiB` 默认值。进度百分比不能用单个 chunk 的 `total_bytes` 当成分母；聚合器会结合计划文件大小计算，见 [实现文档](implementation.md#进度与平均速度)。
 - `throttledratelimit` **默认关闭**（`throttled_rate_kbps=0`）。它只按**单条流**的速度判定，低于阈值时 yt-dlp 会抛 `ThrottledDownload`（`ReExtractInfo` 子类），被其无计数重提取循环接住，表现为每约 5 秒中断并重新 extract 一次；并发越高，单流速度越低，越容易误触发。仅在并发 = 1 且确实需要「慢就换 fresh URL」时，用 `YTDL_THROTTLED_RATE_KBPS=32` 开启（不建议回到 64）。
-- 停滞看门狗：默认 90 秒内没有任何新增字节就抛出 `DownloadStalled`，让任务**可见地失败**而不是永久 `running`，见 [stall_guard.py](../backend/app/stall_guard.py)。判据是「历史最大字节是否被刷新」而不是「本轮是否增长」，因此能区分节流振荡（峰值从不刷新）与正常断点续传（恢复后会超过旧峰值）。`finished` 会重置基线，避免合并格式的视频流→音频流切换被误判。`DownloadStalled` 不会进入下一个 profile 重试，直接冒泡为失败。用 `YTDL_STALL_TIMEOUT_SECONDS=0` 可关闭。注意它依赖 yt-dlp 的 progress 回调：若完全阻塞在 socket 读而无回调，兜底仍是 `socket_timeout=30`。
-- aria2c（可选，默认关闭）：yt-dlp 内建 http 下载器是**单连接**，单条 URL 无法并行，因此 aria2c 是单视频任务唯一真实的提速手段。安装后仍需 `YTDL_ARIA2C_ENABLED=true` 才会启用，连接数由设置面板（界面上叫「单视频并发下载数（1–4）」）或 `YTDL_ARIA2C_CONNECTIONS` 控制（默认 2，上限 4）。**「启用」不等于「每次下载都走」**：`default_aria2c` 是 profile 链里的**第二个**，只有 `default` 因媒体流被挡（403 / 连接重置）、要求登录校验、或 JS 挑战解不出来而被放弃时才会轮到它（见 [_download_profiles](../backend/app/ytdlp_service.py#L841) 与 `should_try_next_profile`）；因此调大段数对本来就能成功的下载没有影响。另外 `--min-split-size` 是 16 MiB，**小于这个体积的单流不会被真正拆分**，此时调大段数同样没有效果。多连接是 YouTube 侧最敏感的触发条件，403/限速概率显著上升，出问题时应先把连接数降到 1 或关闭 aria2c。
+- 停滞看门狗：默认 90 秒内没有任何新增字节就抛出 `DownloadStalled`，让任务**可见地失败**而不是永久 `running`，见 [stall_guard.py](../backend/app/download/stall_guard.py)。判据是「历史最大字节是否被刷新」而不是「本轮是否增长」，因此能区分节流振荡（峰值从不刷新）与正常断点续传（恢复后会超过旧峰值）。`finished` 会重置基线，避免合并格式的视频流→音频流切换被误判。`DownloadStalled` 不会进入下一个 profile 重试，直接冒泡为失败。用 `YTDL_STALL_TIMEOUT_SECONDS=0` 可关闭。注意它依赖 yt-dlp 的 progress 回调：若完全阻塞在 socket 读而无回调，兜底仍是 `socket_timeout=30`。
+- aria2c（可选，默认关闭）：yt-dlp 内建 http 下载器是**单连接**，单条 URL 无法并行，因此 aria2c 是单视频任务唯一真实的提速手段。安装后仍需 `YTDL_ARIA2C_ENABLED=true` 才会启用，连接数由设置面板（界面上叫「单视频并发下载数（1–4）」）或 `YTDL_ARIA2C_CONNECTIONS` 控制（默认 2，上限 4）。**「启用」不等于「每次下载都走」**：`default_aria2c` 是 profile 链里的**第二个**，只有 `default` 因媒体流被挡（403 / 连接重置）、要求登录校验、或 JS 挑战解不出来而被放弃时才会轮到它（见 [_download_profiles](../backend/app/download/ytdlp_service.py#L841) 与 `should_try_next_profile`）；因此调大段数对本来就能成功的下载没有影响。另外 `--min-split-size` 是 16 MiB，**小于这个体积的单流不会被真正拆分**，此时调大段数同样没有效果。多连接是 YouTube 侧最敏感的触发条件，403/限速概率显著上升，出问题时应先把连接数降到 1 或关闭 aria2c。
 - 默认 worker 并发为 5，按**同时下载的视频数**计算（跨单视频任务和合集子项）；若追求稳定，可在设置面板或 `YTDL_YOUTUBE_MAX_PARALLEL_DOWNLOADS=1` 中降为 1。并发是视频级而不是流级：单视频任务只有 1 个 `JobItem`，因此**并发设置对单视频任务无效**。
 - 单个视频内部的视频流、音频流、字幕和缩略图之间不再插入 2–5 秒 `sleep_interval`；视频级节流由 worker 并发承担。解析和下载阶段的 player API 请求仍使用 `sleep_interval_requests=1.0`。
 
@@ -111,7 +111,7 @@ python scripts\bench_throttle_guard.py <临时目录> 64    # 节流守卫开启
 python scripts\bench_throttle_guard.py <临时目录> 0     # 关闭后的连续下载
 ```
 
-YouTube 媒体流 403 或连接中断时，`YtDlpService.download()` 会在同一清晰度下依次尝试 profile，见 [download](../backend/app/ytdlp_service.py#L576)：
+YouTube 媒体流 403 或连接中断时，`YtDlpService.download()` 会在同一清晰度下依次尝试 profile，见 [download](../backend/app/download/ytdlp_service.py#L576)：
 
 1. `default`
 2. `default_aria2c`，仅当显式启用 aria2c 且可执行文件存在
@@ -119,7 +119,7 @@ YouTube 媒体流 403 或连接中断时，`YtDlpService.download()` 会在同�
 4. `safari_hls`
 5. `chrome_default`
 
-媒体流阻断判断见 [is_media_stream_blocked_error](../backend/app/ytdlp_service.py#L732)。这类失败不会在下载中途自动降清晰度重下，任务中心会给出中文原因和可重启建议。
+媒体流阻断判断见 [is_media_stream_blocked_error](../backend/app/download/ytdlp_service.py#L732)。这类失败不会在下载中途自动降清晰度重下，任务中心会给出中文原因和可重启建议。
 
 ## 代理与网络出口
 
@@ -145,11 +145,11 @@ YouTube 媒体流 403 或连接中断时，`YtDlpService.download()` 会在同�
 
 注意「空值 ≠ 直连」：表单清空、`YTDL_PROXY=` 都表示**自动**（仍会用到系统代理与环境变量），强制直连必须显式写 `direct`。
 
-验证走 [connectivity.py](../backend/app/connectivity.py#L73)：向固定的 `https://www.youtube.com/robots.txt` 发一次普通 HTTPS 请求，返回状态码、耗时、字节数与原始异常。刻意不复用 yt-dlp —— 它自带重试、cookies、profile 逻辑，失败时分不清是代理坏了还是提取器坏了。一个容易写错的实现细节：**关闭代理必须用 `ProxyHandler({})`**，不传 handler 会让 urllib 自己去读环境变量，那样探测结果就不再等于产品实际使用的设置。
+验证走 [connectivity.py](../backend/app/host/connectivity.py#L73)：向固定的 `https://www.youtube.com/robots.txt` 发一次普通 HTTPS 请求，返回状态码、耗时、字节数与原始异常。刻意不复用 yt-dlp —— 它自带重试、cookies、profile 逻辑，失败时分不清是代理坏了还是提取器坏了。一个容易写错的实现细节：**关闭代理必须用 `ProxyHandler({})`**，不传 handler 会让 urllib 自己去读环境变量，那样探测结果就不再等于产品实际使用的设置。
 
 ## JS 运行时与 n challenge
 
-YouTube 的 `n` 参数（nsig）需要跑 JS 才能解出来，这是**登录态取数路径的必需项**。相关实现在 [ytdlp_service.py](../backend/app/ytdlp_service.py#L187) 的运行时探测，以及 [runtime_env.py](../backend/app/runtime_env.py#L58) 的环境净化。
+YouTube 的 `n` 参数（nsig）需要跑 JS 才能解出来，这是**登录态取数路径的必需项**。相关实现在 [ytdlp_service.py](../backend/app/download/ytdlp_service.py#L187) 的运行时探测，以及 [runtime_env.py](../backend/app/host/runtime_env.py#L58) 的环境净化。
 
 探测顺序是「显式 `js_runtime_path` → Deno → Node」，其中 `js_runtime_path` 来自设置面板或环境变量 **`YTDL_JS_RUNTIME_PATH`**（历史上文档把它写成 `YTDL_JS_RUNTIME`，实测那个名字设了不生效，见 [006](../ai/bug-fix/006-proxy-is-not-configurable.md) 的遗留项）。探测**不只判断文件存在，而是真的用与 yt-dlp 相同的权限模型跑一次**：
 
@@ -159,19 +159,19 @@ node --experimental-permission --no-warnings=ExperimentalWarning -e <probe>
 
 失败时原始报错会留在 `dependencies.js_runtime_error`，逐个候选被拒的原因留在 `js_runtime_candidates_rejected`。这两项是「检测到 node 却解不出 n challenge」唯一能查清楚的地方。
 
-**宿主环境变量会静默打坏这条链路**：`NODE_OPTIONS` 是每个 node 进程都会读的，宿主若塞进 `--require=<补丁>`，node 会在权限模型下拒绝加载它并以 `ERR_ACCESS_DENIED` 退出；n challenge 求解失败后，yt-dlp 抛出的却是完全指不到病因的 `ERROR: The page needs to be reloaded.`。因此 [sanitize_environment](../backend/app/runtime_env.py#L58) 在启动时摘掉命中 `--require` / `--import` / `--loader` / `--experimental-loader` 的 `NODE_OPTIONS`，并把动作记进日志与 `/api/diagnostics.sanitized_environment`。
+**宿主环境变量会静默打坏这条链路**：`NODE_OPTIONS` 是每个 node 进程都会读的，宿主若塞进 `--require=<补丁>`，node 会在权限模型下拒绝加载它并以 `ERR_ACCESS_DENIED` 退出；n challenge 求解失败后，yt-dlp 抛出的却是完全指不到病因的 `ERROR: The page needs to be reloaded.`。因此 [sanitize_environment](../backend/app/host/runtime_env.py#L58) 在启动时摘掉命中 `--require` / `--import` / `--loader` / `--experimental-loader` 的 `NODE_OPTIONS`，并把动作记进日志与 `/api/diagnostics.sanitized_environment`。
 
-失败分类见 [error_advice.py](../backend/app/error_advice.py#L116)：它把异常链上的文本翻译成 `code + 结论 + 下一步` 四类之一（JS challenge / cookies / 代理 / 媒体流被挡），无法归类时返回 `None` 而不硬凑。`JobManager` 的失败日志会同时打一行结构化事实与一行 `诊断 / 原因 / 建议N`。
+失败分类见 [error_advice.py](../backend/app/download/error_advice.py#L116)：它把异常链上的文本翻译成 `code + 结论 + 下一步` 四类之一（JS challenge / cookies / 代理 / 媒体流被挡），无法归类时返回 `None` 而不硬凑。`JobManager` 的失败日志会同时打一行结构化事实与一行 `诊断 / 原因 / 建议N`。
 
 ## Cookies 与登录态
 
-Cookies 用于合法账号态、年龄确认或 bot 校验场景。解析阶段逻辑见 [_extract_metadata_with_cookies](../backend/app/api_support.py#L87)，下载阶段刷新逻辑见 [_download_with_cookie_refresh](../backend/app/job_manager.py#L765)。
+Cookies 用于合法账号态、年龄确认或 bot 校验场景。解析阶段逻辑见 [_extract_metadata_with_cookies](../backend/app/api/api_support.py#L87)，下载阶段刷新逻辑见 [_download_with_cookie_refresh](../backend/app/download/job_manager.py#L765)。
 
-浏览器导入器只保存 YouTube/Google 相关 cookies，过滤规则见 [YOUTUBE_COOKIE_DOMAIN_SUFFIXES](../backend/app/browser_cookies.py#L13)。Edge 锁库和 DPAPI fallback 处理见 [browser_cookies.py](../backend/app/browser_cookies.py#L117)。
+浏览器导入器只保存 YouTube/Google 相关 cookies，过滤规则见 [YOUTUBE_COOKIE_DOMAIN_SUFFIXES](../backend/app/host/browser_cookies.py#L13)。Edge 锁库和 DPAPI fallback 处理见 [browser_cookies.py](../backend/app/host/browser_cookies.py#L117)。
 
-未配置 cookies 时，YouTube 媒体流 403 概率显著上升。任务中心的媒体流失败文案会前置「当前 cookies 状态：已配置 / 未配置」，见 [_media_stream_failure_message](../backend/app/job_manager.py#L1161)，便于先排除这个最常见的前置条件。
+未配置 cookies 时，YouTube 媒体流 403 概率显著上升。任务中心的媒体流失败文案会前置「当前 cookies 状态：已配置 / 未配置」，见 [_media_stream_failure_message](../backend/app/download/job_manager.py#L1161)，便于先排除这个最常见的前置条件。
 
-已配置的 cookies 是否真的可用，由 [cookie_health.py](../backend/app/cookie_health.py#L234) 判定（`POST /api/cookies/verify`）。它把两件事合成一个结论：
+已配置的 cookies 是否真的可用，由 [cookie_health.py](../backend/app/host/cookie_health.py#L234) 判定（`POST /api/cookies/verify`）。它把两件事合成一个结论：
 
 - **离线体检**（始终执行）：Netscape 格式是否可解析、`.youtube.com` / `.google.com` 域上各有多少条、命中的鉴权项**名字**、最近到期时间。不联网，因此也适用于「只想确认文件格式对不对」。
 - **联网确认**（`deep=true` 时）：用这份 cookies 请求一次 `https://www.youtube.com/`，读页面里的 `"LOGGED_IN"`。
@@ -188,7 +188,7 @@ Cookies 用于合法账号态、年龄确认或 bot 校验场景。解析阶段�
 - `YTDL_YOUTUBE_VISITOR_DATA`
 - `YTDL_YOUTUBE_PO_BROWSER_PATH`
 
-这些值只传给 yt-dlp extractor 或 provider，不在诊断接口中回显原文。诊断只返回是否已配置，以及可用的 impersonation client 列表，见 [get_dependency_status](../backend/app/ytdlp_service.py#L296)。
+这些值只传给 yt-dlp extractor 或 provider，不在诊断接口中回显原文。诊断只返回是否已配置，以及可用的 impersonation client 列表，见 [get_dependency_status](../backend/app/download/ytdlp_service.py#L296)。
 
 ## aria2c fallback
 
@@ -197,12 +197,12 @@ Cookies 用于合法账号态、年龄确认或 bot 校验场景。解析阶段�
 - `YTDL_ARIA2C_ENABLED=true`
 - 系统 PATH 或 `YTDL_ARIA2C_PATH` 能找到 aria2c
 
-连接数参数来自 `aria2c_connections`（默认 2，上限 4，可在设置面板修改），参数拼装见 [_aria2c_args](../backend/app/ytdlp_service.py#L854)。该能力给单视频提供多连接下载，但多连接会显著提高 YouTube 风控面，因此默认关闭；诊断接口返回 `aria2c_available`、`aria2c_enabled`、`aria2c_path`、`aria2c_connections` 便于判断当前是否真的生效。
+连接数参数来自 `aria2c_connections`（默认 2，上限 4，可在设置面板修改），参数拼装见 [_aria2c_args](../backend/app/download/ytdlp_service.py#L854)。该能力给单视频提供多连接下载，但多连接会显著提高 YouTube 风控面，因此默认关闭；诊断接口返回 `aria2c_available`、`aria2c_enabled`、`aria2c_path`、`aria2c_connections` 便于判断当前是否真的生效。
 
 ## 失败排查顺序
 
 0. 先看 `data/logs/app.log`（路径见 `/api/diagnostics.log_file`）。启动三行快照 `proxy resolved` / `js runtime ...` / `dependencies ready` 能立刻排除环境问题；失败处有 `category=` 与紧随其后的 `诊断 / 原因 / 建议N`。
-1. 查看任务中心具体错误；单视频失败时 `Job.error` 会透传唯一失败 `JobItem.error`，见 [job_read_model.py](../backend/app/job_read_model.py#L160)。
+1. 查看任务中心具体错误；单视频失败时 `Job.error` 会透传唯一失败 `JobItem.error`，见 [job_read_model.py](../backend/app/download/job_read_model.py#L160)。
 2. 查看 `/api/diagnostics`，确认 ffmpeg、JS runtime（含 `js_runtime_error`）、impersonation、PO-token provider、cookies、代理、aria2c 状态。代理通不通用 `POST /api/proxy/test`；cookies 是否真能登录用 `POST /api/cookies/verify`。
 3. 重新从浏览器导入 cookies，并用 `POST /api/cookies/verify` 确认结论（域名与鉴权项都可能是「文件存在但全是匿名」的假象）。
 4. 若浏览器可正常播放但应用仍遇到媒体流 403，配置 PO token、visitor data 或浏览器路径。
@@ -217,20 +217,20 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 
 ### 命令返回 0 不等于已发布
 
-投稿走 `biliup-rs 0.2.4`（`biliup.exe`，安装方式 `winget install --id ForgQi.biliup-rs --exact`），命令组装在 [build_upload_argv](../backend/app/bili_bin.py#L143)。三个必须知道的事实：
+投稿走 `biliup-rs 0.2.4`（`biliup.exe`，安装方式 `winget install --id ForgQi.biliup-rs --exact`），命令组装在 [build_upload_argv](../backend/app/bilibili/bili_bin.py#L143)。三个必须知道的事实：
 
-- **登录必须一路做到拿到投稿令牌。** `biliup` 的 `login_by_cookies` 在**发出任何投稿请求之前**会拿 `token_info.access_token` 去 `passport.bilibili.com/x/passport-login/oauth2/info` 校验一次；`access_token` 是空串时 B站 返回 `-400 请求错误`，`biliup` 随即以 `Err` 退出 —— 全程约 1 秒、一个字节都不会上传，而错误码本身读不出「缺令牌」这层意思。所以 [exchange_tv_token](../backend/app/bili_auth.py#L142) 会补上 TV 端三步交换（申请二维码 → 用用户自己的 cookies 替他确认 → 轮询换回 `token_info`），「登录」的完成判据是**拿到令牌**而不是「文件里有 SESSDATA」。详见 bug-fix 记录 [011](../ai/bug-fix/011-biliup-refuses-a-token-less-cookie-file.md)。
-- **返回码 0 只说明命令跑完了，不说明平台上多了稿**。所以 [run_single](../backend/app/bili_upload.py#L483) 在命令返回后一定进 [_verify](../backend/app/bili_upload.py#L300)：用 `GET https://member.bilibili.com/x/web/archives` 回读账号近期稿件，按标题前缀在列表里找（[find_archive](../backend/app/bili_api.py#L127)，带退避重试，因为平台侧列表有延迟）。**查不到就停在 `unverified`** —— 这是本功能唯一不肯妥协的一条，宁可让用户去创作中心确认，也不拿「命令没报错」冒充「已发布」。
+- **登录必须一路做到拿到投稿令牌。** `biliup` 的 `login_by_cookies` 在**发出任何投稿请求之前**会拿 `token_info.access_token` 去 `passport.bilibili.com/x/passport-login/oauth2/info` 校验一次；`access_token` 是空串时 B站 返回 `-400 请求错误`，`biliup` 随即以 `Err` 退出 —— 全程约 1 秒、一个字节都不会上传，而错误码本身读不出「缺令牌」这层意思。所以 [exchange_tv_token](../backend/app/bilibili/bili_auth.py#L142) 会补上 TV 端三步交换（申请二维码 → 用用户自己的 cookies 替他确认 → 轮询换回 `token_info`），「登录」的完成判据是**拿到令牌**而不是「文件里有 SESSDATA」。详见 bug-fix 记录 [011](../ai/bug-fix/011-biliup-refuses-a-token-less-cookie-file.md)。
+- **返回码 0 只说明命令跑完了，不说明平台上多了稿**。所以 [run_single](../backend/app/bilibili/bili_upload.py#L483) 在命令返回后一定进 [_verify](../backend/app/bilibili/bili_upload.py#L300)：用 `GET https://member.bilibili.com/x/web/archives` 回读账号近期稿件，按标题前缀在列表里找（[find_archive](../backend/app/bilibili/bili_api.py#L127)，带退避重试，因为平台侧列表有延迟）。**查不到就停在 `unverified`** —— 这是本功能唯一不肯妥协的一条，宁可让用户去创作中心确认，也不拿「命令没报错」冒充「已发布」。
 - **`--submit` 这个开关照传，但它不起作用。** 上游 0.2.4 的 `match submit` 两个分支都调 `submit_by_app`（web 分支被注释掉了），实际提交永远走 `/x/vu/app/add`。早先文档里「`--submit web` 是必需的」是一条**写错的结论**：真正拦住投稿的是上面那次启动时的令牌校验，不是提交接口。
 
 
 对账还有一处容易写错：**两侧都要 `strip()`**。B站 会对标题做首尾空白处理，用户在手填表单里多打一个尾随空格时，只归一不比较的写法会让对账永远查不到，把一次成功投稿标成「待核对」。改了标题前缀（前 20 字）之后对账也会失效，这是**已知限制**，不是 bug。
 
-回读到的 `state` 由 [platform_state_text](../backend/app/bili_policy.py#L38) 映射成中文，再经 `status_for_platform_state` 折成上传状态；封面的最终值取平台侧（本地抽帧的封面被 B站 转码/裁切过，平台上那个才生效）。
+回读到的 `state` 由 [platform_state_text](../backend/app/bilibili/bili_policy.py#L38) 映射成中文，再经 `status_for_platform_state` 折成上传状态；封面的最终值取平台侧（本地抽帧的封面被 B站 转码/裁切过，平台上那个才生效）。
 
 ### 频控是账号级的
 
-`code 601 您上传视频过快` 是**账号侧**的临时频控，不是本机参数不对。正确处理是等几分钟、原样重投，不要靠改标题/加标签去硬刷 —— 那只会让频控更久。[classify_failure](../backend/app/bili_policy.py#L351) 把它归成一条明确的建议，合集批量投稿之间也留了间隔（`DEFAULT_COLLECTION_GAP_SECONDS`）。这条**无法在本机消解**，只能等。
+`code 601 您上传视频过快` 是**账号侧**的临时频控，不是本机参数不对。正确处理是等几分钟、原样重投，不要靠改标题/加标签去硬刷 —— 那只会让频控更久。[classify_failure](../backend/app/bilibili/bili_policy.py#L351) 把它归成一条明确的建议，合集批量投稿之间也留了间隔（`DEFAULT_COLLECTION_GAP_SECONDS`）。这条**无法在本机消解**，只能等。
 
 ### 上传断了 ≠ 投稿被拒
 
@@ -254,11 +254,11 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 
 `--copyright` 是**必填**语义（`1` 原创/自制、`2` 转载），而 **`biliup upload` 自己的默认值是 `1`（自制）** —— 早先的实现照抄了这个默认值，等于把每一单都填成「自制」。B站 对「把转载标成自制」是有处置的，所以现在是**默认转载**（`DEFAULT_COPYRIGHT`），由用户在表单里改。
 
-关键判据在 [effective_source](../backend/app/bili_meta.py#L205)：**只有转载稿才有来源**，自制稿即便在界面上带着值也不提交 `--source`。不这么收口的话，「界面上有值」与「命令里带了这个参数」会各写一遍，迟早出现落库的快照与实发参数不一致（`source` 是转载稿专有字段，自制稿带了反而可能被判成误标）。
+关键判据在 [effective_source](../backend/app/bilibili/bili_meta.py#L205)：**只有转载稿才有来源**，自制稿即便在界面上带着值也不提交 `--source`。不这么收口的话，「界面上有值」与「命令里带了这个参数」会各写一遍，迟早出现落库的快照与实发参数不一致（`source` 是转载稿专有字段，自制稿带了反而可能被判成误标）。
 
 **合集模板上没有共用来源**，这是有意的：合集里每条视频的出处都不同，逐条渲染时各取该条自己的 `source_url`。界面上相应地只在**单视频**场景显示来源输入框；模板的投影刻意留空而不是回填第一条 —— 回填一个看着像「所有条目都用它」的值，正是要避免的误导。
 
-转载稿缺来源会被平台退回来（错误码 `21004 Missing source for reprint`），所以校验拦在提交之前：服务端 [validate](../backend/app/bili_meta.py#L354) 是权威，界面另写一份同判据的检查，让用户在输入框旁边就看到，而不是点了提交再吃一个只有错误码的 400。
+转载稿缺来源会被平台退回来（错误码 `21004 Missing source for reprint`），所以校验拦在提交之前：服务端 [validate](../backend/app/bilibili/bili_meta.py#L354) 是权威，界面另写一份同判据的检查，让用户在输入框旁边就看到，而不是点了提交再吃一个只有错误码的 400。
 
 ### 合集（season）的两个端点参数风格相反
 
@@ -267,13 +267,13 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 - **创建**：`POST /x2/creative/web/season/add` —— **form-urlencoded** 传 `title/desc/cover/season_price=0/csrf`，返回 `data` 即 `season_id`。
 - **加稿**：`POST /x2/creative/web/season/section/episodes/add` —— **JSON body**，字段是 camelCase 的 `sectionId` + `episodes[{aid, cid, title, charging_pay}]`，而 **`csrf` 走 query 串**。
 
-两者参数风格正好相反，照抄前者的写法会静默失败。`cid` 只能靠 `GET /x/web-interface/view?bvid=` 拿到，所以归集前对每个已发布稿件都多一次详情请求。「创建」有人工审核，通过前平台上可能看不到，[SEASON_SUBMITTED_NOTE](../backend/app/bili_policy.py#L392) 会把这点说给用户。**重试不重复建合集**：归集失败时保留已拿到的 `season_id`，重试只补加缺口 —— 重复建合集在平台侧不可撤销，比「多等一次」贵得多。
+两者参数风格正好相反，照抄前者的写法会静默失败。`cid` 只能靠 `GET /x/web-interface/view?bvid=` 拿到，所以归集前对每个已发布稿件都多一次详情请求。「创建」有人工审核，通过前平台上可能看不到，[SEASON_SUBMITTED_NOTE](../backend/app/bilibili/bili_policy.py#L392) 会把这点说给用户。**重试不重复建合集**：归集失败时保留已拿到的 `season_id`，重试只补加缺口 —— 重复建合集在平台侧不可撤销，比「多等一次」贵得多。
 
 **`sectionId` 装的是分区 id，不是合集 id。** 这是本节最容易踩的一处：「创建」返回的是**合集**编号，而
 「加稿」要的是该合集下某个**分区（section）**的编号，两者在平台上是两套独立编号
 （实测合集 `9343273` 对应「正片」分区 `10455347`）。传错时返回 `code=-404 message=啥都木有` ——
 既不像网络问题也不像权限问题，而且**重试不会自愈**（同一个错值再发一遍）。所以归集前必先
-[find_season_section](../backend/app/bili_api.py#L322) 回读合集列表、从 `sections.sections[]` 里取分区：
+[find_season_section](../backend/app/bilibili/bili_api.py#L322) 回读合集列表、从 `sections.sections[]` 里取分区：
 优先 `type == 1`（平台自动建的「正片」），该合集被加过自定义分区、没有默认分区时按 `order` 取最靠前的。
 读不到分区就**不发加稿请求**，落成「合集建好了，但没读到它下面的分区」并把 `season_id` 带回 ——
 详见 [013](../ai/bug-fix/013-season-section-id-confusion.md)。
@@ -281,14 +281,14 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 ### 归集方式：`season_id` 预置就是全部的「加入已有」（单视频与合集共用）
 
 界面上让用户选**新建合集 / 加入已有合集 / 不归集**，但后端的新逻辑只有一行赋值：
-`submit_collection` / `submit_single` 把用户选中的编号写进 [BiliSeason.season_id](../backend/app/models.py#L199)，
-而 [_group_work](../backend/app/bili_manager.py#L1494) 本来就读它当 `existing_season_id`
+`submit_collection` / `submit_single` 把用户选中的编号写进 [BiliSeason.season_id](../backend/app/contracts/models.py#L199)，
+而 [_group_work](../backend/app/bilibili/bili_manager.py#L1494) 本来就读它当 `existing_season_id`
 并据此跳过 `create_season`。**复用既有的「重试不重复建合集」机制，而不是另开一条归集分支** ——
 另开一条就要把「建集 + 加集 + 失败重试 + 状态收敛」再实现一遍。
 
 **单视频也能归集，靠的就是把这一行接到 `submit_single` 上**。在此之前 `submit_single`
 连归集记录都不建，`_maybe_group` 因此永远找不到它 —— 这个能力只有先下载一整个 playlist
-才够得着。两条路径共用同一组字段、同一份校验（[validate_group_choice](../backend/app/bili_meta.py#L493)）
+才够得着。两条路径共用同一组字段、同一份校验（[validate_group_choice](../backend/app/bilibili/bili_meta.py#L493)）
 与同一套落库，差异**只有默认值**：
 
 | 路径 | 默认 | 为什么 |
@@ -297,33 +297,33 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 | 单视频 | `none` | 改动前单视频**从不进任何合集**。 |
 
 用同一个默认值，两处必然有一处是错的，而且**都是「升级之后悄悄改了用户的东西」，没有报错可循**。
-所以 [normalize_group_mode](../backend/app/bili_meta.py#L102) 的回退值是参数而非写死的常量 ——
+所以 [normalize_group_mode](../backend/app/bilibili/bili_meta.py#L102) 的回退值是参数而非写死的常量 ——
 调用方必须按场景传。
 
 四处容易写反的地方：
 
 - **`new` 模式下 `season_id` 必须保持为空**。它一旦被预置成任何值（哪怕是对的 `0`），
   `_group_work` 就会跳过建集、对着不存在的编号加视频。所以这个字段不能「顺手填个默认值」。
-- **用户显式选择必须覆盖上一轮遗留的编号**。[_upsert_season](../backend/app/bili_manager.py#L874)
+- **用户显式选择必须覆盖上一轮遗留的编号**。[_upsert_season](../backend/app/bilibili/bili_manager.py#L874)
   既有的「`season_id` 不清空」是为了重试不重复建合集；照搬到「用户从加入 A 改成加入 B」上，
   就会静默地继续往 A 里加 —— 用户选了什么完全不起作用。
 - **校验必须看原始输入，不能先归一**。`normalize_group_mode` 把非法值修成 `new` 之后再校验，
   等于把校验废掉了：一个手滑写坏的 `group_mode` 会被静默执行。归一只用于**通过校验之后**
   真正执行的那一步。（这条是被 `test_an_unknown_group_mode_is_400_not_silently_corrected`
   抓出来的，不是推理出来的。）
-- **空合集名拦在投稿之前**。[_require_group_ready](../backend/app/bili_manager.py#L992) 是路由那道
+- **空合集名拦在投稿之前**。[_require_group_ready](../backend/app/bilibili/bili_manager.py#L992) 是路由那道
   400 之外的第二道闸，因为两个提交方法都是公开的：空标题会被 B站 打回来，而那时
   **视频已经投出去了** —— 那是一次不可回退的半成品状态。
 
-**「读不到」与「真的没有」必须分开**。[list_seasons](../backend/app/bili_api.py#L275) 自己吞掉
+**「读不到」与「真的没有」必须分开**。[list_seasons](../backend/app/bilibili/bili_api.py#L275) 自己吞掉
 网络异常返回空表，所以未登录时由 manager 按登录态判断、把原因写进 `BiliSeasonListRead.error`。
 不去伪造那个区别，是因为界面上一旦显示成「这个账号还没有合集」，用户就会跑去新建一个重复的。
 同理，没有编号的合集整条跳过（归集要按编号提交），缺标题的保留并用编号兜名。
 
 **「不归集」在两条路径上的落库行为相反，这是刻意的**：
 
-- **合集**：落成终态 [skipped](../backend/app/models.py#L129) 而不是 `pending`。
-  [_maybe_group](../backend/app/bili_manager.py#L1399) 只自动归集 `pending`，留 `pending` 会让
+- **合集**：落成终态 [skipped](../backend/app/contracts/models.py#L129) 而不是 `pending`。
+  [_maybe_group](../backend/app/bilibili/bili_manager.py#L1399) 只自动归集 `pending`，留 `pending` 会让
   「不归集」根本不管用，且界面上挂一个永远不会结束的徽标。但记录**照建** —— 不落库的话界面上
   什么都不显示，用户分不清是「没归集」还是「还没开始归」。
 - **单视频**：`_upsert_season(create_if_missing=False)` **一条记录都不建**。单视频的默认恰好
@@ -351,13 +351,13 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 
 ### 评论幂等
 
-评论走 `POST /x/v2/reply/add`（旧的 `/x/v2/reply/send` 已下线），置顶走 `/x/v2/reply/top`。重复评论返回 `12051`，所以策略是**先查自己的评论**（在 `/x/v2/reply/main` 里按 `mid` 匹配 + 找 marker 串），有就只补置顶；真撞上 `12051` 时换 `mode=2`（时间序）重找一次。marker 是 [COMMENT_MARKER](../backend/app/bili_upload.py#L92)，写在评论正文里，用来区分「这条评论是本应用发的」和「用户自己发的」。
+评论走 `POST /x/v2/reply/add`（旧的 `/x/v2/reply/send` 已下线），置顶走 `/x/v2/reply/top`。重复评论返回 `12051`，所以策略是**先查自己的评论**（在 `/x/v2/reply/main` 里按 `mid` 匹配 + 找 marker 串），有就只补置顶；真撞上 `12051` 时换 `mode=2`（时间序）重找一次。marker 是 [COMMENT_MARKER](../backend/app/bilibili/bili_upload.py#L92)，写在评论正文里，用来区分「这条评论是本应用发的」和「用户自己发的」。
 
 ### CC 字幕上传：`oid` 是 cid，语言只用白名单里的值
 
 视频投稿成功后，下载阶段落下的字幕会被转成 BCC 提交到
 `POST https://api.bilibili.com/x/v2/dm/subtitle/draft/save`
-（[save_subtitle](../backend/app/bili_api.py#L366)）。它是**字幕轨**而不是烧进画面的硬字幕，
+（[save_subtitle](../backend/app/bilibili/bili_api.py#L366)）。它是**字幕轨**而不是烧进画面的硬字幕，
 观众可以在播放器里关掉 —— 这是需求要的那一条。
 
 四个参数上的坑：
@@ -371,7 +371,7 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 
 **语言白名单（实测，不是从文档推的）**：接受 `zh` / `en` / `zh-Hant` / `zh-TW` / `zh-HK` / `ja` /
 `ko` / `yue` / `fr`；**拒绝** `zh-CN` / `en-US` / `zh-Hans` / `en-GB`，报
-`code=79011 不合法的语言`。所以 [`bilibili_language`](../backend/app/bili_subtitle.py#L93) 把
+`code=79011 不合法的语言`。所以 [`bilibili_language`](../backend/app/bilibili/bili_subtitle.py#L93) 把
 `zh-Hans` / `zh-CN` 压成 `zh`，繁体三档**原样保留**（它们在白名单里，压平反而丢信息），英文一律
 `en`，认不出来退 `en`。判据是用 `submit=false`（只存草稿、不发布）逐个枚举候选值得到的 ——
 **真发一次投稿去试语言值，试错成本是一堆不可撤销的稿件。**
@@ -394,7 +394,7 @@ BCC 的 `body` 一段就是一条 cue。YouTube 的自动字幕是**滚动**的�
 0.010s，文字 100% 被相邻 cue 覆盖），而 `merge_repeated_cues` 只合并「整条同文」，合不掉它们 ——
 于是传上去 239 段，对应只有 122 句台词。
 
-[`drop_transition_cues`](../backend/app/bili_subtitle.py#L211) 判据是**两条同时成立**：时长
+[`drop_transition_cues`](../backend/app/bilibili/bili_subtitle.py#L211) 判据是**两条同时成立**：时长
 ≤ `TRANSITION_MAX_SECONDS`(0.05) **且**文字被**紧邻**的 cue 完整覆盖。只看时长会误删真的只有
 几十毫秒的短字幕；只看「文字在别处出现过」会误删正常重复（同一句话隔几秒再说一次是新字幕）。
 `load_bcc` 的三步定序固定为 **解析 → 丢过渡条 → 合并同文**（先合会把过渡条并进上一条，之后就认不出来）。
@@ -425,11 +425,11 @@ BCC 的 `body` 一段就是一条 cue。YouTube 的自动字幕是**滚动**的�
 
 登录两条路都支持：应用内**扫码**（`/x/passport-login/web/qrcode/generate` + `.../poll`，状态码 `0=confirmed / 86101=waiting / 86090=scanned / 86038=expired`），或**导入/替换已有的 `bili_cookies.json`**。扫码成功后从回调 URL 的 query 与 `Set-Cookie` **两处**取凭据，且 query 里的值需要 `unquote` —— `SESSDATA` 自身含 `%2C`，不解码会写出一个坏 cookie。签发二维码的 SVG **尺寸单位是毫米**（`width="29.6mm"`），前端必须显式覆盖宽高，否则在浏览器里会被当成一个巨大的矢量图撑开表单。
 
-`biliup.exe` 的探测有个 Windows 特有的坑：winget 未开开发者模式时会在 `%LOCALAPPDATA%\Microsoft\WinGet\Links\` 留一个 **0 字节的空壳**，而该目录在 PATH 里优先级最高 —— `shutil.which` 找得到、`path` 也在，但 `CreateProcess` 拒绝执行它。所以每级候选命中后都必须验 PE 头（`MZ`，见 [is_pe](../backend/app/bili_bin.py#L59)），并把「找到了但不能用」如实报出来（[detect_broken_stub](../backend/app/bili_bin.py#L86) / [repair_broken_stub](../backend/app/bili_bin.py#L115)）。界面上这种情况必须按**不通过**渲染并附上原因，不能因为 `found` 为真就打勾。
+`biliup.exe` 的探测有个 Windows 特有的坑：winget 未开开发者模式时会在 `%LOCALAPPDATA%\Microsoft\WinGet\Links\` 留一个 **0 字节的空壳**，而该目录在 PATH 里优先级最高 —— `shutil.which` 找得到、`path` 也在，但 `CreateProcess` 拒绝执行它。所以每级候选命中后都必须验 PE 头（`MZ`，见 [is_pe](../backend/app/bilibili/bili_bin.py#L59)），并把「找到了但不能用」如实报出来（[detect_broken_stub](../backend/app/bilibili/bili_bin.py#L86) / [repair_broken_stub](../backend/app/bilibili/bili_bin.py#L115)）。界面上这种情况必须按**不通过**渲染并附上原因，不能因为 `found` 为真就打勾。
 
 ### 表单与硬限
 
-预填与硬限的权威值都在 [bili_meta.py](../backend/app/bili_meta.py)：标题 ≤ 80、简介 ≤ 250、标签逗号分隔总长 < 200（最多 10 个、单个 ≤ 20）、评论 ≤ 1000（`COMMENT_MAX`）。默认分区 `tid=122`（野生技术协会）。合集按模板批量生成时，`{index}` / `{title}` 这类占位符在 [render](../backend/app/bili_meta.py#L278) 里替换，未知占位符由 `unknown_placeholders` 挑出来单独报错。前端的预填数字全部来自服务端，不写死在组件里。
+预填与硬限的权威值都在 [bili_meta.py](../backend/app/bilibili/bili_meta.py)：标题 ≤ 80、简介 ≤ 250、标签逗号分隔总长 < 200（最多 10 个、单个 ≤ 20）、评论 ≤ 1000（`COMMENT_MAX`）。默认分区 `tid=122`（野生技术协会）。合集按模板批量生成时，`{index}` / `{title}` 这类占位符在 [render](../backend/app/bilibili/bili_meta.py#L278) 里替换，未知占位符由 `unknown_placeholders` 挑出来单独报错。前端的预填数字全部来自服务端，不写死在组件里。
 
 ## 打开字幕文件
 
@@ -485,7 +485,7 @@ notepad / VS Code / Sublime 只能是它的子集：用户装了别的我们不�
 **六、前台：先等它自己上来，超时才抢；自带对话框钉 topmost。** 用户点的是浏览器，窗口是我们的后台
 进程画的，Windows 的前台锁默认拒绝后台进程 `SetForegroundWindow`。但**提前抢更糟**：窗口刚创建时它
 自己在激活，这时去抢会被拒，而且被拒之后它就不再自行激活 —— 实测「提前抢 → 前台始终是浏览器；
-不碰它 → 对话框自己上来」。所以顺序是：先给它 1.2s 自己上来（[_ensure_dialog_foreground](../backend/app/system_open.py#L777)），
+不碰它 → 对话框自己上来」。所以顺序是：先给它 1.2s 自己上来（[_ensure_dialog_foreground](../backend/app/host/system_open.py#L777)），
 确实没上来才用 `AttachThreadInput` 接管前台线程的输入队列再抢。自带对话框另外声明 `-topmost`：
 即使焦点被别的窗口抢走，它仍然压在最上面（真机探针量 `WS_EX_TOPMOST`）。
 
@@ -496,12 +496,12 @@ notepad / VS Code / Sublime 只能是它的子集：用户装了别的我们不�
 
 **八、没有关联不是错误。** 在干净的 Windows 上对一个 `.srt` 调 `os.startfile`，抛的是
 `OSError [WinError 1155] 没有应用程序与此操作的指定文件有关联`。这不是「打不开」，是「还没人认领这个
-后缀」—— 正确反应是像资源管理器那样**弹「打开方式」**（[open_path_with_default_app](../backend/app/system_open.py#L79)
+后缀」—— 正确反应是像资源管理器那样**弹「打开方式」**（[open_path_with_default_app](../backend/app/host/system_open.py#L79)
 里只对这一种 `winerror` 降级，其它错误照原样抛：把「拒绝访问」也悄悄变成弹窗，就是把真问题藏起来）。
 这条路现在只有接口的 `?mode=default` 会走到。
 
 其它平台没有等价的「选择器」（macOS 的 `open -a` 要的是应用名，Linux 的 `xdg-open` 只有默认），
-`mode=chooser` 在那里退化成默认打开，见 [open_path_with_chooser](../backend/app/system_open.py#L97)。
+`mode=chooser` 在那里退化成默认打开，见 [open_path_with_chooser](../backend/app/host/system_open.py#L97)。
 
 前端因此是**一颗**按钮（[SubtitleOpenButton](../frontend/src/components/SubtitleOpenButton.tsx#L19)），
 `title="打开字幕文件；可选择打开方式"`，点下去就是选择器。它曾经是**组合控件**（主段 + 右侧 20px 箭头）：

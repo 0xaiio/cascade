@@ -14,57 +14,83 @@
 | 失败必须可见 | 任何静默卡死最终都要变成任务中心里一条可读原因。 | 需要看门狗、错误分类和文案约束（文案不能含 `timed out` / `reset` / `403` 等会被误分类的词）。 |
 | 不暴露 yt-dlp 全量能力 | API 只接受 `DownloadOptions`，不转发任意 yt-dlp 参数。 | 高级用法需要改代码，而不是改请求体。 |
 
+## 目录结构（按功能分包）
+
+`backend/app` 的**第一层目录按功能划分**，一个目录是一块能独立讲清楚的业务能力；层号（L0~L5）
+写在矩阵里，**不写在目录名上** —— 两种切法同时存在时，目录回答「这段代码服务于谁」，
+矩阵回答「它能依赖谁」。唯一被允许的跨层目录是 `contracts/` 与 `common/`：前者是各方共用的
+接口定义，后者没有项目内依赖。
+
+| 目录 | 内容 | 依赖方向 |
+| --- | --- | --- |
+| [main.py](../backend/app/main.py#L40) / [\_\_main\_\_.py](../backend/app/__main__.py#L64) | 装配根与进程入口。留在包根：`uvicorn app.main:app` 与 `python -m app` 都要求它们在这里，这是入口路径的一部分，不是可以挪动的实现细节。 | 向下装配一切 |
+| [api/](../backend/app/api/__init__.py) | HTTP 契约：请求级依赖容器（`api_context`）、路由支撑（`api_support`）、按资源拆分的 [routers/](../backend/app/api/routers/__init__.py#L21)。 | 只被 `main` 使用，自己向下依赖 |
+| [contracts/](../backend/app/contracts/__init__.py) | 契约：`config`（设置）、`models`（表结构）、`schemas`（线上模型）。 | 被任何层 import 都正常 |
+| [download/](../backend/app/download/__init__.py) | YouTube 下载：队列与孤儿恢复、yt-dlp 边界、清晰度/字幕/降级决策、进度聚合、产物路径与删除判定。 | 依赖 `contracts` / `host` / `infra` / `common` |
+| [bilibili/](../backend/app/bilibili/__init__.py) | B站 投稿：队列与编排、`biliup` 边界、会员接口与登录、元数据与文案、CC 字幕、HTTP 接缝。 | 依赖 `download`（复用产物路径与字幕计划）与 `contracts` / `infra` / `common` |
+| [host/](../backend/app/host/__init__.py) | 本机宿主边界：代理解析、连通性探针、浏览器 cookies 与体检、进程环境、端口探测、系统打开。 | **不依赖任何项目内模块**（只依赖标准库与 `yt_dlp.cookies`），是各业务域共用的地板 |
+| [infra/](../backend/app/infra/__init__.py) | 基础设施：数据库引擎、日志配置、进程内事件总线。 | 依赖 `contracts` |
+| [common/](../backend/app/common/__init__.py) | 纯工具：`paths`、`log_safety`。 | 无项目内依赖 |
+
+两条与「按功能分包」配套的硬约定：
+
+1. **包内一律写相对导入**。`scripts/check_layers.py` 正是靠相对导入的 `level` 折算依赖目标的；
+   写成 `from app.download...` 的绝对导入会绕过这条检查。层号变化时（模块上移一层），
+   导入的 `..` 数目必须跟着变，否则运行期才炸。
+2. **目录不是层的别名**。`bilibili/bili_http.py` 是 L4、`infra/` 里也有 L2 的 `events` ——
+   决定放哪个目录看「它服务于哪块能力」，决定能否依赖看矩阵里的层号。
+
 ## 模块职责矩阵
 
 每个模块只承担一类职责。"不负责"一列用于判断新代码应该落到哪里。
 
 | 模块 | 层 | 职责 | 不负责 |
 | --- | --- | --- | --- |
-| [main.py](../backend/app/main.py#L40) | L0 入口 | **只做装配**：建 `ApiContext`、挂载 `routers/` 下的 `APIRouter`、静态资源托管、lifespan 启停。 | 不声明路由（路由在 `routers/`），不写业务规则，不做状态转换，不构造 yt-dlp 参数。 |
-| [routers/](../backend/app/routers/__init__.py#L21) | L0 入口 | 按资源分模块声明 HTTP 路由（`diagnostics` / `cookies` / `analyze` / `jobs` / `job_files` / `settings` / `events` / `bilibili`）：取参、调辅助、定状态码。 | 不做状态转换，不直接调用 yt-dlp，不写领域规则（产物定位见 `job_artifacts`，设置与错误映射见 `api_support`）。 |
-| [api_context.py](../backend/app/api_context.py#L28) | L0 入口 | 请求级依赖容器 `ApiContext`（`frozen` dataclass）+ `get_context` / `get_session` 依赖别名。 | 不装配依赖（装配在 `main.py`），不写业务规则。 |
-| [api_support.py](../backend/app/api_support.py#L26) | L0 入口 | 路由支撑：任务/条目定位与 404、设置读写与响应构造、cookies 元数据提取、目录选择。 | 不声明路由，不做状态转换。 |
-| [job_artifacts.py](../backend/app/job_artifacts.py#L31) | L0 入口 | 产物**定位**（一条候选链）与本机**打开**（播放 / 打开所在目录 / 打开字幕）。 | 不删文件（删除带白名单校验，属 `job_manager`），不决定用什么播放器或查看器（属 `system_open`）。 |
+| [main.py](../backend/app/main.py#L40) | L0 入口 | **只做装配**：建 `ApiContext`、挂载 `api/routers/` 下的 `APIRouter`、静态资源托管、lifespan 启停。 | 不声明路由（路由在 `api/routers/`），不写业务规则，不做状态转换，不构造 yt-dlp 参数。 |
+| [routers/](../backend/app/api/routers/__init__.py#L21) | L0 入口 | 按资源分模块声明 HTTP 路由（`diagnostics` / `cookies` / `analyze` / `jobs` / `job_files` / `settings` / `events` / `bilibili`）：取参、调辅助、定状态码。 | 不做状态转换，不直接调用 yt-dlp，不写领域规则（产物定位见 `job_artifacts`，设置与错误映射见 `api_support`）。 |
+| [api_context.py](../backend/app/api/api_context.py#L28) | L0 入口 | 请求级依赖容器 `ApiContext`（`frozen` dataclass）+ `get_context` / `get_session` 依赖别名。 | 不装配依赖（装配在 `main.py`），不写业务规则。 |
+| [api_support.py](../backend/app/api/api_support.py#L26) | L0 入口 | 路由支撑：任务/条目定位与 404、设置读写与响应构造、cookies 元数据提取、目录选择。 | 不声明路由，不做状态转换。 |
+| [job_artifacts.py](../backend/app/download/job_artifacts.py#L31) | L0 入口 | 产物**定位**（一条候选链）与本机**打开**（播放 / 打开所在目录 / 打开字幕）。 | 不删文件（删除带白名单校验，属 `job_manager`），不决定用什么播放器或查看器（属 `system_open`）。 |
 | [__main__.py](../backend/app/__main__.py#L64) | L0 入口 | 本地启动入口：解析命令行、启动前做端口预检并识别占用者、交给 uvicorn。 | 不装配应用（那是 `main.py`），不写业务规则。 |
-| [config.py](../backend/app/config.py#L19) | L1 契约 | 声明全部设置字段、默认值与约束、目录准备。 | 不读数据库（`Setting` 覆盖在 `api_support.py` 里做）。 |
-| [schemas.py](../backend/app/schemas.py#L14) | L1 契约 | 定义 HTTP 线上模型与枚举。 | 不引用 yt-dlp 类型，不含业务逻辑。 |
-| [models.py](../backend/app/models.py#L27) | L1 契约 | 定义持久化表结构与 `JobStatus`。 | 不做读写编排。 |
-| [job_manager.py](../backend/app/job_manager.py#L43) | L2 编排 | 队列、worker、并发、暂停/重启/删除、进度 hook、错误分类、终态收敛、事件发布、**启动时的孤儿条目恢复**。 | 不直接调用 yt-dlp（经 `YtDlpService`），不解析 yt-dlp 内部结构（经 formats 工具），**不做降级判定**（判定在 `resolution_decisions`），**不做孤儿条目的状态判定**（在 `orphan_recovery`）。 |
-| [orphan_recovery.py](../backend/app/orphan_recovery.py#L48) | L2 编排 | 启动时把上次进程退出留下的 `queued`/`running` 条目收敛成重启后成立的状态（恢复 / 失败 / 取消 / 暂停），返回「要重新排队哪些」；按任务创建时间与条目序号排序。 | **不决定任务终态**（回到 `job_manager._maybe_finish_job`），不启动 worker、不入队、不发事件。 |
-| [job_read_model.py](../backend/app/job_read_model.py#L12) | L2 编排 | 把表投影成 API 读模型：聚合分辨率/格式、`elapsed_seconds`、降级消息。 | 不写库、不改状态。 |
-| [events.py](../backend/app/events.py#L7) | L2 编排 | 进程内 SSE 扇出（每个订阅者一个队列）。 | 不持久化事件（持久化在 `job_manager`）。 |
-| [bili_manager.py](../backend/app/bili_manager.py#L328) | L2 编排 | B站 上传的队列与编排：单 worker 串行、投稿间隔（抗账号级频控）、状态写库与收敛、重启后把中断记录折成可重试失败、环境体检、事件发布。 | 不直接调 `biliup`（经 `bili_upload`），不解析 B站 内部结构（经 `bili_api`），不算界面徽标（经 `bili_read_model`）。 |
-| [bili_read_model.py](../backend/app/bili_read_model.py#L60) | L2 编排 | 把 `bili_upload` / `bili_season` 投影成 API 读模型；**「多条记录 → 一档徽标」的聚合规则**只在这里定义。 | 不写库、不改状态；`elapsed_seconds` 复用 `job_read_model`（见下方「同层横向依赖」）。 |
-| [ytdlp_service.py](../backend/app/ytdlp_service.py#L88) | L3 领域 | yt-dlp 边界：元数据、预检测、参数构建、profile 重试链、错误分类、依赖诊断。 | 不碰数据库，不决定任务状态。 |
-| [subtitle_plan.py](../backend/app/subtitle_plan.py#L200) | L3 领域 | 字幕下载**计划**：主语言判定（`-orig` 原声轨）、同族轨偏好、人工→ASR→跳过的收敛、来源标签与摘要文案。**纯逻辑**：不联网、不读库、不 import yt-dlp。 | 不写库、不发请求；不知道 `JobItem` 的存在（结论由 `job_manager` 取走）。 |
-| [bili_subtitle.py](../backend/app/bili_subtitle.py#L277) | L3 领域 | B站 CC 字幕：SRT/VTT → BCC 转换、语言标识映射、一次字幕上传（`posted` / `skipped` / `failed`）。 | **不参与稿件状态判定**、不写库、不重试；不知道端点长什么样（端点在 `bili_api`）。 |
-| [ytdlp_formats.py](../backend/app/ytdlp_formats.py#L9) | L3 领域 | 格式选择器、分辨率/大小/codec 提取、降级候选计算。 | 不导入 yt-dlp。 |
-| [stall_guard.py](../backend/app/stall_guard.py#L32) | L3 领域 | 纯函数式停滞判定与 `DownloadStalled`。 | 不写库、不发布事件。 |
-| [fallback_policy.py](../backend/app/fallback_policy.py#L10) | L3 领域 | 降级原因常量与用户可读文案、重启建议。 | 不做降级决策（决策在 `resolution_decisions`）。 |
-| [resolution_decisions.py](../backend/app/resolution_decisions.py#L71) | L3 领域 | 降级**决策**：值不值得找降级候选、降到哪、为什么、降不了时报哪句话。纯函数，可单测。 | 不发请求、不读库、不改 `JobItem`；可用清晰度由 `job_manager` 取好传进来。 |
-| [download_progress.py](../backend/app/download_progress.py#L21) | L3 领域 | 多子流进度聚合与分母策略。 | 不知道数据库和 SSE 的存在。 |
-| [progress_persist.py](../backend/app/progress_persist.py#L5) | L3 领域 | 决定某个进度快照是否值得落库。 | 不执行写库。 |
-| [transfer_stats.py](../backend/app/transfer_stats.py#L5) | L3 领域 | 由字节增量累加平均速度。 | 不处理瞬时速度（瞬时速度直接取 payload）。 |
-| [browser_cookies.py](../backend/app/browser_cookies.py#L55) | L3 领域 | 浏览器 cookies 提取、域名过滤、锁库与 CDP fallback。 | 不决定何时刷新（决策在 `job_manager`/`main`）。 |
-| [cookie_health.py](../backend/app/cookie_health.py#L234) | L3 领域 | cookies **体检**：格式/域名/鉴权项/过期 + 一次 `LOGGED_IN` 探针合成结论。 | 不修改 cookies 文件，不决定解析用哪份（决策在 `main`）。 |
-| [proxy.py](../backend/app/proxy.py#L169) | L3 领域 | 代理**解析**：显式 > 系统 > 环境，归一化与凭据脱敏。 | 不验证通不通（那是 `connectivity`），不发请求。 |
-| [connectivity.py](../backend/app/connectivity.py#L73) | L3 领域 | 代理**验证**：一次朴素 HTTPS 探针，返回状态码/耗时/原始异常。 | 不解析代理来源，不复用 yt-dlp（避免混淆病因）。 |
-| [error_advice.py](../backend/app/error_advice.py#L116) | L3 领域 | 异常链 → 可执行诊断（JS challenge / cookies / 代理 / 媒体流四类）。 | 纯字符串判定，不联网、不读库、不改变重试行为。 |
-| [runtime_env.py](../backend/app/runtime_env.py#L58) | L5 纯工具 | 摘除会打坏 JS 运行时的宿主环境变量，并返回可留痕的记录。 | 只动本进程 `os.environ`，不改系统设置。 |
-| [dev_server.py](../backend/app/dev_server.py#L44) | L5 纯工具 | 端口可用性探测、向后找可用端口、`netstat` / `tasklist` 输出的解析。 | 不启动服务、不改配置；拿不到占用者信息时返回 `None` 而不是猜一个名字。 |
-| [output_paths.py](../backend/app/output_paths.py#L13) | L3 领域 | 输出文件、中间文件与 sidecar 的候选路径解析与发现。 | 不删除文件（删除由 `job_manager` 在受限根目录内执行）。 |
-| [safe_delete.py](../backend/app/safe_delete.py#L22) | L3 领域 | 删除产物的**路径安全判定**：允许范围（`DeleteScope`）、某路径是否可删、任务目录是否可收走。纯函数，可单测。 | 不删任何东西（`unlink` / `rmdir` 由 `job_manager` 执行），不枚举候选（枚举在 `output_paths`）。 |
-| [bili_upload.py](../backend/app/bili_upload.py#L299) | L3 领域 | **单次上传的领域逻辑**：编排 `bili_bin` + `bili_api` + `bili_meta`，产出「已发布/审核中/待核对/失败」的结论与下一步。含模板批量渲染与逐条校验。纯函数式，可整链离线单测。 | 不写库、不发事件、不做队列；不重试、不改状态。 |
-| [bili_bin.py](../backend/app/bili_bin.py#L271) | L3 领域 | 投稿工具边界：`biliup` 探测（含 WinGet 0 字节空壳识别与修复）、命令组装、子进程执行、进度解析、ffmpeg 抽封面。 | 不写库、不发 B站 请求、不生成元数据。 |
-| [bili_api.py](../backend/app/bili_api.py#L124) | L3 领域 | B站 会员态客户端：稿件对账、稿件详情（cid/封面）、创建合集、归集稿件、列出合集、发并置顶评论。全部经可注入 `transport`。 | 不调 `biliup`、不读库、不决定「该不该归集」。 |
-| [bili_auth.py](../backend/app/bili_auth.py#L75) | L3 领域 | 扫码登录（生成二维码 / 轮询状态）、**TV 端三步换投稿令牌**、登录文件读写（四形态兼容）、**凭据摘要（只回传名字与计数，无值、无前缀）**、是否被 git 跟踪。 | 不发 B站 业务请求、不写库。 |
-| [bili_meta.py](../backend/app/bili_meta.py#L202) | L3 领域 | 投稿元数据：模板占位符渲染（显式替换，不用 `str.format`）、标签派生与收敛、分区小词表、平台硬限校验。 | 超限只报错不截断；不计长度之外的事，不读库、不发请求。 |
-| [bili_policy.py](../backend/app/bili_policy.py#L38) | L3 领域 | B站 上传的**文案与分类常量**：平台状态码→人话、记录状态→人话、错误输出→（结论 + 下一步）、徽标档位与配色。 | 不做判定（判定在 `bili_upload` / `bili_manager` / `bili_read_model`）。 |
-| [system_open.py](../backend/app/system_open.py#L28) | L3 领域 | 选择可解码播放器、打开目录、**把文件交给系统打开（默认关联）或弹自带的「打开方式」对话框**、窗口置前。 | 不校验文件是否存在（调用方先解析路径）；**不维护编辑器清单**（对话框的候选读系统注册表），也不存「程序偏好」。 |
-| [db.py](../backend/app/db.py#L27) | L4 基础设施 | engine 创建、SQLite pragma、补列、WAL checkpoint、session 依赖。 | 不知道业务表语义。 |
-| [logging_setup.py](../backend/app/logging_setup.py#L48) | L4 基础设施 | 配置 root/uvicorn logger，落盘 `data/logs/app.log` 并轮转。 | 不决定打什么日志，不解析业务语义。 |
-| [bili_http.py](../backend/app/bili_http.py#L66) | L4 基础设施 | B站 请求的 HTTP 接缝：标准库 `urllib` 实现、**强制直连（清空 ProxyHandler）**、4xx/5xx 也带回正文与 `Set-Cookie`。 | 不知道任何端点的语义（端点与参数在 `bili_api` / `bili_auth`）。 |
-| [paths.py](../backend/app/paths.py#L7) / [log_safety.py](../backend/app/log_safety.py#L20) | L5 纯工具 | 文件名安全化、日志敏感信息清洗。 | 无项目内依赖，可单独测试。 |
+| [config.py](../backend/app/contracts/config.py#L19) | L1 契约 | 声明全部设置字段、默认值与约束、目录准备。 | 不读数据库（`Setting` 覆盖在 `api_support.py` 里做）。 |
+| [schemas.py](../backend/app/contracts/schemas.py#L14) | L1 契约 | 定义 HTTP 线上模型与枚举。 | 不引用 yt-dlp 类型，不含业务逻辑。 |
+| [models.py](../backend/app/contracts/models.py#L27) | L1 契约 | 定义持久化表结构与 `JobStatus`。 | 不做读写编排。 |
+| [job_manager.py](../backend/app/download/job_manager.py#L43) | L2 编排 | 队列、worker、并发、暂停/重启/删除、进度 hook、错误分类、终态收敛、事件发布、**启动时的孤儿条目恢复**。 | 不直接调用 yt-dlp（经 `YtDlpService`），不解析 yt-dlp 内部结构（经 formats 工具），**不做降级判定**（判定在 `resolution_decisions`），**不做孤儿条目的状态判定**（在 `orphan_recovery`）。 |
+| [orphan_recovery.py](../backend/app/download/orphan_recovery.py#L48) | L2 编排 | 启动时把上次进程退出留下的 `queued`/`running` 条目收敛成重启后成立的状态（恢复 / 失败 / 取消 / 暂停），返回「要重新排队哪些」；按任务创建时间与条目序号排序。 | **不决定任务终态**（回到 `job_manager._maybe_finish_job`），不启动 worker、不入队、不发事件。 |
+| [job_read_model.py](../backend/app/download/job_read_model.py#L12) | L2 编排 | 把表投影成 API 读模型：聚合分辨率/格式、`elapsed_seconds`、降级消息。 | 不写库、不改状态。 |
+| [events.py](../backend/app/infra/events.py#L7) | L2 编排 | 进程内 SSE 扇出（每个订阅者一个队列）。 | 不持久化事件（持久化在 `job_manager`）。 |
+| [bili_manager.py](../backend/app/bilibili/bili_manager.py#L328) | L2 编排 | B站 上传的队列与编排：单 worker 串行、投稿间隔（抗账号级频控）、状态写库与收敛、重启后把中断记录折成可重试失败、环境体检、事件发布。 | 不直接调 `biliup`（经 `bili_upload`），不解析 B站 内部结构（经 `bili_api`），不算界面徽标（经 `bili_read_model`）。 |
+| [bili_read_model.py](../backend/app/bilibili/bili_read_model.py#L60) | L2 编排 | 把 `bili_upload` / `bili_season` 投影成 API 读模型；**「多条记录 → 一档徽标」的聚合规则**只在这里定义。 | 不写库、不改状态；`elapsed_seconds` 复用 `job_read_model`（见下方「同层横向依赖」）。 |
+| [ytdlp_service.py](../backend/app/download/ytdlp_service.py#L88) | L3 领域 | yt-dlp 边界：元数据、预检测、参数构建、profile 重试链、错误分类、依赖诊断。 | 不碰数据库，不决定任务状态。 |
+| [subtitle_plan.py](../backend/app/download/subtitle_plan.py#L200) | L3 领域 | 字幕下载**计划**：主语言判定（`-orig` 原声轨）、同族轨偏好、人工→ASR→跳过的收敛、来源标签与摘要文案。**纯逻辑**：不联网、不读库、不 import yt-dlp。 | 不写库、不发请求；不知道 `JobItem` 的存在（结论由 `job_manager` 取走）。 |
+| [bili_subtitle.py](../backend/app/bilibili/bili_subtitle.py#L277) | L3 领域 | B站 CC 字幕：SRT/VTT → BCC 转换、语言标识映射、一次字幕上传（`posted` / `skipped` / `failed`）。 | **不参与稿件状态判定**、不写库、不重试；不知道端点长什么样（端点在 `bili_api`）。 |
+| [ytdlp_formats.py](../backend/app/download/ytdlp_formats.py#L9) | L3 领域 | 格式选择器、分辨率/大小/codec 提取、降级候选计算。 | 不导入 yt-dlp。 |
+| [stall_guard.py](../backend/app/download/stall_guard.py#L32) | L3 领域 | 纯函数式停滞判定与 `DownloadStalled`。 | 不写库、不发布事件。 |
+| [fallback_policy.py](../backend/app/download/fallback_policy.py#L10) | L3 领域 | 降级原因常量与用户可读文案、重启建议。 | 不做降级决策（决策在 `resolution_decisions`）。 |
+| [resolution_decisions.py](../backend/app/download/resolution_decisions.py#L71) | L3 领域 | 降级**决策**：值不值得找降级候选、降到哪、为什么、降不了时报哪句话。纯函数，可单测。 | 不发请求、不读库、不改 `JobItem`；可用清晰度由 `job_manager` 取好传进来。 |
+| [download_progress.py](../backend/app/download/download_progress.py#L21) | L3 领域 | 多子流进度聚合与分母策略。 | 不知道数据库和 SSE 的存在。 |
+| [progress_persist.py](../backend/app/download/progress_persist.py#L5) | L3 领域 | 决定某个进度快照是否值得落库。 | 不执行写库。 |
+| [transfer_stats.py](../backend/app/download/transfer_stats.py#L5) | L3 领域 | 由字节增量累加平均速度。 | 不处理瞬时速度（瞬时速度直接取 payload）。 |
+| [browser_cookies.py](../backend/app/host/browser_cookies.py#L55) | L3 领域 | 浏览器 cookies 提取、域名过滤、锁库与 CDP fallback。 | 不决定何时刷新（决策在 `job_manager`/`main`）。 |
+| [cookie_health.py](../backend/app/host/cookie_health.py#L234) | L3 领域 | cookies **体检**：格式/域名/鉴权项/过期 + 一次 `LOGGED_IN` 探针合成结论。 | 不修改 cookies 文件，不决定解析用哪份（决策在 `main`）。 |
+| [proxy.py](../backend/app/host/proxy.py#L169) | L3 领域 | 代理**解析**：显式 > 系统 > 环境，归一化与凭据脱敏。 | 不验证通不通（那是 `connectivity`），不发请求。 |
+| [connectivity.py](../backend/app/host/connectivity.py#L73) | L3 领域 | 代理**验证**：一次朴素 HTTPS 探针，返回状态码/耗时/原始异常。 | 不解析代理来源，不复用 yt-dlp（避免混淆病因）。 |
+| [error_advice.py](../backend/app/download/error_advice.py#L116) | L3 领域 | 异常链 → 可执行诊断（JS challenge / cookies / 代理 / 媒体流四类）。 | 纯字符串判定，不联网、不读库、不改变重试行为。 |
+| [runtime_env.py](../backend/app/host/runtime_env.py#L58) | L5 纯工具 | 摘除会打坏 JS 运行时的宿主环境变量，并返回可留痕的记录。 | 只动本进程 `os.environ`，不改系统设置。 |
+| [dev_server.py](../backend/app/host/dev_server.py#L44) | L5 纯工具 | 端口可用性探测、向后找可用端口、`netstat` / `tasklist` 输出的解析。 | 不启动服务、不改配置；拿不到占用者信息时返回 `None` 而不是猜一个名字。 |
+| [output_paths.py](../backend/app/download/output_paths.py#L13) | L3 领域 | 输出文件、中间文件与 sidecar 的候选路径解析与发现。 | 不删除文件（删除由 `job_manager` 在受限根目录内执行）。 |
+| [safe_delete.py](../backend/app/download/safe_delete.py#L22) | L3 领域 | 删除产物的**路径安全判定**：允许范围（`DeleteScope`）、某路径是否可删、任务目录是否可收走。纯函数，可单测。 | 不删任何东西（`unlink` / `rmdir` 由 `job_manager` 执行），不枚举候选（枚举在 `output_paths`）。 |
+| [bili_upload.py](../backend/app/bilibili/bili_upload.py#L299) | L3 领域 | **单次上传的领域逻辑**：编排 `bili_bin` + `bili_api` + `bili_meta`，产出「已发布/审核中/待核对/失败」的结论与下一步。含模板批量渲染与逐条校验。纯函数式，可整链离线单测。 | 不写库、不发事件、不做队列；不重试、不改状态。 |
+| [bili_bin.py](../backend/app/bilibili/bili_bin.py#L271) | L3 领域 | 投稿工具边界：`biliup` 探测（含 WinGet 0 字节空壳识别与修复）、命令组装、子进程执行、进度解析、ffmpeg 抽封面。 | 不写库、不发 B站 请求、不生成元数据。 |
+| [bili_api.py](../backend/app/bilibili/bili_api.py#L124) | L3 领域 | B站 会员态客户端：稿件对账、稿件详情（cid/封面）、创建合集、归集稿件、列出合集、发并置顶评论。全部经可注入 `transport`。 | 不调 `biliup`、不读库、不决定「该不该归集」。 |
+| [bili_auth.py](../backend/app/bilibili/bili_auth.py#L75) | L3 领域 | 扫码登录（生成二维码 / 轮询状态）、**TV 端三步换投稿令牌**、登录文件读写（四形态兼容）、**凭据摘要（只回传名字与计数，无值、无前缀）**、是否被 git 跟踪。 | 不发 B站 业务请求、不写库。 |
+| [bili_meta.py](../backend/app/bilibili/bili_meta.py#L202) | L3 领域 | 投稿元数据：模板占位符渲染（显式替换，不用 `str.format`）、标签派生与收敛、分区小词表、平台硬限校验。 | 超限只报错不截断；不计长度之外的事，不读库、不发请求。 |
+| [bili_policy.py](../backend/app/bilibili/bili_policy.py#L38) | L3 领域 | B站 上传的**文案与分类常量**：平台状态码→人话、记录状态→人话、错误输出→（结论 + 下一步）、徽标档位与配色。 | 不做判定（判定在 `bili_upload` / `bili_manager` / `bili_read_model`）。 |
+| [system_open.py](../backend/app/host/system_open.py#L28) | L3 领域 | 选择可解码播放器、打开目录、**把文件交给系统打开（默认关联）或弹自带的「打开方式」对话框**、窗口置前。 | 不校验文件是否存在（调用方先解析路径）；**不维护编辑器清单**（对话框的候选读系统注册表），也不存「程序偏好」。 |
+| [db.py](../backend/app/infra/db.py#L27) | L4 基础设施 | engine 创建、SQLite pragma、补列、WAL checkpoint、session 依赖。 | 不知道业务表语义。 |
+| [logging_setup.py](../backend/app/infra/logging_setup.py#L48) | L4 基础设施 | 配置 root/uvicorn logger，落盘 `data/logs/app.log` 并轮转。 | 不决定打什么日志，不解析业务语义。 |
+| [bili_http.py](../backend/app/bilibili/bili_http.py#L66) | L4 基础设施 | B站 请求的 HTTP 接缝：标准库 `urllib` 实现、**强制直连（清空 ProxyHandler）**、4xx/5xx 也带回正文与 `Set-Cookie`。 | 不知道任何端点的语义（端点与参数在 `bili_api` / `bili_auth`）。 |
+| [paths.py](../backend/app/common/paths.py#L7) / [log_safety.py](../backend/app/common/log_safety.py#L20) | L5 纯工具 | 文件名安全化、日志敏感信息清洗。 | 无项目内依赖，可单独测试。 |
 
 ## 前端组件边界
 
@@ -123,8 +149,8 @@ PlantUML 源文件：[module-dependencies.puml](diagrams/module-dependencies.pum
 2. **L3 不得反向依赖 L2 或 L0**。典型反例：让 `ytdlp_service` 去更新 `JobItem` 状态。正确做法是把结果返回给 `job_manager`，由编排层决定状态。
 3. **L1 保持纯净**：`schemas.py` 不导入 yt-dlp，`config.py` 不导入数据库层。这样 API 契约可以脱离运行时被单独审阅、测试和生成文档。
 4. 新能力优先落到 L3 的单一模块（例如"判断是否需要合并音视频"属于 `ytdlp_formats.requires_ffmpeg`），只有需要"在多个模块之间做决定"时才上移到 L2。
-5. 同一层内部的横向依赖要显式说明理由。当前存在的横向依赖：`job_manager` → `ytdlp_formats`（复用降级计算）、`job_read_model` → `output_paths`（复用路径发现）、`bili_read_model` → `job_read_model`（复用 `elapsed_seconds`）、`bili_upload` → `bili_bin` / `bili_api` / `bili_auth` / `bili_meta` / `bili_policy`（单次上传的编排，全部是复用而非成环），都是复用纯函数，不构成循环。L0 内部另有一组单向横向依赖：`routers/*` → `api_support` / `job_artifacts` / `api_context`，方向固定（路由是叶子，支撑模块不反向导入任何路由），因此不会成环。
-6. **组合根只做装配**：`create_app` 里出现业务分支即为越界 —— 判断「这段代码该放哪」的判据是"它需不需要一个 `Request`"，需要就进 `routers/`，只是一段被多个路由复用的逻辑就进 `api_support.py` / `job_artifacts.py`。
+5. 同一层内部的横向依赖要显式说明理由。当前存在的横向依赖：`job_manager` → `ytdlp_formats`（复用降级计算）、`job_read_model` → `output_paths`（复用路径发现）、`bili_read_model` → `job_read_model`（复用 `elapsed_seconds`）、`bili_upload` → `bili_bin` / `bili_api` / `bili_auth` / `bili_meta` / `bili_policy`（单次上传的编排，全部是复用而非成环），都是复用纯函数，不构成循环。L0 内部另有一组单向横向依赖：`api/routers/*` → `api_support` / `job_artifacts` / `api_context`，方向固定（路由是叶子，支撑模块不反向导入任何路由），因此不会成环。跨功能包只有一条：`bilibili` → `download`（复用产物路径 `output_paths`、字幕计划 `subtitle_plan`、`ytdlp_service` 与 `job_read_model.elapsed_seconds`），方向朝同层或下层，不构成循环。
+6. **组合根只做装配**：`create_app` 里出现业务分支即为越界 —— 判断「这段代码该放哪」的判据是"它需不需要一个 `Request`"，需要就进 `api/routers/`，只是一段被多个路由复用的逻辑就进 `api/api_support.py` / `download/job_artifacts.py`。
 
 ## 运行时并发模型
 
@@ -140,7 +166,7 @@ PlantUML 源文件：[runtime-concurrency.puml](diagrams/runtime-concurrency.pum
 由此推出三条必须遵守的约定：
 
 1. **进度 hook 在工作线程上执行**，所以它使用自己的 `Session` 写库，不能复用请求级 session。
-2. **从线程发布事件要跨回事件循环**：[_publish_threadsafe](../backend/app/job_manager.py#L1228) 先写 `JobEvent` 行，再 `loop.call_soon_threadsafe` 调度 `broker.publish`。异步路径直接用 [_publish](../backend/app/job_manager.py#L1215)。
+2. **从线程发布事件要跨回事件循环**：[_publish_threadsafe](../backend/app/download/job_manager.py#L1228) 先写 `JobEvent` 行，再 `loop.call_soon_threadsafe` 调度 `broker.publish`。异步路径直接用 [_publish](../backend/app/download/job_manager.py#L1215)。
 3. **锁只保护状态转换，不保护下载**：`_item_claim_lock` 只覆盖"刷新 → 校验 queued → 置 running → commit"；`_cookie_import_lock` 只在 403 后的 cookies 刷新导入期间持有。下载本身靠 `should_cancel` 回调协作取消，而不是靠锁。
 4. **单个条目的收尾出错不能带走 worker**：worker 循环对每条 item 的整段工作加了兜底 —— 崩溃的条目被标记为 `failed`（而不是永远停在 `running`），worker 继续消费队列。没有这层兜底，一个条目的记账错误就会静默地少掉一个并发口。见 [008](../ai/bug-fix/008-return-in-finally-swallows-the-real-error.md)。
 5. **队列不跨进程存活，所以启动时必须先对账**：`asyncio.Queue` 随进程消失，而库里还留着 `queued`/`running`。启动序列是「先改库、再 `start()`」——反过来 worker 会与被扫描的行并发读写。见 [015](../ai/bug-fix/015-orphan-items-never-resume.md)。
@@ -155,11 +181,11 @@ PlantUML 源文件：[download-data-flow.puml](diagrams/download-data-flow.puml)
 
 ### 解析链接
 
-`POST /api/analyze` → `YtDlpService.extract_metadata()`（`extract_flat="in_playlist"`，带 cookies）→ `AnalyzeResponse`。若 yt-dlp 抛出的错误同时命中 cookies 提示词，则自动导入浏览器 cookies 后**重试一次**，见 [extract_metadata_with_cookies](../backend/app/api_support.py#L95)。
+`POST /api/analyze` → `YtDlpService.extract_metadata()`（`extract_flat="in_playlist"`，带 cookies）→ `AnalyzeResponse`。若 yt-dlp 抛出的错误同时命中 cookies 提示词，则自动导入浏览器 cookies 后**重试一次**，见 [extract_metadata_with_cookies](../backend/app/api/api_support.py#L95)。
 
 ### 建任务与入队
 
-`POST /api/jobs` → 解析 → 选条目（单视频合成 1 条 `VideoEntry`）→ 写 `Job` + N 个 `JobItem` → `enqueue()` 把 queued item id 放进队列。playlist 任务会额外在下载根目录下按安全化标题创建子目录，见 [job_download_dir](../backend/app/api_support.py#L87)。
+`POST /api/jobs` → 解析 → 选条目（单视频合成 1 条 `VideoEntry`）→ 写 `Job` + N 个 `JobItem` → `enqueue()` 把 queued item id 放进队列。playlist 任务会额外在下载根目录下按安全化标题创建子目录，见 [job_download_dir](../backend/app/api/api_support.py#L87)。
 
 ### 下载与进度
 
@@ -192,7 +218,7 @@ yt-dlp 自己按「人工先占、自动只补缺」的顺序挑 → 下载成�
 
 ### 删除与文件清理
 
-删除统一走 `JobManager`：先删数据库记录与关联 `JobEvent`，再按需删除文件。文件删除只在"下载根目录"或"该任务下载目录"之内执行，并对 `output_path`、合并后的最终文件与 sidecar 分别枚举候选，见 [_delete_output_files](../backend/app/job_manager.py#L399)。删除 playlist 的最后一个子项时父任务一并删除。
+删除统一走 `JobManager`：先删数据库记录与关联 `JobEvent`，再按需删除文件。文件删除只在"下载根目录"或"该任务下载目录"之内执行，并对 `output_path`、合并后的最终文件与 sidecar 分别枚举候选，见 [_delete_output_files](../backend/app/download/job_manager.py#L399)。删除 playlist 的最后一个子项时父任务一并删除。
 
 ### 播放与打开本地文件
 
@@ -217,7 +243,7 @@ yt-dlp 自己按「人工先占、自动只补缺」的顺序挑 → 下载成�
 
 单视频：`GET /api/bilibili/prefill` 预填表单 → `POST /api/bilibili/uploads` 落一行 `queued` 的 `BiliUpload` 并入队 → worker 依次做「抽帧封面（可选）→ `biliup` 投稿 → 回读稿件列表对账 → 发并置顶评论（可选）」→ 状态收敛为 `published` / `reviewing` / `unverified` / `rejected` / `failed` → SSE 通知，前端按 `GET /api/bilibili/uploads` 或 `/summary` 重拉读模型。
 
-**预填优先复用上一次投稿**（[build_prefill](../backend/app/bili_manager.py#L227)，FR-45）：这个任务/条目投过，就把那一行的入参原样填回表单；没有才按视频标题现算默认值。三条边界：
+**预填优先复用上一次投稿**（[build_prefill](../backend/app/bilibili/bili_manager.py#L227)，FR-45）：这个任务/条目投过，就把那一行的入参原样填回表单；没有才按视频标题现算默认值。三条边界：
 
 - **量的必须是「上一次真的提交出去的那一份」**，不是当前表单的残留 —— 投稿是异步的，表单关掉就没了，所以唯一可靠的来源是 `bili_upload` / `bili_season.template_json`。
 - **合集要存模板原文**：那些行存的是渲染后的结果，反推模板只能猜（见[持久化设计](#持久化设计)）。
@@ -228,11 +254,11 @@ yt-dlp 自己按「人工先占、自动只补缺」的顺序挑 → 下载成�
 两条与平台语义直接相关的约束：
 
 - **命令返回码 0 不等于已发布**。`biliup` 退出后必须用账号的稿件列表回读对账（按标题前缀匹配，两侧都做空白归一），对不上就是 `unverified`（「待核对」，不是失败）——两者措辞必须分开，否则用户会去重投一条**已经投上去**的稿件。
-- **重试动作由终态决定，而不是由按钮决定**：`failed` / `rejected` → 重新投稿（复用同一行，`attempt` 自增）；`unverified` → **只**重读平台列表，绝不重投；已发布或在途 → **什么都不做，除非字幕失败**（那时走「只重传字幕」）。判定只在 [BiliManager](../backend/app/bili_manager.py#L423) 里做，界面只负责把这个结论显示出来。
+- **重试动作由终态决定，而不是由按钮决定**：`failed` / `rejected` → 重新投稿（复用同一行，`attempt` 自增）；`unverified` → **只**重读平台列表，绝不重投；已发布或在途 → **什么都不做，除非字幕失败**（那时走「只重传字幕」）。判定只在 [BiliManager](../backend/app/bilibili/bili_manager.py#L423) 里做，界面只负责把这个结论显示出来。
 
 #### 挂在投稿末尾的 CC 字幕
 
-`run_single` 的最后一步是 [_attach_subtitle](../backend/app/bili_upload.py#L415)：稿件已在平台上、
+`run_single` 的最后一步是 [_attach_subtitle](../backend/app/bilibili/bili_upload.py#L415)：稿件已在平台上、
 且拿到 `aid` + `cid` + `bvid` 之后，把下载阶段落下的字幕文件转成 BCC，提交到
 `POST /x/v2/dm/subtitle/draft/save`（`oid` = **cid**，不是 aid）。它是**字幕轨**而不是烧进画面的硬字幕，
 观众可以在播放器里关掉。
@@ -258,8 +284,8 @@ yt-dlp 自己按「人工先占、自动只补缺」的顺序挑 → 下载成�
 `Job` 与 `JobItem` 共用 `JobStatus` 六态，但驱动者不同：
 
 - `JobItem` 由 worker 驱动：认领时置 `running`，结束按结果置 `succeeded` / `failed` / `cancelled` / `paused`。
-- `Job` 由 [_maybe_finish_job](../backend/app/job_manager.py#L541) 收敛：只要还有 running 或 queued 子项就保持 `running`；全部结束才由 [_finish_job](../backend/app/job_manager.py#L822) 判定终态（有失败项 → `failed`；被暂停 → `paused`；被取消 → `cancelled`；否则 `succeeded`）。
-- 任务级进度是子项进度的算术平均，见 [_refresh_job_counts](../backend/app/job_manager.py#L870)。
+- `Job` 由 [_maybe_finish_job](../backend/app/download/job_manager.py#L541) 收敛：只要还有 running 或 queued 子项就保持 `running`；全部结束才由 [_finish_job](../backend/app/download/job_manager.py#L822) 判定终态（有失败项 → `failed`；被暂停 → `paused`；被取消 → `cancelled`；否则 `succeeded`）。
+- 任务级进度是子项进度的算术平均，见 [_refresh_job_counts](../backend/app/download/job_manager.py#L870)。
 
 并发一致性依赖三点：单条 `JobItem` 只会被一个 worker 认领（`_item_claim_lock` + 状态校验）；worker 线程各自持有 session 并独立 commit；读模型只读不写，避免与写入路径争抢状态。
 
@@ -268,35 +294,35 @@ B站 上传有**自己的两套状态**，与 `JobStatus` 无关：
 - `BiliUpload.status`（8 态）：`queued` → `uploading` → 三选一分支 —— `submitted`（命令成功、还没对账）→ `published` / `reviewing` / `rejected`（平台稿件状态码折合）；命令失败或对账查不到则落到 `unverified`（待核对）或 `failed`。`unverified` **不是失败**：它表达「我们还不知道」，所以它的重试只重读平台，不重投。
 - `BiliSeason.status`（4 态）：`pending` → `grouping` → `grouped` / `failed`。`grouped` 的文案是「已提交归集（B站 需人工审核）」——平台侧还有一个看不见的人工审核环节，界面不能承诺「合集已上线」。
 
-界面上的那**一档徽标**（`none` / `uploading` / `uploaded` / `unverified` / `partial` / `failed`）不落库，由 [derive_badge](../backend/app/bili_read_model.py#L60) 从「这个任务的全部记录 + 合集记录」现场算出来 —— 多条记录的聚合规则只有这一处，前端不参与。重启后的一致性靠 [resume_interrupted](../backend/app/bili_manager.py#L465)：进程退出时停在 `uploading` 的记录（含 `queued`）一律折成**可重试的失败**，而不是永远停在「上传中」。
+界面上的那**一档徽标**（`none` / `uploading` / `uploaded` / `unverified` / `partial` / `failed`）不落库，由 [derive_badge](../backend/app/bilibili/bili_read_model.py#L60) 从「这个任务的全部记录 + 合集记录」现场算出来 —— 多条记录的聚合规则只有这一处，前端不参与。重启后的一致性靠 [resume_interrupted](../backend/app/bilibili/bili_manager.py#L465)：进程退出时停在 `uploading` 的记录（含 `queued`）一律折成**可重试的失败**，而不是永远停在「上传中」。
 
 ## 持久化设计
 
 | 决策 | 内容 | 理由 |
 | --- | --- | --- |
-| WAL + `busy_timeout=5000` + `synchronous=NORMAL` | 每个连接建立时下发 pragma，见 [_configure_sqlite_connection](../backend/app/db.py#L14)。 | 多 worker 并发写入时"等待"而不是直接 `database is locked`；被其他进程锁住时只跳过 pragma，不让应用起不来。 |
-| 追加式补列 | [_ensure_columns](../backend/app/db.py#L43) 用 `PRAGMA table_info` + `ALTER TABLE ADD COLUMN`。 | 兼容旧库，无需迁移框架。**只支持追加**，不支持删除/改名/改类型。 |
-| WAL checkpoint | lifespan 启动与停止各执行一次 `wal_checkpoint(TRUNCATE)`，见 [checkpoint_wal](../backend/app/db.py#L109)。 | 避免进程被强杀后 `-wal` 侧车无界增长，也避免每次读都回放 WAL。失败只记日志。 |
+| WAL + `busy_timeout=5000` + `synchronous=NORMAL` | 每个连接建立时下发 pragma，见 [_configure_sqlite_connection](../backend/app/infra/db.py#L14)。 | 多 worker 并发写入时"等待"而不是直接 `database is locked`；被其他进程锁住时只跳过 pragma，不让应用起不来。 |
+| 追加式补列 | [_ensure_columns](../backend/app/infra/db.py#L43) 用 `PRAGMA table_info` + `ALTER TABLE ADD COLUMN`。 | 兼容旧库，无需迁移框架。**只支持追加**，不支持删除/改名/改类型。 |
+| WAL checkpoint | lifespan 启动与停止各执行一次 `wal_checkpoint(TRUNCATE)`，见 [checkpoint_wal](../backend/app/infra/db.py#L109)。 | 避免进程被强杀后 `-wal` 侧车无界增长，也避免每次读都回放 WAL。失败只记日志。 |
 | 进度写入节流 | `ProgressPersistGate`：首次、终态、间隔 ≥250ms 或进度跳变 ≥0.5% 才写。 | 5 路并行时避免把每个 chunk 回调都变成一次事务。 |
 | 进度聚合 | `DownloadProgressAggregator` 按子流分别累计已下载字节，分母取"各子流已知总和的较大者"并以下限钳制。 | 字幕/chunk/分离音视频都会各自回调；不能让小文件或当前 chunk 的 100% 冒充整体完成，也不能把已下载字节归零。 |
 | B站 上传两张表 | `bili_upload`（一条稿件一行）与 `bili_season`（一个任务的合集一行）。前者存投稿入参（标题/简介/标签/分区/视频路径/是否做封面/评论）+ 结果（`bvid`/`aid`/`cid`/`verified_state`/`progress`/`attempt`/`log_tail`），后者存 `season_id` 与归集状态。 | **入参也落库**：投稿是异步的，worker 必须能在用户关掉页面之后照着重投；只存结果会让重试变成「拿当前表单再猜一次」。`attempt` 让重投复用同一行，界面不出现重复条目。 |
-| 合集模板另存一列 | `bili_season.template_json` 存**模板原文**（[template_to_json](../backend/app/bili_meta.py#L407)），老行补列时是空串。 | `bili_upload` 每行存的是**渲染后**的元数据；重投时想从那些行反推模板只能猜哪些字是占位符，猜错的后果是「重投一次，每条标题都变了」。存原文是最便宜也最准的做法。单视频投稿走同一个归集记录时**不清空**这一列（见 `_upsert_season`）。 |
-| 跨接口的时间一律带时区 | 所有对外的 `started_at` / `finished_at` / `created_at` 都是 **UTC 且以 `Z` 结尾**（[UtcDateTime](../backend/app/schemas.py#L31)）。SQLite 不存时区，读回来是 naive 的墙上时间；原样发出时前端 `Date.parse` 按**本地**时间解析（ECMAScript 规定），本机 UTC+8 上每个时长凭空多 8 小时（实测 52 秒显示成「已提交 8:00:52」，见 [020](../ai/bug-fix/020-the-progress-clock-is-eight-hours-off.md)）。前端解析收敛到 [parseServerTime](../frontend/src/formatting.ts#L48)，界面显示时刻时按本地时区渲染。 | `docs/openapi.yaml` 里这些字段本来就写着 `format: date-time`（RFC 3339 要求偏移量）—— 实现一直在违反自己的契约，而契约闸门只比字段名不看格式。 |
+| 合集模板另存一列 | `bili_season.template_json` 存**模板原文**（[template_to_json](../backend/app/bilibili/bili_meta.py#L407)），老行补列时是空串。 | `bili_upload` 每行存的是**渲染后**的元数据；重投时想从那些行反推模板只能猜哪些字是占位符，猜错的后果是「重投一次，每条标题都变了」。存原文是最便宜也最准的做法。单视频投稿走同一个归集记录时**不清空**这一列（见 `_upsert_season`）。 |
+| 跨接口的时间一律带时区 | 所有对外的 `started_at` / `finished_at` / `created_at` 都是 **UTC 且以 `Z` 结尾**（[UtcDateTime](../backend/app/contracts/schemas.py#L31)）。SQLite 不存时区，读回来是 naive 的墙上时间；原样发出时前端 `Date.parse` 按**本地**时间解析（ECMAScript 规定），本机 UTC+8 上每个时长凭空多 8 小时（实测 52 秒显示成「已提交 8:00:52」，见 [020](../ai/bug-fix/020-the-progress-clock-is-eight-hours-off.md)）。前端解析收敛到 [parseServerTime](../frontend/src/formatting.ts#L48)，界面显示时刻时按本地时区渲染。 | `docs/openapi.yaml` 里这些字段本来就写着 `format: date-time`（RFC 3339 要求偏移量）—— 实现一直在违反自己的契约，而契约闸门只比字段名不看格式。 |
 | B站 凭据不入库 | 登录态只以文件形式放 `data/bilibili/cookies.json`（gitignored），API 只回传名字与计数。 | 凭据落库会被 `GET` 读模型、备份与 SQL 转储带出去；文件形态还能直接被 `biliup` 复用，不必在两层之间搬运凭据。 |
 | 字幕结论分两处记 | 下载侧在 `JobItem`（`subtitle_language` 族名 / `subtitle_source` / `subtitle_path`），上传侧在 `BiliUpload`（`subtitle_state` / `subtitle_lan` / `subtitle_message`）。**上传侧不复制字幕路径**，只存这一次的结论。 | 下载与上传是两条链路；路径复制一份会让「记录里有路径」与「磁盘上有文件」脱钩。`subtitle_state` 独立于 `status`，是为了让「字幕失败」不翻掉「稿件已发布」。历史行的补列默认 `skipped`（改动前从不传字幕，写 `failed` 等于给旧记录凭空编一个失败）。 |
 
 ## 错误分类与可观测性
 
-错误分类集中在 `YtDlpService` 的静态判定函数上，降级判定集中在 [resolution_decisions.py](../backend/app/resolution_decisions.py#L87)，`job_manager` 只消费这两者的结果、负责 IO 与状态写入：
+错误分类集中在 `YtDlpService` 的静态判定函数上，降级判定集中在 [resolution_decisions.py](../backend/app/download/resolution_decisions.py#L87)，`job_manager` 只消费这两者的结果、负责 IO 与状态写入：
 
 | 分类 | 判定依据 | 处理 |
 | --- | --- | --- |
-| cookies 缺失/需登录 | 错误链中出现 cookies 提示词 + 登录/bot 关键词，见 [is_cookie_required_error](../backend/app/ytdlp_service.py#L830)。 | 刷新浏览器 cookies 后重试一次；仍失败则给出两条可操作建议。 |
-| 媒体流阻断 | 403/`forbidden` 或连接重置族关键词，见 [is_media_stream_blocked_error](../backend/app/ytdlp_service.py#L732)。 | 在同清晰度下换 profile 重试；终态文案前置 cookies 状态，并给出降清晰度重启建议。 |
-| 目标格式不可用（**预检阶段**） | 错误文本含 `requested format is not available`，由 [prepare_download](../backend/app/ytdlp_service.py#L395) 抛出。 | 归一成 `is_selectable=False`，按原因分类后**真的**用降级清晰度重新预检并下载。 |
+| cookies 缺失/需登录 | 错误链中出现 cookies 提示词 + 登录/bot 关键词，见 [is_cookie_required_error](../backend/app/download/ytdlp_service.py#L830)。 | 刷新浏览器 cookies 后重试一次；仍失败则给出两条可操作建议。 |
+| 媒体流阻断 | 403/`forbidden` 或连接重置族关键词，见 [is_media_stream_blocked_error](../backend/app/download/ytdlp_service.py#L732)。 | 在同清晰度下换 profile 重试；终态文案前置 cookies 状态，并给出降清晰度重启建议。 |
+| 目标格式不可用（**预检阶段**） | 错误文本含 `requested format is not available`，由 [prepare_download](../backend/app/download/ytdlp_service.py#L395) 抛出。 | 归一成 `is_selectable=False`，按原因分类后**真的**用降级清晰度重新预检并下载。 |
 | 目标格式不可用（**下载阶段**） | 同上，但出现在预检通过之后（两次请求之间格式列表变了）。 | 标注 `requested_resolution_unselectable` 并把错误替换成降级说明；按 [架构文档](architecture.md) 的约定，**不**自动重下。 |
 | 停滞 | 看门狗判定字节峰值超时未刷新。 | 直接失败，不换 profile、不重试。 |
-| 其他 | 兜底。 | 透传清洗后的错误文本，见 [readable_error_message](../backend/app/ytdlp_service.py#L806)。 |
+| 其他 | 兜底。 | 透传清洗后的错误文本，见 [readable_error_message](../backend/app/download/ytdlp_service.py#L806)。 |
 
 可观测性由三处构成：任务中心读模型（进度/速度/大小/实际分辨率/格式/错误）、`/api/diagnostics`（依赖与稳定性参数，且不回显 token 原文）、以及 `JobEvent` 表（事件审计，可与 SSE 推送交叉核对）。
 
@@ -305,9 +331,9 @@ B站 上传有**自己的两套状态**，与 `JobStatus` 无关：
 | 想做的事 | 正确落点 |
 | --- | --- |
 | 新增一个下载 profile（新的 player client / impersonation 组合） | 在 `ytdlp_service.py` 加常量并扩展 `_download_profiles()`、`_youtube_extractor_args()`、`_impersonation_target()`；若属于 anti-403 链路需同步 `YOUTUBE_ANTI403_PROFILES`。 |
-| 新增一个可配置项 | `config.py` 加字段 → 需要的话在 `api_support.py` 的 `apply_stored_settings` / `settings_response` 与 `Setting` 表打通 → 补 `/api/settings` 路由（`routers/settings.py`）与诊断字段 → 更新环境变量文档。 |
+| 新增一个可配置项 | `contracts/config.py` 加字段 → 需要的话在 `api/api_support.py` 的 `apply_stored_settings` / `settings_response` 与 `Setting` 表打通 → 补 `/api/settings` 路由（`api/routers/settings.py`）与诊断字段 → 更新环境变量文档。 |
 | 新增一个降级原因 | 在 `fallback_policy.py` 加常量与文案、补一条 `restart_resolution` 规则，并在 `resolution_decisions.py` 里加上产出该常量的一条判定；不要在 `job_manager` 里内联中文字符串。`test_resolution_decisions.py` 有一条参数化用例会遍历所有 reason 常量，漏加文案会当场报错。 |
-| 新增一个 API | 在 `routers/` 下对应资源的模块里声明路由（新资源就新建一个模块并登记进 `API_ROUTERS`），模型放 `schemas.py`，跨路由复用的逻辑放 `api_support.py` / `job_artifacts.py`；涉及状态转换的一律委托 `JobManager`，不直接改表。 |
+| 新增一个 API | 在 `api/routers/` 下对应资源的模块里声明路由（新资源就新建一个模块并登记进 `API_ROUTERS`），模型放 `contracts/schemas.py`，跨路由复用的逻辑放 `api/api_support.py` / `download/job_artifacts.py`；涉及状态转换的一律委托 `JobManager`，不直接改表。 |
 | 新增一种错误分类 | 在 `YtDlpService` 加静态判定函数，在 `_log_item_failure` 加类别名，并补单测确认不会与其他分类互相误命中（尤其注意关键词冲突）。 |
 | 改字幕的选取规则（语种、主语言判据、轨偏好） | 只改 `subtitle_plan.py`（纯函数），`test_subtitle_plan` 当场能验；**不要**把判定搬进 `job_manager` —— 那里只有 IO 与时序，搬进去就测不到了。 |
 | 改字幕的上传行为（格式、端点、语言标识） | 格式与结论在 `bili_subtitle.py`，端点与参数在 `bili_api.save_subtitle`，时机在 `bili_upload._attach_subtitle`。语言标识**只能取平台白名单里的值**，改之前先看 `test_bili_subtitle` 里那张参数化表。 |
@@ -315,7 +341,7 @@ B站 上传有**自己的两套状态**，与 `JobStatus` 无关：
 ## 已知限制与设计债
 
 1. **停滞判定依赖 progress 回调**：如果 yt-dlp 完全阻塞在 socket 读且不回调，看门狗不会触发，此时只有 `socket_timeout=30` 兜底。因此不能声称"解决了所有卡死"。
-2. ~~**进程重启不恢复在途任务**：历史 `queued`/`running` item 在进程退出后不会自动重新入队或标记为取消，界面上表现为"永远排队"。~~ **已修复**（[`ai/bug-fix/015`](../ai/bug-fix/015-orphan-items-never-resume.md)，`ead7b81`）：启动时 [recover_orphaned_work](../backend/app/job_manager.py#L83) 先收敛孤儿条目再起 worker，默认重新排队并断点续传，准入分支的判据见 [实现文档](implementation.md#进程退出与恢复)。原记录（`ai/perf/PLAN.md` §8）保留作为历史上下文。
+2. ~~**进程重启不恢复在途任务**：历史 `queued`/`running` item 在进程退出后不会自动重新入队或标记为取消，界面上表现为"永远排队"。~~ **已修复**（[`ai/bug-fix/015`](../ai/bug-fix/015-orphan-items-never-resume.md)，`ead7b81`）：启动时 [recover_orphaned_work](../backend/app/download/job_manager.py#L83) 先收敛孤儿条目再起 worker，默认重新排队并断点续传，准入分支的判据见 [实现文档](implementation.md#进程退出与恢复)。原记录（`ai/perf/PLAN.md` §8）保留作为历史上下文。
 3. **无正式迁移框架**：`_ensure_columns` 只能加列。删除列、改类型或数据回填都需要手工 SQL，且没有版本记录表。
 4. **单视频无法内部并行**：yt-dlp 内建 http 下载器是单连接，`concurrent_fragment_downloads=1`，因此单视频提速只能靠 aria2c（默认关闭，且会推高 403 风险）。
 5. **profile 链是串行且昂贵的**：每个 profile 都是一次完整 extract，失败路径的耗时按 profile 数累加；`DownloadStalled` 与 `DownloadCancelled` 已跳过链路，其余错误仍会逐级重试。

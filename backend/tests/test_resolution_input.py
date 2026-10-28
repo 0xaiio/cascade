@@ -14,11 +14,11 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
-from app.config import AppSettings
-from app.db import create_app_engine, init_db
+from app.contracts.config import AppSettings
+from app.infra.db import create_app_engine, init_db
 from app.main import create_app
-from app.models import Job, JobItem
-from app.schemas import DownloadOptions
+from app.contracts.models import Job, JobItem
+from app.contracts.schemas import DownloadOptions
 
 from fakes import FakeYtDlpService
 

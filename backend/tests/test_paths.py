@@ -1,4 +1,4 @@
-from app.paths import safe_path_name
+from app.common.paths import safe_path_name
 
 
 def test_safe_path_name_preserves_readable_playlist_title() -> None:

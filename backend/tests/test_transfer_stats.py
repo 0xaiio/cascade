@@ -1,4 +1,4 @@
-from app.transfer_stats import TransferStats
+from app.download.transfer_stats import TransferStats
 
 
 def test_transfer_stats_calculates_average_speed_from_download_progress() -> None:

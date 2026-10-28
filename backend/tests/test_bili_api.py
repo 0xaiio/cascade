@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.bili_api import (
+from app.bilibili.bili_api import (
     COMMENT_DUPLICATE_CODE,
     MEMBER_ORIGIN,
     TITLE_MATCH_PREFIX,
@@ -31,7 +31,7 @@ from app.bili_api import (
     list_seasons,
     send_and_top_comment,
 )
-from app.bili_http import MEMBER_REFERER, WEB_REFERER, HttpError
+from app.bilibili.bili_http import MEMBER_REFERER, WEB_REFERER, HttpError
 from bili_fakes import JAR, FakeBiliTransport, RecordingSleeper, StubTransport, own_reply, section_id_for
 
 MARKER = "个人工作流同步上传"

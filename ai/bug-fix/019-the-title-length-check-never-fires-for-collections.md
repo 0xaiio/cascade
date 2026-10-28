@@ -25,7 +25,7 @@
 ```
 
 `isCollection` 时 `metadata.title` 是**模板**，不是要提交的那串字。而服务端提交时是**逐条渲染后**
-校验的（`backend/app/bili_upload.py:659` `validate_collection` → `render_collection` → `validate`）。
+校验的（`backend/app/bilibili/bili_upload.py:659` `validate_collection` → `render_collection` → `validate`）。
 两处量的不是同一个东西 ⇒ 前端这个「通过」是假的。
 
 判据：**服务端量什么，前端就得量什么。** `{title}` 只有 7 个字符，量模板等于什么都没查。

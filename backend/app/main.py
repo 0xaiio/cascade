@@ -21,18 +21,18 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session
 
-from .api_context import ApiContext
-from .api_support import apply_stored_settings, select_directory_with_tkinter
-from .bili_manager import BiliManager
-from .config import REPO_ROOT, AppSettings, get_settings
-from .db import checkpoint_wal, create_app_engine, init_db
-from .events import EventBroker
-from .job_manager import JobManager
-from .logging_setup import configure_logging
-from .routers import API_ROUTERS
-from .runtime_env import sanitize_environment
-from .system_open import open_path_with_chooser, open_path_with_default_app, open_video_with_best_player
-from .ytdlp_service import YtDlpService
+from .api.api_context import ApiContext
+from .api.api_support import apply_stored_settings, select_directory_with_tkinter
+from .bilibili.bili_manager import BiliManager
+from .contracts.config import REPO_ROOT, AppSettings, get_settings
+from .infra.db import checkpoint_wal, create_app_engine, init_db
+from .infra.events import EventBroker
+from .download.job_manager import JobManager
+from .infra.logging_setup import configure_logging
+from .api.routers import API_ROUTERS
+from .host.runtime_env import sanitize_environment
+from .host.system_open import open_path_with_chooser, open_path_with_default_app, open_video_with_best_player
+from .download.ytdlp_service import YtDlpService
 
 logger = logging.getLogger(__name__)
 

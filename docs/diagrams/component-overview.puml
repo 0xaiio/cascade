@@ -30,64 +30,64 @@ package "Frontend" {
 
 package "Backend / entry" {
   [main.py\ncomposition root + lifespan] as Main
-  [routers/*\nHTTP endpoints] as Routers
-  [api_context.py\nrequest dependencies] as ApiCtx
-  [api_support.py\nendpoint helpers] as ApiSupport
-  [job_artifacts.py\nartifact location] as JobArtifacts
-  [schemas.py\nrequest/response models] as Schemas
-  [config.py\nAppSettings] as Config
+  [api/routers/*\nHTTP endpoints] as Routers
+  [api/api_context.py\nrequest dependencies] as ApiCtx
+  [api/api_support.py\nendpoint helpers] as ApiSupport
+  [download/job_artifacts.py\nartifact location] as JobArtifacts
+  [contracts/schemas.py\nrequest/response models] as Schemas
+  [contracts/config.py\nAppSettings] as Config
 }
 
 package "Backend / orchestration" {
-  [job_manager.py\nqueue + workers] as Manager
-  [job_read_model.py\nAPI projection] as ReadModel
-  [events.py\nEventBroker (SSE)] as Broker
-  [bili_manager.py\nupload queue, single worker] as BiliManager
-  [bili_read_model.py\nbadge aggregation] as BiliReadModel
+  [download/job_manager.py\nqueue + workers] as Manager
+  [download/job_read_model.py\nAPI projection] as ReadModel
+  [infra/events.py\nEventBroker (SSE)] as Broker
+  [bilibili/bili_manager.py\nupload queue, single worker] as BiliManager
+  [bilibili/bili_read_model.py\nbadge aggregation] as BiliReadModel
 }
 
 package "Backend / download" {
-  [ytdlp_service.py\nyt-dlp boundary] as Service
-  [ytdlp_formats.py\nselectors] as Formats
-  [stall_guard.py\nstall watchdog] as StallGuard
-  [browser_cookies.py\ncookie import] as Cookies
-  [system_open.py\nplayer / folder opener] as SystemOpen
-  [output_paths.py\noutput discovery] as OutputPaths
+  [download/ytdlp_service.py\nyt-dlp boundary] as Service
+  [download/ytdlp_formats.py\nselectors] as Formats
+  [download/stall_guard.py\nstall watchdog] as StallGuard
+  [host/browser_cookies.py\ncookie import] as Cookies
+  [host/system_open.py\nplayer / folder opener] as SystemOpen
+  [download/output_paths.py\noutput discovery] as OutputPaths
 }
 
 package "Backend / bili upload" {
-  [bili_upload.py\nsingle upload flow] as BiliUpload
-  [bili_bin.py\nbiliup boundary] as BiliBin
-  [bili_api.py\nreconcile, season, reply] as BiliApi
-  [bili_auth.py\nqr login + cookie file] as BiliAuth
-  [bili_meta.py\nmetadata + limits] as BiliMeta
-  [bili_policy.py\nmessages + badges] as BiliPolicy
-  [bili_http.py\nHTTP seam] as BiliHttp
+  [bilibili/bili_upload.py\nsingle upload flow] as BiliUpload
+  [bilibili/bili_bin.py\nbiliup boundary] as BiliBin
+  [bilibili/bili_api.py\nreconcile, season, reply] as BiliApi
+  [bilibili/bili_auth.py\nqr login + cookie file] as BiliAuth
+  [bilibili/bili_meta.py\nmetadata + limits] as BiliMeta
+  [bilibili/bili_policy.py\nmessages + badges] as BiliPolicy
+  [bilibili/bili_http.py\nHTTP seam] as BiliHttp
 }
 
 package "Backend / progress" {
-  [download_progress.py\nstream aggregation] as Progress
-  [progress_persist.py\npersist gate] as PersistGate
-  [transfer_stats.py\naverage speed] as Stats
+  [download/download_progress.py\nstream aggregation] as Progress
+  [download/progress_persist.py\npersist gate] as PersistGate
+  [download/transfer_stats.py\naverage speed] as Stats
 }
 
 package "Backend / self-check" {
-  [proxy.py\nproxy resolution] as ProxyResolver
-  [connectivity.py\nproxy proof] as Connectivity
-  [cookie_health.py\ncookie report] as CookieHealth
-  [error_advice.py\nexception -> advice] as ErrorAdvice
-  [runtime_env.py\nhostile env scrubbing] as RuntimeEnv
+  [host/proxy.py\nproxy resolution] as ProxyResolver
+  [host/connectivity.py\nproxy proof] as Connectivity
+  [host/cookie_health.py\ncookie report] as CookieHealth
+  [download/error_advice.py\nexception -> advice] as ErrorAdvice
+  [host/runtime_env.py\nhostile env scrubbing] as RuntimeEnv
 }
 
 package "Backend / support" {
-  [models.py\nSQLModel tables] as Models
-  [db.py\nengine + pragmas] as DB
-  [fallback_policy.py\ndowngrade messages] as Fallback
-  [resolution_decisions.py\ndowngrade decisions] as Decisions
-  [paths.py\nsafe names] as Paths
-  [log_safety.py\nlog scrubbing] as LogSafety
-  [logging_setup.py\nfile logging] as LoggingSetup
-  [dev_server.py\nport occupant probe] as DevServer
+  [contracts/models.py\nSQLModel tables] as Models
+  [infra/db.py\nengine + pragmas] as DB
+  [download/fallback_policy.py\ndowngrade messages] as Fallback
+  [download/resolution_decisions.py\ndowngrade decisions] as Decisions
+  [common/paths.py\nsafe names] as Paths
+  [common/log_safety.py\nlog scrubbing] as LogSafety
+  [infra/logging_setup.py\nfile logging] as LoggingSetup
+  [host/dev_server.py\nport occupant probe] as DevServer
 }
 
 App --> UrlAnalyzer

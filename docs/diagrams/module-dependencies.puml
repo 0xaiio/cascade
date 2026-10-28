@@ -6,60 +6,60 @@ skinparam linetype ortho
 
 package "L0 entry" {
   [main.py\ncomposition root] as Main
-  [routers/*\nHTTP endpoints] as Routers
-  [api_context.py\nrequest dependencies] as ApiCtx
-  [api_support.py\nendpoint helpers] as ApiSupport
-  [job_artifacts.py\nartifact location] as Artifacts
+  [api/routers/*\nHTTP endpoints] as Routers
+  [api/api_context.py\nrequest dependencies] as ApiCtx
+  [api/api_support.py\nendpoint helpers] as ApiSupport
+  [download/job_artifacts.py\nartifact location] as Artifacts
 }
 
 package "L1 contracts" {
-  [config.py\nAppSettings] as Config
-  [schemas.py\nwire models] as Schemas
-  [models.py\nSQLModel tables] as Models
+  [contracts/config.py\nAppSettings] as Config
+  [contracts/schemas.py\nwire models] as Schemas
+  [contracts/models.py\nSQLModel tables] as Models
 }
 
 package "L2 orchestration" {
-  [job_manager.py\nqueue, workers, state machine] as Manager
-  [job_read_model.py\nAPI projection] as ReadModel
-  [events.py\nEventBroker] as Broker
-  [bili_manager.py\nbilibili queue, single worker] as BiliManager
-  [bili_read_model.py\nbilibili badges and read models] as BiliReadModel
+  [download/job_manager.py\nqueue, workers, state machine] as Manager
+  [download/job_read_model.py\nAPI projection] as ReadModel
+  [infra/events.py\nEventBroker] as Broker
+  [bilibili/bili_manager.py\nbilibili queue, single worker] as BiliManager
+  [bilibili/bili_read_model.py\nbilibili badges and read models] as BiliReadModel
 }
 
 package "L3 domain and policy" {
-  [ytdlp_service.py\nyt-dlp boundary] as Service
-  [ytdlp_formats.py\nselectors, fallback math] as Formats
-  [stall_guard.py\nstall watchdog] as Stall
-  [fallback_policy.py\nreason and message] as Fallback
-  [resolution_decisions.py\ndowngrade decisions] as Decisions
-  [browser_cookies.py\ncookie import] as Cookies
-  [cookie_health.py\ncookie verification] as CookieHealth
-  [proxy.py\nproxy resolution] as Proxy
-  [connectivity.py\nproxy probe] as Connectivity
-  [error_advice.py\nexception to advice] as Advice
-  [download_progress.py\nsubstream aggregation] as Progress
-  [progress_persist.py\npersist gate] as Gate
-  [transfer_stats.py\naverage speed] as Stats
-  [output_paths.py\npath discovery] as Outputs
-  [system_open.py\nplayer and folder] as Opener
-  [bili_upload.py\nsingle upload flow] as BiliUpload
-  [bili_bin.py\nbiliup boundary] as BiliBin
-  [bili_api.py\nbilibili member APIs] as BiliApi
-  [bili_auth.py\nqr login, cookie file] as BiliAuth
-  [bili_meta.py\nmetadata and limits] as BiliMeta
-  [bili_policy.py\nbilibili messages, badges] as BiliPolicy
+  [download/ytdlp_service.py\nyt-dlp boundary] as Service
+  [download/ytdlp_formats.py\nselectors, fallback math] as Formats
+  [download/stall_guard.py\nstall watchdog] as Stall
+  [download/fallback_policy.py\nreason and message] as Fallback
+  [download/resolution_decisions.py\ndowngrade decisions] as Decisions
+  [host/browser_cookies.py\ncookie import] as Cookies
+  [host/cookie_health.py\ncookie verification] as CookieHealth
+  [host/proxy.py\nproxy resolution] as Proxy
+  [host/connectivity.py\nproxy probe] as Connectivity
+  [download/error_advice.py\nexception to advice] as Advice
+  [download/download_progress.py\nsubstream aggregation] as Progress
+  [download/progress_persist.py\npersist gate] as Gate
+  [download/transfer_stats.py\naverage speed] as Stats
+  [download/output_paths.py\npath discovery] as Outputs
+  [host/system_open.py\nplayer and folder] as Opener
+  [bilibili/bili_upload.py\nsingle upload flow] as BiliUpload
+  [bilibili/bili_bin.py\nbiliup boundary] as BiliBin
+  [bilibili/bili_api.py\nbilibili member APIs] as BiliApi
+  [bilibili/bili_auth.py\nqr login, cookie file] as BiliAuth
+  [bilibili/bili_meta.py\nmetadata and limits] as BiliMeta
+  [bilibili/bili_policy.py\nbilibili messages, badges] as BiliPolicy
 }
 
 package "L4 infrastructure" {
-  [db.py\nengine, pragmas, migrations] as DB
-  [logging_setup.py\nroot logger, rotating file] as Logging
-  [bili_http.py\nbilibili HTTP seam] as BiliHttp
+  [infra/db.py\nengine, pragmas, migrations] as DB
+  [infra/logging_setup.py\nroot logger, rotating file] as Logging
+  [bilibili/bili_http.py\nbilibili HTTP seam] as BiliHttp
 }
 
 package "L5 pure helpers" {
-  [paths.py\nsafe path names] as Paths
-  [log_safety.py\nlog scrubbing] as LogSafe
-  [runtime_env.py\nhostile env scrubbing] as RuntimeEnv
+  [common/paths.py\nsafe path names] as Paths
+  [common/log_safety.py\nlog scrubbing] as LogSafe
+  [host/runtime_env.py\nhostile env scrubbing] as RuntimeEnv
 }
 
 Main --> Routers
@@ -172,8 +172,15 @@ note bottom
 Dependency rule: arrows only point downwards.
 L5 has no project imports; L3 never imports L2 or L0;
 infrastructure (L4) knows tables but not job logic.
+Label prefix is the directory the module lives in:
+api/ contracts/ download/ bilibili/ host/ infra/ common/.
+Directories group by capability; the arrows answer to the
+layer, not the directory (bilibili/bili_http.py is L4 and
+infra/events.py is L2). Only one edge crosses a capability
+boundary: bilibili/ reuses download/ (output_paths,
+subtitle_plan, ytdlp_service, job_read_model).
 Inside L0 the direction is fixed: main.py assembles,
-routers/* are leaves, and the support modules
+api/routers/* are leaves, and the support modules
 (api_support, job_artifacts, api_context) never import a router.
 Two deliberate separations: parsing the proxy (proxy.py)
 is apart from proving it works (connectivity.py), and

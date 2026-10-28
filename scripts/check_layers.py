@@ -33,10 +33,12 @@ CONTRACT_LAYER = 1
 
 
 def parse_layers(design_text: str) -> dict[str, int]:
-    """从模块职责矩阵取「模块名 → 层号」。
+    """从模块职责矩阵取「模块键 → 层号」。
 
     矩阵行形如：`| [main.py](../backend/app/main.py#L39) | L0 入口 | 职责 | 不负责 |`
     一格里可能有多个链接（`[paths.py](…) / [log_safety.py](…)`），所以按链接逐个取。
+    键是**相对 `backend/app` 的路径**（模块按功能分了子包：`download/job_manager`、
+    `bilibili/bili_upload` ……），所以键从链接目标里取，不是从链接文字里猜。
     """
     layers: dict[str, int] = {}
     for line in design_text.splitlines():
@@ -45,18 +47,36 @@ def parse_layers(design_text: str) -> dict[str, int]:
         cells = line.split("|")
         if len(cells) < 5:
             continue
-        match = re.search(r"L(\d)", cells[2])
+        # 层号必须**在格子开头**（`L2 编排`）。放宽成「格子里出现 L\d」会让
+        # 目录说明表这类散文格子被误认成层登记 —— 那样未登记的模块会静默继承一个层。
+        match = re.match(r"\s*L(\d)\s+\S", cells[2])
         if match is None:
             continue
         layer = int(match.group(1))
-        for name in re.findall(r"\[([^\]/]+\.py|routers/)\]", cells[1]):
-            key = name[:-3] if name.endswith(".py") else name.rstrip("/")
+        for key in module_keys(cells[1]):
             layers[key] = layer
     return layers
 
 
+def module_keys(cell: str) -> list[str]:
+    """把一格里指向 `backend/app` 的链接换成模块键。
+
+    键取自**链接目标**而不是链接文字：文字是给人看的（`[main.py](…)`、`[routers/](…)`），
+    目标才是真实路径。包指向 `__init__.py`，去掉 `/__init__` 后就是包键（`api/routers`）。
+    """
+    keys: list[str] = []
+    for target in re.findall(r"\]\([^)\s]*?/backend/app/([^)#\s]+)", cell):
+        key = target.rstrip("/")
+        if key.endswith(".py"):
+            key = key[: -len(".py")]
+        if key.endswith("/__init__"):
+            key = key[: -len("/__init__")]
+        keys.append(key)
+    return keys
+
+
 def actual_modules() -> dict[str, Path]:
-    """`backend/app` 下所有模块，键是相对 `backend/app` 的无后缀路径（如 `routers/jobs`）。"""
+    """`backend/app` 下所有模块，键是相对 `backend/app` 的无后缀路径（如 `api/routers/jobs`）。"""
     modules: dict[str, Path] = {}
     for path in sorted(APP_DIR.rglob("*.py")):
         if path.name == "__init__.py":
@@ -66,24 +86,44 @@ def actual_modules() -> dict[str, Path]:
 
 
 def layer_of(key: str, layers: dict[str, int]) -> int | None:
-    """查一个模块的层；`routers/jobs` 这类没有独立登记时回退到它的包（`routers`）。"""
+    """查一个模块的层；没独立登记时逐级回退到**最近的已登记祖先包**。
+
+    回退按段数从长到短找（`api/routers/jobs` → `api/routers`），不是只取第一段：
+    模块现在活在功能包下面，只取第一段的话 `api/routers/jobs` 会去找 `api` 而永远落空。
+    """
     if key in layers:
         return layers[key]
-    return layers.get(key.split("/", 1)[0])
+    parts = key.split("/")
+    for depth in range(len(parts) - 1, 0, -1):
+        ancestor = "/".join(parts[:depth])
+        if ancestor in layers:
+            return layers[ancestor]
+    return None
 
 
 def imports_of(path: Path) -> set[str]:
-    """模块里的包内相对 import（`from .x import …` / `from . import x`），其余不算。"""
+    """模块里的包内相对 import（`from ..x import …` / `from . import x`），解析成模块键。
+
+    要按 `level` 折算：模块搬到 `download/` 之后，「上一层」不再等于「包根」。
+    只认相对导入是有意的 —— 包内一律写相对导入（绝对导入绕开了这条校验），
+    这正是文档里「依赖方向」那条规则能被机器检查的前提。
+    """
+    relative = path.relative_to(APP_DIR).with_suffix("")
+    package = relative.as_posix().split("/")
+    if path.name != "__init__.py":
+        package = package[:-1]
+
     tree = ast.parse(path.read_text(encoding="utf-8"))
     targets: set[str] = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.ImportFrom) or node.level == 0:
             continue
+        base = package[: len(package) - (node.level - 1)]
         if node.module:
-            targets.add(node.module.replace(".", "/"))
+            targets.add("/".join([*base, *node.module.split(".")]))
         else:
             for alias in node.names:
-                targets.add(alias.name)
+                targets.add("/".join([*base, alias.name]))
     return targets
 
 

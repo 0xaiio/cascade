@@ -26,22 +26,22 @@ from pathlib import Path
 import pytest
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from app.bili_bin import CommandResult, is_pe
-from app.bili_auth import TvToken, read_login_token, write_cookie_file
-from app.bili_http import HttpError
-from app.bili_manager import (
+from app.bilibili.bili_bin import CommandResult, is_pe
+from app.bilibili.bili_auth import TvToken, read_login_token, write_cookie_file
+from app.bilibili.bili_http import HttpError
+from app.bilibili.bili_manager import (
     CRASHED_UPLOAD_ERROR,
     BiliManager,
     BiliPreconditionError,
     build_prefill,
 )
-from app.bili_meta import MetadataTemplate, UploadMetadata, default_collection_template
-from app.bili_policy import SEASON_CREATE_FAILED
-from app.bili_read_model import read_job_uploads
-from app.bili_upload import UploadResult, UploadTarget
-from app.config import AppSettings
-from app.events import EventBroker
-from app.models import (
+from app.bilibili.bili_meta import MetadataTemplate, UploadMetadata, default_collection_template
+from app.bilibili.bili_policy import SEASON_CREATE_FAILED
+from app.bilibili.bili_read_model import read_job_uploads
+from app.bilibili.bili_upload import UploadResult, UploadTarget
+from app.contracts.config import AppSettings
+from app.infra.events import EventBroker
+from app.contracts.models import (
     BiliSeason,
     BiliSeasonStatus,
     BiliUpload,
@@ -1122,8 +1122,8 @@ async def test_health_separates_a_zero_byte_stub_from_a_missing_tool(tmp_path, m
     real = tmp_path / "packages" / "ForgQi.biliup-rs_win-x64" / "biliup.exe"
     real.parent.mkdir(parents=True, exist_ok=True)
     real.write_bytes(b"MZ" + b"\x00" * 64)
-    monkeypatch.setattr("app.bili_bin.WINGET_LINK_PATH", link)
-    monkeypatch.setattr("app.bili_bin.WINGET_PACKAGE_GLOB", str(tmp_path / "packages"))
+    monkeypatch.setattr("app.bilibili.bili_bin.WINGET_LINK_PATH", link)
+    monkeypatch.setattr("app.bilibili.bili_bin.WINGET_PACKAGE_GLOB", str(tmp_path / "packages"))
     harness.settings.biliup_path = str(link)
 
     status = await harness.manager.health()
@@ -1140,8 +1140,8 @@ async def test_repair_tool_overwrites_the_stub_and_says_so(tmp_path, monkeypatch
     real = tmp_path / "packages" / "ForgQi.biliup-rs_win-x64" / "biliup.exe"
     real.parent.mkdir(parents=True, exist_ok=True)
     real.write_bytes(b"MZ" + b"\x00" * 64)
-    monkeypatch.setattr("app.bili_bin.WINGET_LINK_PATH", link)
-    monkeypatch.setattr("app.bili_bin.WINGET_PACKAGE_GLOB", str(tmp_path / "packages"))
+    monkeypatch.setattr("app.bilibili.bili_bin.WINGET_LINK_PATH", link)
+    monkeypatch.setattr("app.bilibili.bili_bin.WINGET_PACKAGE_GLOB", str(tmp_path / "packages"))
     harness.settings.biliup_path = str(link)
 
     message = harness.manager.repair_tool()

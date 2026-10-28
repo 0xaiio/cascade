@@ -1,4 +1,4 @@
-from app.log_safety import sanitize_log_message
+from app.common.log_safety import sanitize_log_message
 
 
 def test_sanitize_log_message_redacts_url_queries_and_token_assignments() -> None:

@@ -49,7 +49,7 @@
 
 ## 2. 实施方案
 
-### 2.1 新建 `backend/app/safe_delete.py`（纯逻辑，82 行）
+### 2.1 新建 `backend/app/download/safe_delete.py`（纯逻辑，82 行）
 
 | 成员 | 职责 |
 | --- | --- |
@@ -82,8 +82,8 @@
 
 | 指标 | 重构前 | 重构后 |
 | --- | --- | --- |
-| `backend/app/job_manager.py` | 1132 行 | **1128 行**（−4） |
-| `backend/app/safe_delete.py` | — | **82 行**（新增） |
+| `backend/app/download/job_manager.py` | 1132 行 | **1128 行**（−4） |
+| `backend/app/download/safe_delete.py` | — | **82 行**（新增） |
 | `backend/app/*.py` 模块数 | 33 | **34** |
 | `job_manager` 里的删除相关私有方法 | 2（`_delete_output_files` + `_is_under_allowed_root`） | 1（只剩 IO 的那个） |
 | 后端测试用例 | 338 | **354**（+16） |

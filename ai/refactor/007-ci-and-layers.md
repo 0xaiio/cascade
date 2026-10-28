@@ -146,7 +146,7 @@ docs/openapi.yaml（本机没有 PyYAML）」—— 与其静默只跑一半，�
 | **未登记模块** | **天然发生**：脚本首跑时 005 的 `safe_delete.py` 还没登记 | EXIT=1，报出 2 处（见 §3.1） |
 | **依赖朝上** | **主动注入**：在 L3 的 `safe_delete.py` 里加 `from .job_manager import JobManager`（L2） | EXIT=1，报 `safe_delete.py（L3 领域）import 了 job_manager.py（L2 编排）—— 依赖方向朝上` |
 
-注入后已还原（`git diff backend/app/safe_delete.py` 为空），还原后复跑 EXIT=0。
+注入后已还原（`git diff backend/app/download/safe_delete.py` 为空），还原后复跑 EXIT=0。
 
 ### 4.3 CI 在本机验证到什么程度
 

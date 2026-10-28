@@ -19,8 +19,8 @@ from pathlib import Path
 
 import pytest
 
-from app.bili_api import BiliApiError
-from app.bili_subtitle import (
+from app.bilibili.bili_api import BiliApiError
+from app.bilibili.bili_subtitle import (
     DEFAULT_LAN,
     LAN_CHINESE,
     LAN_ENGLISH_BILI,

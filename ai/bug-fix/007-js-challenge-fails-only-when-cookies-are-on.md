@@ -56,7 +56,7 @@ Error: Access to this API has been restricted. Use --allow-fs-read to manage per
 
 ## 修复方案
 
-### a. 摘掉会打坏子进程的环境变量（`backend/app/runtime_env.py`）
+### a. 摘掉会打坏子进程的环境变量（`backend/app/host/runtime_env.py`）
 
 ```python
 HOSTILE_NODE_OPTION_FLAGS = ("--require", "--import", "--loader", "--experimental-loader")
@@ -77,7 +77,7 @@ def describe_environment_risks(environ=None) -> list[dict]: ...
 - 失败原因留痕：`dependencies.js_runtime_error`（原始报错）与 `js_runtime_candidates_rejected`（逐个候选）。
 - 整个候选探测被 `try/except Exception` 包住 —— **探测本身出错不能把服务带崩**，只算「这个候选不可用」。
 
-### c. 把异常翻译成「该做什么」（`backend/app/error_advice.py`）
+### c. 把异常翻译成「该做什么」（`backend/app/download/error_advice.py`）
 
 `advise()` 只依赖异常链上的文本（`exception_chain()` 用 BFS 展开 `__cause__`/`__context__`，去重防环），
 判定顺序**从最具体到最泛**：JS challenge → cookies → 代理 → 媒体流被挡；无法归类时返回 `None`，不硬凑。
@@ -95,7 +95,7 @@ def describe_environment_risks(environ=None) -> list[dict]: ...
 `getattr(..., None)` 保护：**日志与诊断绝不能改变重试/失败行为**（测试里的 fake service 没有这个方法，
 第一版就因此挂掉了 6 个 API 测试）。
 
-### d. 日志一定会落盘（`backend/app/logging_setup.py`）
+### d. 日志一定会落盘（`backend/app/infra/logging_setup.py`）
 
 - `create_app()` 第一件事就调 `configure_logging(app_settings.data_dir / "logs")`；
 - 控制台 + `RotatingFileHandler(data/logs/app.log, 2 MiB × 3, UTF-8)`；

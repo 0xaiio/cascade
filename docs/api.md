@@ -1,10 +1,10 @@
 # API 文档
 
-适用读者：前端开发者、后端维护者和需要调试接口的测试者。所有 schema 定义以 [backend/app/schemas.py](../backend/app/schemas.py) 为准，前端类型以 [frontend/src/types.ts](../frontend/src/types.ts) 为准。
+适用读者：前端开发者、后端维护者和需要调试接口的测试者。所有 schema 定义以 [backend/app/contracts/schemas.py](../backend/app/contracts/schemas.py) 为准，前端类型以 [frontend/src/types.ts](../frontend/src/types.ts) 为准。
 
 ## 机器可读规范
 
-[openapi.yaml](openapi.yaml) 是本 API 的 OpenAPI 3.1.0 描述，覆盖全部 41 个操作、48 个 schema、复用的路径参数/错误响应组件与逐接口请求/响应示例。它由人工从 [routers/](../backend/app/routers/__init__.py)（路由与状态码）与 [schemas.py](../backend/app/schemas.py)（字段与必填性）编写；**这两个文件仍是唯一事实来源**，规范只做投影。
+[openapi.yaml](openapi.yaml) 是本 API 的 OpenAPI 3.1.0 描述，覆盖全部 41 个操作、48 个 schema、复用的路径参数/错误响应组件与逐接口请求/响应示例。它由人工从 [routers/](../backend/app/api/routers/__init__.py)（路由与状态码）与 [schemas.py](../backend/app/contracts/schemas.py)（字段与必填性）编写；**这两个文件仍是唯一事实来源**，规范只做投影。
 
 可直接用于：
 
@@ -22,7 +22,7 @@
 
 ### 与运行时契约的漂移校验
 
-上面那一步靠自觉。而**运行时契约**（`create_app().openapi()`，由 [schemas.py](../backend/app/schemas.py)
+上面那一步靠自觉。而**运行时契约**（`create_app().openapi()`，由 [schemas.py](../backend/app/contracts/schemas.py)
 与各路由的响应模型生成）才是唯一「改代码就跟着变」的那一份 —— `openapi.yaml` 与
 [types.ts](../frontend/src/types.ts) 都只是它的**手写副本**。两者有没有分叉，可以直接跑：
 
@@ -45,7 +45,7 @@
 - 后端应用由 [create_app](../backend/app/main.py#L40) 创建；API 默认绑定 `127.0.0.1:8000`（可用仓库根 `.env` 的 `YTDL_API_PORT` 或 `python -m app --port` 覆盖，见 [开发文档](development.md#端口被占用时)），单端口模式下同时托管 `frontend/dist`。
 - API 返回 JSON；`DELETE /api/jobs/{id}` 与四个本地打开接口成功时返回 `204`。
 - 前端统一请求封装在 [request](../frontend/src/api.ts#L70)，非 2xx 响应会抛出 `ApiError`，并保留结构化 `detail`。
-- Cookies 导入锁库错误使用结构化 `detail`，字段见 [BrowserCookieImportError.to_detail](../backend/app/browser_cookies.py#L58)。
+- Cookies 导入锁库错误使用结构化 `detail`，字段见 [BrowserCookieImportError.to_detail](../backend/app/host/browser_cookies.py#L58)。
 - **所有时间字段是 UTC，且以 `Z` 结尾**（`started_at` / `finished_at` / `created_at` / `updated_at`）。
   SQLite 不存时区，读回来是 naive 的墙上时间，读模型补成 aware 之后才发出 —— 少了这个 `Z`，消费方 `Date.parse` 会把同一串数字按**本地**时间解析（ECMAScript 规定），于是每个时长都凭空多出一个时区偏移（本机 UTC+8 上实测 52 秒显示成 8 小时，见 [020](../ai/bug-fix/020-the-progress-clock-is-eight-hours-off.md)）。
   前端解析统一走 [parseServerTime](../frontend/src/formatting.ts#L48)，不要直接 `Date.parse`。
@@ -56,18 +56,18 @@
 | 方法 | 路径 | 用途 | 主要模型 |
 | --- | --- | --- | --- |
 | `GET` | `/health` | 健康检查。 | `dict[str, bool]` |
-| `GET` | `/api/diagnostics` | 依赖和运行状态诊断。 | [`DiagnosticsRead`](../backend/app/schemas.py#L329) |
-| `POST` | `/api/diagnostics/runtime` | 清掉 JS 运行时探测缓存后重新自检，返回同一份诊断。 | [`DiagnosticsRead`](../backend/app/schemas.py#L329) |
-| `POST` | `/api/proxy/test` | 检测代理连通性，可临时试一个**未保存**的地址。 | [`ProxyTestRequest`](../backend/app/schemas.py#L285)、[`ProxyTestRead`](../backend/app/schemas.py#L290) |
-| `POST` | `/api/cookies/verify` | cookies 体检（离线格式/域名/鉴权项，可联网确认登录态）。 | [`CookieVerifyRequest`](../backend/app/schemas.py#L303)、[`CookieHealthRead`](../backend/app/schemas.py#L308) |
-| `POST` | `/api/analyze` | 解析单视频或 playlist。 | [`AnalyzeRequest`](../backend/app/schemas.py#L71)、[`AnalyzeResponse`](../backend/app/schemas.py#L100) |
-| `POST` | `/api/jobs` | 创建下载任务并入队。 | [`CreateJobRequest`](../backend/app/schemas.py#L132)、[`JobRead`](../backend/app/schemas.py#L199) |
+| `GET` | `/api/diagnostics` | 依赖和运行状态诊断。 | [`DiagnosticsRead`](../backend/app/contracts/schemas.py#L329) |
+| `POST` | `/api/diagnostics/runtime` | 清掉 JS 运行时探测缓存后重新自检，返回同一份诊断。 | [`DiagnosticsRead`](../backend/app/contracts/schemas.py#L329) |
+| `POST` | `/api/proxy/test` | 检测代理连通性，可临时试一个**未保存**的地址。 | [`ProxyTestRequest`](../backend/app/contracts/schemas.py#L285)、[`ProxyTestRead`](../backend/app/contracts/schemas.py#L290) |
+| `POST` | `/api/cookies/verify` | cookies 体检（离线格式/域名/鉴权项，可联网确认登录态）。 | [`CookieVerifyRequest`](../backend/app/contracts/schemas.py#L303)、[`CookieHealthRead`](../backend/app/contracts/schemas.py#L308) |
+| `POST` | `/api/analyze` | 解析单视频或 playlist。 | [`AnalyzeRequest`](../backend/app/contracts/schemas.py#L71)、[`AnalyzeResponse`](../backend/app/contracts/schemas.py#L100) |
+| `POST` | `/api/jobs` | 创建下载任务并入队。 | [`CreateJobRequest`](../backend/app/contracts/schemas.py#L132)、[`JobRead`](../backend/app/contracts/schemas.py#L199) |
 | `GET` | `/api/jobs` | 获取任务列表。 | `list[JobRead]` |
 | `GET` | `/api/jobs/{job_id}` | 获取单个任务详情。 | `JobRead` |
-| `POST` | `/api/jobs/batch` | 批量暂停、重启或删除。 | [`JobBatchActionRequest`](../backend/app/schemas.py#L141) |
+| `POST` | `/api/jobs/batch` | 批量暂停、重启或删除。 | [`JobBatchActionRequest`](../backend/app/contracts/schemas.py#L141) |
 | `POST` | `/api/jobs/{job_id}/cancel` | 取消任务。 | `JobRead` |
 | `POST` | `/api/jobs/{job_id}/pause` | 暂停任务。 | `JobRead` |
-| `POST` | `/api/jobs/{job_id}/restart` | 重启任务，可覆盖清晰度。 | [`RestartJobRequest`](../backend/app/schemas.py#L137) |
+| `POST` | `/api/jobs/{job_id}/restart` | 重启任务，可覆盖清晰度。 | [`RestartJobRequest`](../backend/app/contracts/schemas.py#L137) |
 | `POST` | `/api/jobs/{job_id}/play` | 播放单视频任务已下载的视频文件。 | `204 No Content` |
 | `POST` | `/api/jobs/{job_id}/open-folder` | 打开单视频任务已下载视频所在文件夹，或打开 playlist 任务文件夹。 | `204 No Content` |
 | `POST` | `/api/jobs/{job_id}/open-subtitle` | 用本机程序打开单视频任务下载到的字幕文件；缺省先请系统的「打开方式」（不可用时自动退回应用自带的对话框），`?mode=default` 才走文件关联。 | 查询参数 `mode`（`chooser` 缺省 / `default`） |
@@ -78,28 +78,28 @@
 | `POST` | `/api/jobs/{job_id}/items/delete` | 删除 playlist 中一个或多个子视频任务，可选删除输出和 sidecar 文件。 | `DeleteJobItemsRequest`、`DeleteJobItemsResponse` |
 | `DELETE` | `/api/jobs/{job_id}` | 删除任务，可选删除输出视频及字幕、metadata、缩略图、description 等相关文件。 | 查询参数 `delete_files` |
 | `GET` | `/api/events` | SSE 任务事件流。 | `text/event-stream` |
-| `GET` | `/api/settings` | 获取设置。 | [`SettingsRead`](../backend/app/schemas.py#L239) |
-| `PUT` | `/api/settings` | 更新设置。 | [`SettingsUpdate`](../backend/app/schemas.py#L260) |
+| `GET` | `/api/settings` | 获取设置。 | [`SettingsRead`](../backend/app/contracts/schemas.py#L239) |
+| `PUT` | `/api/settings` | 更新设置。 | [`SettingsUpdate`](../backend/app/contracts/schemas.py#L260) |
 | `POST` | `/api/settings/download-dir/select` | 打开本机目录选择对话框。 | `SettingsRead` |
-| `POST` | `/api/cookies` | 上传 cookies 文件。 | [`CookieStatus`](../backend/app/schemas.py#L272) |
-| `POST` | `/api/cookies/from-browser` | 从浏览器导入 cookies。 | [`BrowserCookieImportRequest`](../backend/app/schemas.py#L280) |
+| `POST` | `/api/cookies` | 上传 cookies 文件。 | [`CookieStatus`](../backend/app/contracts/schemas.py#L272) |
+| `POST` | `/api/cookies/from-browser` | 从浏览器导入 cookies。 | [`BrowserCookieImportRequest`](../backend/app/contracts/schemas.py#L280) |
 | `DELETE` | `/api/cookies` | 清除本地 cookies。 | `CookieStatus` |
-| `GET` | `/api/bilibili/status` | B站 投稿环境体检（工具 / ffmpeg / 登录态 / 缺项清单 / 分区表 / 硬限）。 | [`BiliStatusRead`](../backend/app/schemas.py#L380) |
+| `GET` | `/api/bilibili/status` | B站 投稿环境体检（工具 / ffmpeg / 登录态 / 缺项清单 / 分区表 / 硬限）。 | [`BiliStatusRead`](../backend/app/contracts/schemas.py#L380) |
 | `POST` | `/api/bilibili/tools/repair` | 修复 WinGet `Links` 目录下 0 字节的 `biliup.exe` 空壳，然后重新体检。 | `BiliStatusRead` |
-| `POST` | `/api/bilibili/login/qrcode` | 生成扫码登录二维码（返回 **SVG 文本**）。 | [`BiliQrcodeRead`](../backend/app/schemas.py#L394) |
-| `GET` | `/api/bilibili/login/poll` | 轮询扫码状态；**只有 `confirmed` 才落盘登录态**。 | [`BiliLoginPollRead`](../backend/app/schemas.py#L403) |
+| `POST` | `/api/bilibili/login/qrcode` | 生成扫码登录二维码（返回 **SVG 文本**）。 | [`BiliQrcodeRead`](../backend/app/contracts/schemas.py#L394) |
+| `GET` | `/api/bilibili/login/poll` | 轮询扫码状态；**只有 `confirmed` 才落盘登录态**。 | [`BiliLoginPollRead`](../backend/app/contracts/schemas.py#L403) |
 | `POST` | `/api/bilibili/cookies` | 导入一份已有的 B站 登录文件（`multipart/form-data`，不校验格式）。 | `BiliStatusRead` |
 | `DELETE` | `/api/bilibili/cookies` | 清除 B站 登录态；幂等，本来没有也返回体检结论。 | `BiliStatusRead` |
-| `GET` | `/api/bilibili/prefill` | 预填上传表单：单视频给一组值，合集给「模板 + 逐条预览 + 超限定位」。 | [`BiliPrefillRead`](../backend/app/schemas.py#L464) |
-| `GET` | `/api/bilibili/seasons` | 账号下**已存在**的合集，供投稿界面下拉选择。**未登录也返回 200**（空列表 + `error` 说明原因）。 | [`BiliSeasonListRead`](../backend/app/schemas.py#L530) |
-| `GET` | `/api/bilibili/uploads` | 按任务读回上传状态（任务级徽标 + 条目级明细 + 合集记录）。 | [`BiliJobUploadsRead`](../backend/app/schemas.py#L612) |
-| `POST` | `/api/bilibili/uploads` | 启动单视频投稿（可选归入某个合集）；返回**整个任务**的上传状态。 | [`BiliUploadCreate`](../backend/app/schemas.py#L498)、`BiliJobUploadsRead` |
-| `GET` | `/api/bilibili/uploads/summary` | **所有有 B站 记录的任务**的徽标汇总（任务中心每行一个图标，逐个问就是 N 个请求）。 | [`BiliJobUploadsSummaryRead`](../backend/app/schemas.py#L627) |
-| `POST` | `/api/bilibili/uploads/{upload_id}/retry` | 重试一条稿件；动作按终态三选一。 | [`BiliRetryRead`](../backend/app/schemas.py#L638) |
-| `POST` | `/api/bilibili/collections` | 启动合集投稿：按模板逐条投稿，全部确认发布后自动归集。 | [`BiliCollectionCreate`](../backend/app/schemas.py#L539)、`BiliJobUploadsRead` |
-| `POST` | `/api/bilibili/collections/{season_record_id}/group` | 重试合集归集；已有 `season_id` 时只补加视频，不重复建合集。 | [`BiliSeasonRetryRead`](../backend/app/schemas.py#L645) |
+| `GET` | `/api/bilibili/prefill` | 预填上传表单：单视频给一组值，合集给「模板 + 逐条预览 + 超限定位」。 | [`BiliPrefillRead`](../backend/app/contracts/schemas.py#L464) |
+| `GET` | `/api/bilibili/seasons` | 账号下**已存在**的合集，供投稿界面下拉选择。**未登录也返回 200**（空列表 + `error` 说明原因）。 | [`BiliSeasonListRead`](../backend/app/contracts/schemas.py#L530) |
+| `GET` | `/api/bilibili/uploads` | 按任务读回上传状态（任务级徽标 + 条目级明细 + 合集记录）。 | [`BiliJobUploadsRead`](../backend/app/contracts/schemas.py#L612) |
+| `POST` | `/api/bilibili/uploads` | 启动单视频投稿（可选归入某个合集）；返回**整个任务**的上传状态。 | [`BiliUploadCreate`](../backend/app/contracts/schemas.py#L498)、`BiliJobUploadsRead` |
+| `GET` | `/api/bilibili/uploads/summary` | **所有有 B站 记录的任务**的徽标汇总（任务中心每行一个图标，逐个问就是 N 个请求）。 | [`BiliJobUploadsSummaryRead`](../backend/app/contracts/schemas.py#L627) |
+| `POST` | `/api/bilibili/uploads/{upload_id}/retry` | 重试一条稿件；动作按终态三选一。 | [`BiliRetryRead`](../backend/app/contracts/schemas.py#L638) |
+| `POST` | `/api/bilibili/collections` | 启动合集投稿：按模板逐条投稿，全部确认发布后自动归集。 | [`BiliCollectionCreate`](../backend/app/contracts/schemas.py#L539)、`BiliJobUploadsRead` |
+| `POST` | `/api/bilibili/collections/{season_record_id}/group` | 重试合集归集；已有 `season_id` 时只补加视频，不重复建合集。 | [`BiliSeasonRetryRead`](../backend/app/contracts/schemas.py#L645) |
 
-路由实现集中在 [routers/](../backend/app/routers/__init__.py)。`POST /api/jobs` 成功时返回 `201`，其余返回模型或 `204`。B站 那一组统一返回 JSON 读模型（没有 `204`）。
+路由实现集中在 [routers/](../backend/app/api/routers/__init__.py)。`POST /api/jobs` 成功时返回 `201`，其余返回模型或 `204`。B站 那一组统一返回 JSON 读模型（没有 `204`）。
 
 ## 关键请求模型
 
@@ -109,7 +109,7 @@
 
 ### DownloadOptions
 
-字段定义见 [DownloadOptions](../backend/app/schemas.py#L113)。
+字段定义见 [DownloadOptions](../backend/app/contracts/schemas.py#L113)。
 
 | 字段 | 说明 |
 | --- | --- |
@@ -140,7 +140,7 @@
 
 `PUT /api/settings` 采用局部更新语义：只有显式提交的字段才会被改写。`default_speed_limit_kbps` 通过 `model_fields_set` 判断，因此显式提交 `null` 表示取消限速；`aria2c_connections` 只更新设置与 `YtDlpService`，不会打断正在下载的任务。
 
-更新并发会即时调整后台 worker 数量。更新限速或重试次数后，后端会同步 queued/running/paused 任务的 `DownloadOptions`；如果当前有视频正在下载，会取消当前 yt-dlp 实例、保留 `.part` 文件，并重新入队以断点续传方式应用新设置。保存后的值写入 `Setting` 表并在下次启动时恢复，见 [_apply_stored_settings](../backend/app/api_support.py#L149)。
+更新并发会即时调整后台 worker 数量。更新限速或重试次数后，后端会同步 queued/running/paused 任务的 `DownloadOptions`；如果当前有视频正在下载，会取消当前 yt-dlp 实例、保留 `.part` 文件，并重新入队以断点续传方式应用新设置。保存后的值写入 `Setting` 表并在下次启动时恢复，见 [_apply_stored_settings](../backend/app/api/api_support.py#L149)。
 
 `POST /api/settings/download-dir/select` 会在服务端弹出本机目录选择对话框；无图形环境时返回 `400`（`Folder dialog is unavailable in this environment.`），此时应改用 `PUT /api/settings` 直接提交 `download_dir`。
 
@@ -161,7 +161,7 @@
 
 ### CookieStatus
 
-`POST /api/cookies` 与 `POST /api/cookies/from-browser` 返回 [`CookieStatus`](../backend/app/schemas.py#L272)：`enabled`、`filename`、`source`（`none` / `file` / `browser`）、`browser`、`imported_count`。诊断与设置接口只返回 `cookies_enabled` 布尔值，不返回 cookies 内容。
+`POST /api/cookies` 与 `POST /api/cookies/from-browser` 返回 [`CookieStatus`](../backend/app/contracts/schemas.py#L272)：`enabled`、`filename`、`source`（`none` / `file` / `browser`）、`browser`、`imported_count`。诊断与设置接口只返回 `cookies_enabled` 布尔值，不返回 cookies 内容。
 
 ### DeleteJobItemsRequest
 
@@ -173,7 +173,7 @@
 
 播放视频和打开文件夹接口不接收路径参数，只使用数据库中的 `JobItem.output_path`、`Job.download_dir` 和任务下载目录内可按 YouTube id 关联到的文件。若 `output_path` 缺失或指向 yt-dlp 分离流中间文件名，后端会先尝试解析到合并后的最终文件；打开文件夹时若还没有最终视频，也可回退到任务下载目录。缺少输出路径、文件或目录不存在时返回 `409`；任务或子视频不存在时返回 `404`；系统打开器失败时返回 `400`。Windows 下打开文件夹会新开 Explorer 窗口，避免只在任务栏闪烁。
 
-打开字幕（`open-subtitle`）同样不收路径：字幕位置由 [existing_subtitle_file](../backend/app/output_paths.py#L184) 算——库里的 `subtitle_path` 优先（只验存在），否则看视频旁边的同名 `.srt` / `.vtt`。`mode` 只有两个取值，对应系统那边的两种 verb：
+打开字幕（`open-subtitle`）同样不收路径：字幕位置由 [existing_subtitle_file](../backend/app/download/output_paths.py#L184) 算——库里的 `subtitle_path` 优先（只验存在），否则看视频旁边的同名 `.srt` / `.vtt`。`mode` 只有两个取值，对应系统那边的两种 verb：
 
 | `mode` | 实际动作 | 谁决定程序 |
 | --- | --- | --- |
@@ -186,19 +186,19 @@
 
 ### AnalyzeResponse
 
-包含标题、是否 playlist、条目、格式列表、字幕列表、自动字幕列表和 ffmpeg 状态。格式和字幕映射逻辑见 [extract_metadata](../backend/app/ytdlp_service.py#L357)。
+包含标题、是否 playlist、条目、格式列表、字幕列表、自动字幕列表和 ffmpeg 状态。格式和字幕映射逻辑见 [extract_metadata](../backend/app/download/ytdlp_service.py#L357)。
 
-`entries` 只在 playlist 场景非空；`formats` 已过滤掉纯 storyboard/图片格式，见 [_map_formats](../backend/app/ytdlp_service.py#L1155)。
+`entries` 只在 playlist 场景非空；`formats` 已过滤掉纯 storyboard/图片格式，见 [_map_formats](../backend/app/download/ytdlp_service.py#L1155)。
 
 ### JobRead 与 JobItemRead
 
-任务读模型由 [read_job](../backend/app/job_read_model.py#L12) 生成。任务级 `actual_resolution` 和 `actual_format` 是子视频聚合结果；单一值时显示具体值，playlist 不一致时显示 `混合分辨率` 或 `混合格式`，实现见 [job_read_model.py](../backend/app/job_read_model.py#L125)。`elapsed_seconds` 由 `started_at` 与 `finished_at`（未结束时取当前时间）计算，见 [elapsed_seconds](../backend/app/job_read_model.py#L166)。`notify_on_complete` 是「这个任务勾没勾完成后通知」的派生字段，从 `options_json` 读出，见 [_notify_on_complete](../backend/app/job_read_model.py#L44)：它必须走读模型，否则前端刷新一次页面就拿不到它（SSE 每条事件只是重拉 `/api/jobs`）。
+任务读模型由 [read_job](../backend/app/download/job_read_model.py#L12) 生成。任务级 `actual_resolution` 和 `actual_format` 是子视频聚合结果；单一值时显示具体值，playlist 不一致时显示 `混合分辨率` 或 `混合格式`，实现见 [job_read_model.py](../backend/app/download/job_read_model.py#L125)。`elapsed_seconds` 由 `started_at` 与 `finished_at`（未结束时取当前时间）计算，见 [elapsed_seconds](../backend/app/download/job_read_model.py#L166)。`notify_on_complete` 是「这个任务勾没勾完成后通知」的派生字段，从 `options_json` 读出，见 [_notify_on_complete](../backend/app/download/job_read_model.py#L44)：它必须走读模型，否则前端刷新一次页面就拿不到它（SSE 每条事件只是重拉 `/api/jobs`）。
 
 子视频级字段包括：
 
 - `actual_width`、`actual_height`、`actual_format`：下载前预检测后写入，完成后校准。
 - `downloaded_bytes`、`total_bytes`：下载前若 yt-dlp 能预估计划大小，会先写入 `total_bytes`；下载中持续校准；下载完成后保留最终大小。
-- `duration`：视频时长（秒）。**建任务时**就从解析结果的条目写入（`POST /api/jobs` 的条目本身带时长），所以任务一进队列就能显示，不必等预检；平台没给时长时为 `null`。`duration` 这一列是后补的，补列之前建的旧任务**重启一次**会在预检时补上（见 [_apply_download_preparation](../backend/app/job_manager.py#L1032)）。
+- `duration`：视频时长（秒）。**建任务时**就从解析结果的条目写入（`POST /api/jobs` 的条目本身带时长），所以任务一进队列就能显示，不必等预检；平台没给时长时为 `null`。`duration` 这一列是后补的，补列之前建的旧任务**重启一次**会在预检时补上（见 [_apply_download_preparation](../backend/app/download/job_manager.py#L1032)）。
 - `output_path`：优先使用数据库记录；若为空但任务下载目录中存在 `... [youtube_id].mp4/.mkv/.webm` 等最终视频，读模型会投影该路径，便于任务中心恢复播放和打开文件夹能力。
 - `requested_resolution`、`fallback_resolution`、`fallback_reason`、`resolution_fallback`：清晰度降级和重启建议。
 - `speed`：运行中是瞬时速度；终态是平均速度。
@@ -239,7 +239,7 @@ cookies 体检结果。字段分三层：
 
 ### ResolutionFallback
 
-字段定义见 [ResolutionFallback](../backend/app/schemas.py#L152)，消息构建逻辑见 [fallback_policy.py](../backend/app/fallback_policy.py#L10)。固定原因包括：
+字段定义见 [ResolutionFallback](../backend/app/contracts/schemas.py#L152)，消息构建逻辑见 [fallback_policy.py](../backend/app/download/fallback_policy.py#L10)。固定原因包括：
 
 - `requested_resolution_missing`
 - `source_below_720_only`
@@ -254,7 +254,7 @@ cookies 体检结果。字段分三层：
 
 1. **投稿是异步的**。`POST /api/bilibili/uploads` 与 `/collections` 只负责入队并立刻返回当前读模型，进度要靠 `GET /api/bilibili/uploads`、`/summary` 或 SSE 事件流回读。
 2. **命令返回码 0 不等于已发布**。后端在命令退出后回读账号稿件列表对账（按标题前缀匹配，两侧空白归一），对不上就是 `unverified`（待核对）——它既不是成功也不是失败，界面文案与推荐动作都单独一套（`UPLOAD_UNVERIFIED`）。
-3. **界面状态由后端聚合**。任务级那一档徽标（`none` / `uploading` / `uploaded` / `unverified` / `partial` / `failed`）由 [derive_badge](../backend/app/bili_read_model.py#L60) 现场算出，前端只渲染，不自行推导。
+3. **界面状态由后端聚合**。任务级那一档徽标（`none` / `uploading` / `uploaded` / `unverified` / `partial` / `failed`）由 [derive_badge](../backend/app/bilibili/bili_read_model.py#L60) 现场算出，前端只渲染，不自行推导。
 
 投放限制在服务端统一校验，超限**只报错不截断**（静默截断会让用户以为发出去的是完整内容），合集会把问题定位到第几条。
 
@@ -267,17 +267,17 @@ cookies 体检结果。字段分三层：
 | `copyright` | 只能取 `1`（自制）或 `2`（转载）。**默认 `2`** |
 | `source` | `copyright=2` 时**必填**；`copyright=1` 时**不提交** |
 
-`copyright` 与 `source` 不在上面这张「长度上限」表里，但同样是提交前的拦截项，判据在 [validate](../backend/app/bili_meta.py#L354)。三点值得调用方注意：
+`copyright` 与 `source` 不在上面这张「长度上限」表里，但同样是提交前的拦截项，判据在 [validate](../backend/app/bilibili/bili_meta.py#L354)。三点值得调用方注意：
 
 - **读不出合法 `copyright` 时回退 `2`（转载）而不是 `1`**。标成自制是替用户声明一件他没说过的事；标成转载最多让他改一下。
-- **自制稿即便 `source` 带值也不会出现在命令行里**。判据只有一个函数 [effective_source](../backend/app/bili_meta.py#L205) —— 若在别处再写一遍「要不要带来源」，落库快照与实发参数迟早对不上。
+- **自制稿即便 `source` 带值也不会出现在命令行里**。判据只有一个函数 [effective_source](../backend/app/bilibili/bili_meta.py#L205) —— 若在别处再写一遍「要不要带来源」，落库快照与实发参数迟早对不上。
 - **合集模板上 `source` 恒为空**，逐条来源由服务端渲染时各取该条自己的来源链接。模板里回填第一条的值会让人误以为「所有条目都用它」，所以刻意不回填。
 
-历史上已入库的稿件，`db._ensure_columns` 补的 `copyright` 是 `1`（那是改动之前的实际行为），与产品默认值 `2` 不同 —— 见 [BiliUpload](../backend/app/models.py#L132) 的注释。
+历史上已入库的稿件，`db._ensure_columns` 补的 `copyright` 是 `1`（那是改动之前的实际行为），与产品默认值 `2` 不同 —— 见 [BiliUpload](../backend/app/contracts/models.py#L132) 的注释。
 
 ### 归集方式（`group_mode` / `season_id` / `season_title`）
 
-**单视频与合集两条投稿路径共用同一组字段与同一份校验**（[validate_group_choice](../backend/app/bili_meta.py#L493)），
+**单视频与合集两条投稿路径共用同一组字段与同一份校验**（[validate_group_choice](../backend/app/bilibili/bili_meta.py#L493)），
 区别只在默认值：
 
 | 字段 | 说明 |
@@ -293,9 +293,9 @@ cookies 体检结果。字段分三层：
 - `POST /api/bilibili/collections`（合集）默认 `new`。改动前就是每次投完自动新建，
   改成别的会让已有的合集投稿突然失去归集。
 
-两个常量分别在 [DEFAULT_GROUP_MODE](../backend/app/bili_meta.py#L97) 与
-[DEFAULT_SINGLE_GROUP_MODE](../backend/app/bili_meta.py#L98)，
-[normalize_group_mode](../backend/app/bili_meta.py#L102) 的回退值是**参数**而不是写死的 ——
+两个常量分别在 [DEFAULT_GROUP_MODE](../backend/app/bilibili/bili_meta.py#L97) 与
+[DEFAULT_SINGLE_GROUP_MODE](../backend/app/bilibili/bili_meta.py#L98)，
+[normalize_group_mode](../backend/app/bilibili/bili_meta.py#L102) 的回退值是**参数**而不是写死的 ——
 传错的表现是「升级后一批投稿悄悄多出/失去合集」，不会有任何报错。
 
 三条调用方容易踩到的语义：
@@ -314,7 +314,7 @@ cookies 体检结果。字段分三层：
 
 ### BiliUploadRead 与 BiliJobUploadsRead
 
-前端真正消费的是 [BiliJobUploadsRead](../backend/app/schemas.py#L612)（任务级读模型）与 [BiliJobUploadsSummaryRead](../backend/app/schemas.py#L627)（全部任务的徽标汇总）。`uploads` 按条目在任务中的位置排序，对不上任何条目的记录排在最后。
+前端真正消费的是 [BiliJobUploadsRead](../backend/app/contracts/schemas.py#L612)（任务级读模型）与 [BiliJobUploadsSummaryRead](../backend/app/contracts/schemas.py#L627)（全部任务的徽标汇总）。`uploads` 按条目在任务中的位置排序，对不上任何条目的记录排在最后。
 
 条目级 `status` 是后端自己的生命周期，`badge` 是界面用的粗档位：
 
@@ -344,7 +344,7 @@ cookies 体检结果。字段分三层：
 
 提交前，`GET /api/bilibili/prefill` 的每条 `BiliPrefillItem.subtitle` 会告诉界面**这一条会带什么字幕**
 （`en · 人工` / `zh · 自动生成` / `无字幕` / 空串）。这句文案由服务端
-[`subtitle_summary`](../backend/app/subtitle_plan.py#L92) 拼好 —— 前端自己拼一遍就会出现
+[`subtitle_summary`](../backend/app/download/subtitle_plan.py#L92) 拼好 —— 前端自己拼一遍就会出现
 「界面写自动生成、后端写 ASR」两套说法。
 
 已发布/审核中的稿件，只要字幕**失败过**、或者**有字幕文件却还没 `posted`**，重试就走
@@ -365,11 +365,11 @@ cookies 体检结果。字段分三层：
 
 `409` 用在这里是刻意的：B站 投稿的前置条件全部是「现在还不满足、但可以补救」的状态（等下载完、装工具、登录），因此做成**请求被拒**而不是「建了个任务然后失败」—— 后者会把一次可解释的拒绝变成一条要用户去清理的失败记录。
 
-对应实现见 [cookie_import_status_code](../backend/app/api_support.py#L137)（锁库错误映射为 `409`）与各路由内的 `HTTPException`。
+对应实现见 [cookie_import_status_code](../backend/app/api/api_support.py#L137)（锁库错误映射为 `409`）与各路由内的 `HTTPException`。
 
 ## 任务状态
 
-任务和子视频状态来自 [JobStatus](../backend/app/models.py#L12)。
+任务和子视频状态来自 [JobStatus](../backend/app/contracts/models.py#L12)。
 
 | 状态 | 含义 |
 | --- | --- |
@@ -382,7 +382,7 @@ cookies 体检结果。字段分三层：
 
 ## 诊断字段
 
-`GET /api/diagnostics` 返回 `{"cookies_enabled": bool, "dependencies": {...}, "log_file": str|null, "sanitized_environment": [...]}`，其中 `dependencies` 是 `YtDlpService.get_dependency_status()` 与配置值的合并结果，见 [main.py](../backend/app/routers/diagnostics.py#L30)。常见字段：
+`GET /api/diagnostics` 返回 `{"cookies_enabled": bool, "dependencies": {...}, "log_file": str|null, "sanitized_environment": [...]}`，其中 `dependencies` 是 `YtDlpService.get_dependency_status()` 与配置值的合并结果，见 [main.py](../backend/app/api/routers/diagnostics.py#L30)。常见字段：
 
 - `ffmpeg`、`ffprobe`
 - `yt_dlp_version`

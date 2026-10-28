@@ -802,10 +802,10 @@ README 快速启动当前混用了单端口托管和 Vite 开发模式，导致�
 
 ## File Structure
 
-- `backend/app/db.py` — SQLite engine; enable WAL + busy timeout on connect.
-- `backend/app/progress_persist.py` — decide whether a progress snapshot should hit SQLite/SSE.
-- `backend/app/job_manager.py` — use the persist gate; skip extra `extract_metadata` when `prepare_download` already succeeds; merge missing-resolution fallback into `_prepare_download`.
-- `backend/app/ytdlp_service.py` — stop applying playlist `sleep_interval` to single-URL downloads (`noplaylist=True`).
+- `backend/app/infra/db.py` — SQLite engine; enable WAL + busy timeout on connect.
+- `backend/app/download/progress_persist.py` — decide whether a progress snapshot should hit SQLite/SSE.
+- `backend/app/download/job_manager.py` — use the persist gate; skip extra `extract_metadata` when `prepare_download` already succeeds; merge missing-resolution fallback into `_prepare_download`.
+- `backend/app/download/ytdlp_service.py` — stop applying playlist `sleep_interval` to single-URL downloads (`noplaylist=True`).
 - `backend/tests/test_db.py` — WAL / busy_timeout.
 - `backend/tests/test_progress_persist.py` — persist gate unit tests.
 - `backend/tests/test_ytdlp_service.py` — sleep option assertions.
@@ -831,7 +831,7 @@ README 快速启动当前混用了单端口托管和 Vite 开发模式，导致�
 ### Task 1: SQLite WAL and busy timeout
 
 **Files:**
-- Modify: `backend/app/db.py`
+- Modify: `backend/app/infra/db.py`
 - Create: `backend/tests/test_db.py`
 - Modify: `docs/implementation.md`, `docs/development.md`, `docs/safety-review.md`, `docs/4-plus-1-view.md`, `docs/diagrams/four-plus-one-process-view.puml`
 
@@ -882,7 +882,7 @@ Expected: FAIL because `journal_mode` is `delete` (or not `wal`).
 
 - [x] **Step 3: Write minimal implementation**
 
-In `backend/app/db.py` add SQLAlchemy connect hook:
+In `backend/app/infra/db.py` add SQLAlchemy connect hook:
 
 ```python
 from collections.abc import Generator
@@ -934,7 +934,7 @@ In `docs/4-plus-1-view.md` process view paragraph, mention WAL.
 
 ```powershell
 python -m pytest backend\tests\test_db.py -q
-git add backend/app/db.py backend/tests/test_db.py docs/implementation.md docs/development.md docs/safety-review.md docs/4-plus-1-view.md docs/diagrams/four-plus-one-process-view.puml
+git add backend/app/infra/db.py backend/tests/test_db.py docs/implementation.md docs/development.md docs/safety-review.md docs/4-plus-1-view.md docs/diagrams/four-plus-one-process-view.puml
 git commit -m "feat: enable SQLite WAL for concurrent download writes"
 git push origin main
 ```
@@ -944,9 +944,9 @@ git push origin main
 ### Task 2: Throttle progress SQLite and SSE writes
 
 **Files:**
-- Create: `backend/app/progress_persist.py`
+- Create: `backend/app/download/progress_persist.py`
 - Create: `backend/tests/test_progress_persist.py`
-- Modify: `backend/app/job_manager.py` (`_run_item` progress_hook)
+- Modify: `backend/app/download/job_manager.py` (`_run_item` progress_hook)
 - Modify: `docs/implementation.md`, `docs/testing.md`, `docs/diagrams/four-plus-one-development-view.puml`, `docs/diagrams/single-video-sequence.puml`
 
 **Interfaces:**
@@ -1000,7 +1000,7 @@ Expected: FAIL with `ModuleNotFoundError: app.progress_persist`
 
 - [x] **Step 3: Implement the gate**
 
-Create `backend/app/progress_persist.py`:
+Create `backend/app/download/progress_persist.py`:
 
 ```python
 PROGRESS_PERSIST_MIN_INTERVAL_SECONDS = 0.25
@@ -1091,7 +1091,7 @@ Expected: PASS. Intermediate UI polls in `test_api.py` still work because the fi
 - [x] **Step 7: Commit and push**
 
 ```powershell
-git add backend/app/progress_persist.py backend/app/job_manager.py backend/tests/test_progress_persist.py docs/implementation.md docs/testing.md docs/diagrams/four-plus-one-development-view.puml docs/diagrams/single-video-sequence.puml
+git add backend/app/download/progress_persist.py backend/app/download/job_manager.py backend/tests/test_progress_persist.py docs/implementation.md docs/testing.md docs/diagrams/four-plus-one-development-view.puml docs/diagrams/single-video-sequence.puml
 git commit -m "perf: throttle download progress database writes"
 git push origin main
 ```
@@ -1101,7 +1101,7 @@ git push origin main
 ### Task 3: Skip redundant extract_metadata on the happy path
 
 **Files:**
-- Modify: `backend/app/job_manager.py` (`_run_item`, `_prepare_download`; delete `_options_for_available_resolution`)
+- Modify: `backend/app/download/job_manager.py` (`_run_item`, `_prepare_download`; delete `_options_for_available_resolution`)
 - Modify: `backend/tests/fakes.py`
 - Modify: `backend/tests/test_api.py`
 - Modify: `docs/implementation.md`, `docs/technical.md`, `docs/diagrams/playlist-sequence.puml`
@@ -1325,7 +1325,7 @@ Expected: PASS, including existing fallback tests (`requested_resolution_missing
 - [x] **Step 6: Commit and push**
 
 ```powershell
-git add backend/app/job_manager.py backend/tests/fakes.py backend/tests/test_api.py docs/implementation.md docs/technical.md docs/diagrams/playlist-sequence.puml
+git add backend/app/download/job_manager.py backend/tests/fakes.py backend/tests/test_api.py docs/implementation.md docs/technical.md docs/diagrams/playlist-sequence.puml
 git commit -m "perf: skip extra YouTube extract when format is selectable"
 git push origin main
 ```
@@ -1335,7 +1335,7 @@ git push origin main
 ### Task 4: Do not sleep 2–5s between files of one video
 
 **Files:**
-- Modify: `backend/app/ytdlp_service.py` (`build_download_options`)
+- Modify: `backend/app/download/ytdlp_service.py` (`build_download_options`)
 - Modify: `backend/tests/test_ytdlp_service.py`
 - Modify: `docs/technical.md`, `docs/user-manual.md`
 
@@ -1397,7 +1397,7 @@ Expected: PASS
 - [x] **Step 6: Commit and push**
 
 ```powershell
-git add backend/app/ytdlp_service.py backend/tests/test_ytdlp_service.py docs/technical.md docs/user-manual.md
+git add backend/app/download/ytdlp_service.py backend/tests/test_ytdlp_service.py docs/technical.md docs/user-manual.md
 git commit -m "perf: remove intra-item yt-dlp sleep between media files"
 git push origin main
 ```

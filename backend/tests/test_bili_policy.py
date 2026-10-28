@@ -11,7 +11,7 @@
 
 import pytest
 
-from app.bili_policy import (
+from app.bilibili.bili_policy import (
     BADGE_FAILED,
     BADGE_NONE,
     BADGE_PARTIAL,
@@ -53,7 +53,7 @@ from app.bili_policy import (
     status_for_platform_state,
     upload_status_text,
 )
-from app.models import BiliUploadStatus
+from app.contracts.models import BiliUploadStatus
 
 
 def _advice_pairs() -> list[str]:

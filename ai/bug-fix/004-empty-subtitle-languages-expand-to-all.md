@@ -25,7 +25,7 @@ ERROR: ... HTTP Error 429 ...
 
 ## 原因
 
-`backend/app/ytdlp_service.py` 的 `_subtitle_options()`：
+`backend/app/download/ytdlp_service.py` 的 `_subtitle_options()`：
 
 ```python
 languages = options.subtitle_languages or ["all"]

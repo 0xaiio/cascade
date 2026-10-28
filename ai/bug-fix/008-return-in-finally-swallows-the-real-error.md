@@ -26,7 +26,7 @@ return
 
 ## 原因
 
-### 1) `finally` 里的 `return`（`backend/app/job_manager.py:628` 起，函数 `JobManager._run_item`）
+### 1) `finally` 里的 `return`（`backend/app/download/job_manager.py:628` 起，函数 `JobManager._run_item`）
 
 收尾逻辑写在 `finally` 里，并用 `return` 提前退出两个分支：
 
@@ -56,7 +56,7 @@ SyntaxWarning 只在**源码被重新编译**时打印；`__pycache__` 命中时
 $ python -m pytest -q                     # .pyc 是新的 → 一条警告都没有
 255 passed
 
-$ git stash push -- backend/app/job_manager.py    # 让 .pyc 失效
+$ git stash push -- backend/app/download/job_manager.py    # 让 .pyc 失效
 $ python -m pytest -q tests/test_job_manager_finally.py
 app\job_manager.py:630: SyntaxWarning: 'return' in a 'finally' block
 app\job_manager.py:647: SyntaxWarning: 'return' in a 'finally' block
@@ -153,7 +153,7 @@ app/job_manager.py:647: SyntaxWarning: ...          （无）
 ### 2) 行为 A/B（同一批测试，只把 `job_manager.py` 回退到修复前）
 
 ```text
-$ git stash push -- backend/app/job_manager.py
+$ git stash push -- backend/app/download/job_manager.py
 $ python -m pytest -q tests/test_job_manager_finally.py tests/test_finally_guards.py
 FAILED ...::test_run_item_propagates_error_raised_while_the_item_is_deleted
 FAILED ...::test_worker_survives_an_item_that_crashes_while_finishing
@@ -208,7 +208,7 @@ $ python -m pytest -q tests/test_job_manager_finally.py tests/test_finally_guard
 - **行为变化（有意）**：收尾阶段的异常现在会浮到 worker 并被记成 `logger.exception`。
   日志会多出 `item worker crashed:` 这一类行 —— 这是想要的，不是噪音。
 - **行为变化（有意）**：条目的失败文案多了一种 `内部错误：任务在收尾阶段异常退出，详情见日志。`
-- 回滚：`git revert <sha>`。该 commit 只碰 `backend/app/job_manager.py` 与两个新增测试文件，回滚不影响下载链路。
+- 回滚：`git revert <sha>`。该 commit 只碰 `backend/app/download/job_manager.py` 与两个新增测试文件，回滚不影响下载链路。
 
 ## 关联
 

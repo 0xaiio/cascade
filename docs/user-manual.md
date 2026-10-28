@@ -47,14 +47,14 @@ YouTube Downloader 是本机单用户工具。前端提供链接解析、下载�
 ## 基本下载流程
 
 1. 在首页输入单视频或 playlist 链接，点击解析。
-2. Playlist 会展示条目列表，可选择要下载的子视频；后端会根据选择生成 `JobItem`，见 [创建任务路由](../backend/app/routers/jobs.py#L28)。
+2. Playlist 会展示条目列表，可选择要下载的子视频；后端会根据选择生成 `JobItem`，见 [创建任务路由](../backend/app/api/routers/jobs.py#L28)。
 3. 在下载选项中选择下载模式、清晰度、字幕语言、字幕来源、字幕格式、metadata、缩略图、限速、重试和通知；默认清晰度为 `1440p`，默认字幕来源为“两者都要”。
 4. 点击加入下载队列，在任务中心观察进度、速度、预计剩余时间、实际分辨率和实际格式。
 5. 对任务执行暂停、重启、仅删除任务，或删除任务并删除已下载文件；前端 API 调用见 [api.ts](../frontend/src/api.ts#L56)。
 
 ## 下载选项
 
-下载选项的数据结构由 [DownloadOptions](../backend/app/schemas.py#L113) 定义，前端对应类型见 [types.ts](../frontend/src/types.ts#L43)。
+下载选项的数据结构由 [DownloadOptions](../backend/app/contracts/schemas.py#L113) 定义，前端对应类型见 [types.ts](../frontend/src/types.ts#L43)。
 
 | 选项 | 行为 |
 | --- | --- |
@@ -94,7 +94,7 @@ YouTube Downloader 是本机单用户工具。前端提供链接解析、下载�
 
 ## 任务中心
 
-任务中心展示任务级和子视频级状态。后端 API 返回的字段见 [JobRead](../backend/app/schemas.py#L199) 和 [JobItemRead](../backend/app/schemas.py#L160)，前端展示组件见 [JobQueue](../frontend/src/components/JobQueue.tsx#L24)。
+任务中心展示任务级和子视频级状态。后端 API 返回的字段见 [JobRead](../backend/app/contracts/schemas.py#L199) 和 [JobItemRead](../backend/app/contracts/schemas.py#L160)，前端展示组件见 [JobQueue](../frontend/src/components/JobQueue.tsx#L24)。
 Playlist 展开后会用浅色分组背景承载子视频列表，便于区分合集任务行和单个视频任务。
 
 | 信息 | 说明 |
@@ -373,8 +373,8 @@ HTTP 状态码、耗时、收到多少字节、原始异常，以及下一步建
 
 ### 其它导入入口与边界
 
-- 从浏览器导入可选择「自动检测浏览器」或指定 Edge、Chrome、Firefox、Brave、Chromium 等，见 [browser_cookies.py](../backend/app/browser_cookies.py#L19)。
-- Edge 正在运行导致数据库锁定时会返回结构化错误，见 [BrowserCookieImportError](../backend/app/browser_cookies.py#L23)。
+- 从浏览器导入可选择「自动检测浏览器」或指定 Edge、Chrome、Firefox、Brave、Chromium 等，见 [browser_cookies.py](../backend/app/host/browser_cookies.py#L19)。
+- Edge 正在运行导致数据库锁定时会返回结构化错误，见 [BrowserCookieImportError](../backend/app/host/browser_cookies.py#L23)。
   界面上的「关闭 Edge 并导入」会 `taskkill /IM msedge.exe /F /T`，**会关掉你所有 Edge 窗口（含未保存的标签页）**，
   需要你显式点击；能自己先关掉浏览器的话，优先手动关。
 - **不要**让应用去读取你正在使用的 Edge/Chrome 配置目录：Edge 的 cookie 是 v20 app-bound 加密，
@@ -417,9 +417,9 @@ YouTube 把登录态与出口 IP 绑定。导出 cookies 时走代理 A、下载
 
 ## 下载目录与产物
 
-默认下载根目录是 `downloads/`，数据库和 cookies 默认在 `data/`，配置默认值见 [AppSettings](../backend/app/config.py#L19)。Playlist 会在下载根目录下创建同名子文件夹；目录选择和保存逻辑见 [select_download_dir](../backend/app/routers/settings.py#L84)。
+默认下载根目录是 `downloads/`，数据库和 cookies 默认在 `data/`，配置默认值见 [AppSettings](../backend/app/contracts/config.py#L19)。Playlist 会在下载根目录下创建同名子文件夹；目录选择和保存逻辑见 [select_download_dir](../backend/app/api/routers/settings.py#L84)。
 
-产物命名模板固定为 `<标题(最多200字节)> [<YouTube id>].<扩展名>`，见 [build_download_options](../backend/app/ytdlp_service.py#L496)。因此即使数据库里的 `output_path` 丢失，后端仍能按文件名中的 id 找回同名视频与 sidecar。
+产物命名模板固定为 `<标题(最多200字节)> [<YouTube id>].<扩展名>`，见 [build_download_options](../backend/app/download/ytdlp_service.py#L496)。因此即使数据库里的 `output_path` 丢失，后端仍能按文件名中的 id 找回同名视频与 sidecar。
 
 ## 常见问题入口
 

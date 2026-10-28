@@ -1,4 +1,4 @@
-from app.progress_persist import ProgressPersistGate
+from app.download.progress_persist import ProgressPersistGate
 
 
 def test_progress_persist_gate_allows_first_and_finished() -> None:

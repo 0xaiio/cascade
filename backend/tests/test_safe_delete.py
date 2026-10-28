@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from app.safe_delete import DeleteScope, delete_scope, is_deletion_allowed, removable_job_dir
+from app.download.safe_delete import DeleteScope, delete_scope, is_deletion_allowed, removable_job_dir
 
 
 # --- delete_scope ------------------------------------------------------------

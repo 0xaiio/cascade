@@ -55,7 +55,7 @@ youtube.com 走 54109              : URLError: <urlopen error Tunnel connection 
 
 ## 修复方案
 
-新增 `backend/app/proxy.py`，把代理**显式解析**成一个确定结果，优先级：
+新增 `backend/app/host/proxy.py`，把代理**显式解析**成一个确定结果，优先级：
 
 ```
 显式设置  >  Windows 系统代理（WinINet 注册表 ProxyEnable/ProxyServer）  >  环境变量

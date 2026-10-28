@@ -17,8 +17,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
-from app.events import EventBroker
-from app.routers.events import events
+from app.infra.events import EventBroker
+from app.api.routers.events import events
 
 TIMEOUT = 2.0
 

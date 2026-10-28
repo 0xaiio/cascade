@@ -11,14 +11,14 @@ from __future__ import annotations
 
 import pytest
 
-from app.fallback_policy import (
+from app.download.fallback_policy import (
     MEDIA_STREAM_BLOCKED,
     REQUESTED_RESOLUTION_MISSING,
     REQUESTED_RESOLUTION_UNSELECTABLE,
     SOURCE_BELOW_720_ONLY,
     build_resolution_fallback,
 )
-from app.resolution_decisions import (
+from app.download.resolution_decisions import (
     ResolutionDecisionKind,
     decide_media_stream_fallback,
     decide_probe_fallback,
@@ -29,7 +29,7 @@ from app.resolution_decisions import (
     should_look_for_fallback,
     unselectable_resolution_message,
 )
-from app.schemas import DownloadOptions, FormatOption
+from app.contracts.schemas import DownloadOptions, FormatOption
 
 
 def formats(*heights: int) -> list[FormatOption]:

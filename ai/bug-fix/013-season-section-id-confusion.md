@@ -41,7 +41,7 @@ BiliApiError: 归集稿件失败（code=-404 message=啥都木有）
 
 修复前，这两个值在代码里是同一个变量 `season_id`，从头到尾没人换过号：
 
-`git show HEAD:backend/app/bili_api.py`（第 196-217 行，节选）：
+`git show HEAD:backend/app/bilibili/bili_api.py`（第 196-217 行，节选）：
 
 ```python
 def add_episodes(transport, jar, *, season_id: int, episodes) -> None:
@@ -52,7 +52,7 @@ def add_episodes(transport, jar, *, season_id: int, episodes) -> None:
     }
 ```
 
-`git show HEAD:backend/app/bili_upload.py`（第 395-442 行，节选）：
+`git show HEAD:backend/app/bilibili/bili_upload.py`（第 395-442 行，节选）：
 
 ```python
     season_id = existing_season_id

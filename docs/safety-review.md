@@ -24,12 +24,12 @@
 
 详情：
 
-- `subprocess.run([ffmpeg, ...])` 使用固定参数列表（[system_open.py](../backend/app/system_open.py#L100)、[ytdlp_service.py](../backend/app/ytdlp_service.py#L628)）
-- `subprocess.Popen([biliup, ...])` 用 list 形式启动投稿进程、不经 shell；`biliup` 的路径来自候选探测或配置，标题/简介/标签等内容作为**独立 argv 元素**传入（[bili_bin.py](../backend/app/bili_bin.py#L226)）
-- `subprocess.run([taskkill, ...])` 使用已知固定命令（[browser_cookies.py](../backend/app/browser_cookies.py#L141)）
-- `subprocess.Popen([edge, --remote-debugging-port=..., ...])` 参数由常量或系统路径构成，非用户可控（[browser_cookies.py](../backend/app/browser_cookies.py#L157)）
-- 「打开方式」三级链：① 本进程内调 [SHOpenWithDialog](../backend/app/system_open.py#L71)（`shell32` 的文档化导出）；② 退回 `Popen(["rundll32.exe", "shell32.dll,OpenAs_RunDLL", path])`（命令名与导出项都是常量、list 形式、不经 shell，路径由后端从数据库推导、不是前端传的）；③ 自带对话框里用户选中的 exe 用 `Popen([exe, file])` 启动。三条都不接受前端传入的路径或程序名
-- `subprocess.run(["netstat", ...])` / `(["tasklist", "/FI", f"PID eq {pid}", ...])` 用于识别端口占用者：命令名与参数都是常量，`pid` 由 [parse_listening_pids](../backend/app/dev_server.py#L71) 用 `int()` 从 `netstat` 输出解析、解析失败即跳过，因此无法注入（[dev_server.py](../backend/app/dev_server.py#L119)）
+- `subprocess.run([ffmpeg, ...])` 使用固定参数列表（[system_open.py](../backend/app/host/system_open.py#L100)、[ytdlp_service.py](../backend/app/download/ytdlp_service.py#L628)）
+- `subprocess.Popen([biliup, ...])` 用 list 形式启动投稿进程、不经 shell；`biliup` 的路径来自候选探测或配置，标题/简介/标签等内容作为**独立 argv 元素**传入（[bili_bin.py](../backend/app/bilibili/bili_bin.py#L226)）
+- `subprocess.run([taskkill, ...])` 使用已知固定命令（[browser_cookies.py](../backend/app/host/browser_cookies.py#L141)）
+- `subprocess.Popen([edge, --remote-debugging-port=..., ...])` 参数由常量或系统路径构成，非用户可控（[browser_cookies.py](../backend/app/host/browser_cookies.py#L157)）
+- 「打开方式」三级链：① 本进程内调 [SHOpenWithDialog](../backend/app/host/system_open.py#L71)（`shell32` 的文档化导出）；② 退回 `Popen(["rundll32.exe", "shell32.dll,OpenAs_RunDLL", path])`（命令名与导出项都是常量、list 形式、不经 shell，路径由后端从数据库推导、不是前端传的）；③ 自带对话框里用户选中的 exe 用 `Popen([exe, file])` 启动。三条都不接受前端传入的路径或程序名
+- `subprocess.run(["netstat", ...])` / `(["tasklist", "/FI", f"PID eq {pid}", ...])` 用于识别端口占用者：命令名与参数都是常量，`pid` 由 [parse_listening_pids](../backend/app/host/dev_server.py#L71) 用 `int()` 从 `netstat` 输出解析、解析失败即跳过，因此无法注入（[dev_server.py](../backend/app/host/dev_server.py#L119)）
 - yt-dlp 通过 Python SDK（`yt_dlp.YoutubeDL`）调用，非 shell 或 subprocess
 
 ## 2. 路径遍历（Path Traversal）
@@ -40,10 +40,10 @@
 
 详情：
 
-- 文件删除在 [_delete_output_files](../backend/app/job_manager.py#L399) 中执行，所有候选路径通过 [_is_under_allowed_root](../backend/app/job_manager.py#L372) 验证，仅允许在下载根目录或任务下载子目录下操作
-- 本地播放/打开文件夹/打开字幕接口（[routers/job_files.py](../backend/app/routers/job_files.py#L17) 起）仅使用数据库记录的 `output_path`、`subtitle_path` 和 `download_dir`，不接受前端传入任意路径；`open-subtitle` 的 `mode` 是 `Literal["default", "chooser"]`，越界取值由 FastAPI 直接 `422`
-- [safe_path_name](../backend/app/paths.py#L7) 为 playlist 目录名移除 `<>:"/\|?*` 等不安全字符，并限制长度为 120 字符
-- [discover_output_file_candidates](../backend/app/output_paths.py#L52) 仅在给定的 `job_download_dir` 内按 YouTube video ID 匹配文件，不遍历上级目录
+- 文件删除在 [_delete_output_files](../backend/app/download/job_manager.py#L399) 中执行，所有候选路径通过 [_is_under_allowed_root](../backend/app/download/job_manager.py#L372) 验证，仅允许在下载根目录或任务下载子目录下操作
+- 本地播放/打开文件夹/打开字幕接口（[routers/job_files.py](../backend/app/api/routers/job_files.py#L17) 起）仅使用数据库记录的 `output_path`、`subtitle_path` 和 `download_dir`，不接受前端传入任意路径；`open-subtitle` 的 `mode` 是 `Literal["default", "chooser"]`，越界取值由 FastAPI 直接 `422`
+- [safe_path_name](../backend/app/common/paths.py#L7) 为 playlist 目录名移除 `<>:"/\|?*` 等不安全字符，并限制长度为 120 字符
+- [discover_output_file_candidates](../backend/app/download/output_paths.py#L52) 仅在给定的 `job_download_dir` 内按 YouTube video ID 匹配文件，不遍历上级目录
 
 ## 3. SQL 注入（SQL Injection）
 
@@ -54,8 +54,8 @@
 详情：
 
 - 所有查询通过 `session.exec(select(...))` 执行，使用 SQLModel 的声明式查询
-- [_ensure_columns](../backend/app/db.py#L43) 使用 f-string 构建 `ALTER TABLE` 语句，但表名和列名来自硬编码字典，非用户输入
-- [checkpoint_wal](../backend/app/db.py#L109) 的 `PRAGMA wal_checkpoint(...)` 同样由常量与函数默认参数构成
+- [_ensure_columns](../backend/app/infra/db.py#L43) 使用 f-string 构建 `ALTER TABLE` 语句，但表名和列名来自硬编码字典，非用户输入
+- [checkpoint_wal](../backend/app/infra/db.py#L109) 的 `PRAGMA wal_checkpoint(...)` 同样由常量与函数默认参数构成
 - 无原始 SQL 拼接
 
 ## 4. 跨站脚本攻击（XSS）
@@ -96,11 +96,11 @@
 
 详情：
 
-- [GET /api/diagnostics](../backend/app/routers/diagnostics.py#L29) 仅返回 PO token / visitor data 的"是否已配置"布尔值，不返回原文（[get_dependency_status](../backend/app/ytdlp_service.py#L296)）
-- [sanitize_log_message](../backend/app/log_safety.py#L20) 在写入日志前通过正则替换移除 URL query string（包含 cookie、token、authorization 等参数）
-- 代理 URL 在日志与 API 响应里都先经 [redact_proxy_credentials](../backend/app/proxy.py#L62) 脱敏（`user:pass@` → `***`）
+- [GET /api/diagnostics](../backend/app/api/routers/diagnostics.py#L29) 仅返回 PO token / visitor data 的"是否已配置"布尔值，不返回原文（[get_dependency_status](../backend/app/download/ytdlp_service.py#L296)）
+- [sanitize_log_message](../backend/app/common/log_safety.py#L20) 在写入日志前通过正则替换移除 URL query string（包含 cookie、token、authorization 等参数）
+- 代理 URL 在日志与 API 响应里都先经 [redact_proxy_credentials](../backend/app/host/proxy.py#L62) 脱敏（`user:pass@` → `***`）
 - cookies 文件（`data/cookies.txt`、B站 的 `data/bili_cookies.json`）和 `.env` 文件均在 `.gitignore` 中排除，不会进入 Git
-- 浏览器 cookie 导入只提取 YouTube/Google 域名（`YOUTUBE_COOKIE_DOMAIN_SUFFIXES`，[browser_cookies.py](../backend/app/browser_cookies.py#L20)）
+- 浏览器 cookie 导入只提取 YouTube/Google 域名（`YOUTUBE_COOKIE_DOMAIN_SUFFIXES`，[browser_cookies.py](../backend/app/host/browser_cookies.py#L20)）
 
 新增的两处暴露面（均为本机、且是排障必需，见第 18 节的复核项）：
 
@@ -115,11 +115,11 @@
 
 详情：
 
-- 浏览器 cookie 导入使用 [BrowserCookieImporter](../backend/app/browser_cookies.py#L67)，支持 Edge/Chrome/Firefox/Brave/Chromium 等
+- 浏览器 cookie 导入使用 [BrowserCookieImporter](../backend/app/host/browser_cookies.py#L67)，支持 Edge/Chrome/Firefox/Brave/Chromium 等
 - 导入的 cookies 过滤为仅 youtube.com 和 google.com 域名
 - Edge cookies 数据库被锁时，提供提示并支持关闭浏览器重试
-- CDP fallback（[_extract_edge_cookies_via_cdp](../backend/app/browser_cookies.py#L176)）使用临时 headless Edge 实例，完成后立即终止进程
-- Cookie 导入由 `threading.Lock`（[job_manager.py](../backend/app/job_manager.py#L57)）保护，防止并发导入导致的资源竞争
+- CDP fallback（[_extract_edge_cookies_via_cdp](../backend/app/host/browser_cookies.py#L176)）使用临时 headless Edge 实例，完成后立即终止进程
+- Cookie 导入由 `threading.Lock`（[job_manager.py](../backend/app/download/job_manager.py#L57)）保护，防止并发导入导致的资源竞争
 
 **注意**：CDP fallback 启动 Edge 时使用了 `--remote-allow-origins=*`。虽然使用了随机空闲端口且进程在获取 cookies 后立即终止（超时 15 秒 + 10 秒），且仅绑定 `127.0.0.1`，但在 Headless Edge 短暂运行期间，同机的其他本地进程理论上可以连接到调试端口。攻击面极小（需要本机已存在恶意进程），且 YouTube cookies 在 Edge 中通常已在登录态下。
 
@@ -131,10 +131,10 @@
 
 详情：
 
-- 文件删除通过 [_is_under_allowed_root](../backend/app/job_manager.py#L372) 验证目标路径位于下载根目录或任务子目录内
-- 删除 playlist 子文件夹前检查文件夹确实在下载根目录下（[job_manager.py](../backend/app/job_manager.py#L369)）
-- 本地文件打开（[system_open.py](../backend/app/system_open.py#L28)）不涉及路径操作安全风险——仅打开已存在的文件
-- 输出路径解析（[output_paths.py](../backend/app/output_paths.py#L30)）仅在给定下载目录内进行，不访问外围文件系统
+- 文件删除通过 [_is_under_allowed_root](../backend/app/download/job_manager.py#L372) 验证目标路径位于下载根目录或任务子目录内
+- 删除 playlist 子文件夹前检查文件夹确实在下载根目录下（[job_manager.py](../backend/app/download/job_manager.py#L369)）
+- 本地文件打开（[system_open.py](../backend/app/host/system_open.py#L28)）不涉及路径操作安全风险——仅打开已存在的文件
+- 输出路径解析（[output_paths.py](../backend/app/download/output_paths.py#L30)）仅在给定下载目录内进行，不访问外围文件系统
 
 ## 10. 依赖安全
 
@@ -187,7 +187,7 @@
 
 详情：
 
-- Cookie 导入有 `threading.Lock` 保护（[job_manager.py](../backend/app/job_manager.py#L57)）
+- Cookie 导入有 `threading.Lock` 保护（[job_manager.py](../backend/app/download/job_manager.py#L57)）
 - 任务状态由 `_cancelled`、`_paused`、`_deleted`、`_runtime_restart_items` 等内存集合协调 worker 行为
 - `should_cancel` 回调在下载过程中定期检查，响应暂停/取消/删除请求
 - 数据库写入使用 SQLAlchemy session + commit，提供事务保护
@@ -236,11 +236,11 @@
 
 | 变更 | 位置 | 初步判断 | 需要复核的点 |
 | --- | --- | --- | --- |
-| 停滞看门狗 | [stall_guard.py](../backend/app/stall_guard.py) | 新增模块只读 progress payload 并在超时后抛异常，不接触文件系统、网络或数据库；无用户输入。 | 超时抛错是否会与取消/暂停语义冲突，导致任务状态异常。 |
-| WAL checkpoint | [db.py](../backend/app/db.py#L93) | `PRAGMA wal_checkpoint(TRUNCATE)` 由常量构成，失败只记日志。 | 与并发写入的交互、被强杀时的数据完整性。 |
-| 进度落库节流 | [progress_persist.py](../backend/app/progress_persist.py) | 纯内存节流，无 I/O。 | 节流是否会导致终态进度丢失。 |
-| 上传的 `.env` / 配置注入面 | [config.py](../backend/app/config.py#L19) | 新增 `YTDL_ARIA2C_PATH` 作为外部下载器可执行路径，会被交给 yt-dlp 作为 `external_downloader` 执行。**本机配置文件可控，非远端输入**，因此按本项目的威胁模型仍是低风险。 | 是否需要在文档中明确"该变量只应由本机使用者设置"；是否存在从 UI 可达的写入路径。 |
-| SQLite 补列 | [db.py](../backend/app/db.py#L43) | 仍是硬编码列名字典 + f-string，未引入外部输入。 | 无新增风险。 |
+| 停滞看门狗 | [stall_guard.py](../backend/app/download/stall_guard.py) | 新增模块只读 progress payload 并在超时后抛异常，不接触文件系统、网络或数据库；无用户输入。 | 超时抛错是否会与取消/暂停语义冲突，导致任务状态异常。 |
+| WAL checkpoint | [db.py](../backend/app/infra/db.py#L93) | `PRAGMA wal_checkpoint(TRUNCATE)` 由常量构成，失败只记日志。 | 与并发写入的交互、被强杀时的数据完整性。 |
+| 进度落库节流 | [progress_persist.py](../backend/app/download/progress_persist.py) | 纯内存节流，无 I/O。 | 节流是否会导致终态进度丢失。 |
+| 上传的 `.env` / 配置注入面 | [config.py](../backend/app/contracts/config.py#L19) | 新增 `YTDL_ARIA2C_PATH` 作为外部下载器可执行路径，会被交给 yt-dlp 作为 `external_downloader` 执行。**本机配置文件可控，非远端输入**，因此按本项目的威胁模型仍是低风险。 | 是否需要在文档中明确"该变量只应由本机使用者设置"；是否存在从 UI 可达的写入路径。 |
+| SQLite 补列 | [db.py](../backend/app/infra/db.py#L43) | 仍是硬编码列名字典 + f-string，未引入外部输入。 | 无新增风险。 |
 
 复核方式：按第 1–15 节的分类逐项走查上述模块，通过后把结论并入对应章节，并把本文档顶部的基线改为复核时点的 commit。
 
@@ -250,13 +250,13 @@
 
 | 变更 | 位置 | 初步判断 | 需要复核的点 |
 | --- | --- | --- | --- |
-| 代理连通性自检 | [connectivity.py](../backend/app/connectivity.py#L73)、`POST /api/proxy/test` | 用 `urllib` 请求**固定的** `https://www.youtube.com/robots.txt`，URL 不可由请求体控制；代理地址来自本机设置或请求体，只作用于这一次请求，不写库、不落盘。响应回显的代理 URL 已脱敏。 | 请求体可控的代理地址等于「本机发起任意代理连接」的原语；本工具本来就允许配置代理，但需确认没有把它暴露成可被网页驱动（无认证 + `127.0.0.1` 绑定下，浏览器侧仍有 CSRF 面）。 |
-| cookies 登录态校验 | [cookie_health.py](../backend/app/cookie_health.py#L234)、`POST /api/cookies/verify` | 只读 `data/cookies.txt`，用 `MozillaCookieJar` 发一次 `https://www.youtube.com/`。**不返回 cookie 内容**，只返回条数、域名分布、命中的 cookie **名字**与 `LOGGED_IN` 判定。 | 返回的 cookie 名字集合（如 `SID`/`HSID`）本身是低敏信息；确认没有路径能把文件内容带出来。`deep=false` 时完全不联网。 |
-| 日志落盘 | [logging_setup.py](../backend/app/logging_setup.py#L48) | 写 `<data_dir>/logs/app.log`，UTF-8、2 MiB × 3 轮转。目录不可写时降级为「仅控制台」而不是启动失败。写入前统一过 [sanitize_log_message](../backend/app/log_safety.py#L20)。**已确认 `data/` 与 `*.log` 都在 `.gitignore` 内**，日志不会入库。 | 日志是**新增的持久化面**：确认所有进日志的字符串都过了清洗（尤其是来自 yt-dlp 的原始错误与代理 URL）。 |
-| 宿主环境变量摘除 | [runtime_env.py](../backend/app/runtime_env.py#L58) | 只在自己的进程内 `os.environ.pop("NODE_OPTIONS")`，且**只在命中 `--require`/`--import`/`--loader`/`--experimental-loader` 时**；不写系统环境、不改注册表；动作记进日志与诊断。 | 这是一处「应用会修改自身环境」的行为，需要确认它不会被误用成静默隐藏宿主配置的手段（当前实现只针对会破坏 JS 运行时的强加载开关，且必定留痕）。 |
-| 代理解析 | [proxy.py](../backend/app/proxy.py#L169) | 把「显式配置 / 系统代理 / 环境变量」归一成代理 URL，并**在回显前剥离凭据**（用户密码不会进界面和日志）。不发起请求。 | 解析结果会进日志（`proxy resolved ...`）与诊断响应；确认 `socks`/`http` 等 scheme 归一不会把凭据带出来，且 `direct` 语义不会被误解成「无代理」。 |
-| 端口占用者识别 | [dev_server.py](../backend/app/dev_server.py#L111) | 调用 `netstat` / `tasklist` 两个只读命令（list 参数形式，见第 1 节），PID 经 `int()` 校验；命令缺失或超时一律退化成「不知道是谁」。 | 这是一处**新的子进程面**（2026-10-01 引入）：确认 `tasklist` 输出的进程名只用于展示、不会被当成路径或命令再消费；确认失败路径不会泄露本机环境细节。 |
-| 错误翻译 | [error_advice.py](../backend/app/error_advice.py#L116) | 纯字符串判定：把异常链映射成「诊断 / 原因 / 建议」，不联网、不读库、不改变重试行为。 | 映射输出会直接展示给用户并进日志；确认原始异常在拼接前统一过 [log_safety](../backend/app/log_safety.py#L20) 清洗，不会把 URL query 或 token 带出来。 |
+| 代理连通性自检 | [connectivity.py](../backend/app/host/connectivity.py#L73)、`POST /api/proxy/test` | 用 `urllib` 请求**固定的** `https://www.youtube.com/robots.txt`，URL 不可由请求体控制；代理地址来自本机设置或请求体，只作用于这一次请求，不写库、不落盘。响应回显的代理 URL 已脱敏。 | 请求体可控的代理地址等于「本机发起任意代理连接」的原语；本工具本来就允许配置代理，但需确认没有把它暴露成可被网页驱动（无认证 + `127.0.0.1` 绑定下，浏览器侧仍有 CSRF 面）。 |
+| cookies 登录态校验 | [cookie_health.py](../backend/app/host/cookie_health.py#L234)、`POST /api/cookies/verify` | 只读 `data/cookies.txt`，用 `MozillaCookieJar` 发一次 `https://www.youtube.com/`。**不返回 cookie 内容**，只返回条数、域名分布、命中的 cookie **名字**与 `LOGGED_IN` 判定。 | 返回的 cookie 名字集合（如 `SID`/`HSID`）本身是低敏信息；确认没有路径能把文件内容带出来。`deep=false` 时完全不联网。 |
+| 日志落盘 | [logging_setup.py](../backend/app/infra/logging_setup.py#L48) | 写 `<data_dir>/logs/app.log`，UTF-8、2 MiB × 3 轮转。目录不可写时降级为「仅控制台」而不是启动失败。写入前统一过 [sanitize_log_message](../backend/app/common/log_safety.py#L20)。**已确认 `data/` 与 `*.log` 都在 `.gitignore` 内**，日志不会入库。 | 日志是**新增的持久化面**：确认所有进日志的字符串都过了清洗（尤其是来自 yt-dlp 的原始错误与代理 URL）。 |
+| 宿主环境变量摘除 | [runtime_env.py](../backend/app/host/runtime_env.py#L58) | 只在自己的进程内 `os.environ.pop("NODE_OPTIONS")`，且**只在命中 `--require`/`--import`/`--loader`/`--experimental-loader` 时**；不写系统环境、不改注册表；动作记进日志与诊断。 | 这是一处「应用会修改自身环境」的行为，需要确认它不会被误用成静默隐藏宿主配置的手段（当前实现只针对会破坏 JS 运行时的强加载开关，且必定留痕）。 |
+| 代理解析 | [proxy.py](../backend/app/host/proxy.py#L169) | 把「显式配置 / 系统代理 / 环境变量」归一成代理 URL，并**在回显前剥离凭据**（用户密码不会进界面和日志）。不发起请求。 | 解析结果会进日志（`proxy resolved ...`）与诊断响应；确认 `socks`/`http` 等 scheme 归一不会把凭据带出来，且 `direct` 语义不会被误解成「无代理」。 |
+| 端口占用者识别 | [dev_server.py](../backend/app/host/dev_server.py#L111) | 调用 `netstat` / `tasklist` 两个只读命令（list 参数形式，见第 1 节），PID 经 `int()` 校验；命令缺失或超时一律退化成「不知道是谁」。 | 这是一处**新的子进程面**（2026-10-01 引入）：确认 `tasklist` 输出的进程名只用于展示、不会被当成路径或命令再消费；确认失败路径不会泄露本机环境细节。 |
+| 错误翻译 | [error_advice.py](../backend/app/download/error_advice.py#L116) | 纯字符串判定：把异常链映射成「诊断 / 原因 / 建议」，不联网、不读库、不改变重试行为。 | 映射输出会直接展示给用户并进日志；确认原始异常在拼接前统一过 [log_safety](../backend/app/common/log_safety.py#L20) 清洗，不会把 URL query 或 token 带出来。 |
 | 说明浮层 | [HelpPopover.tsx](../frontend/src/components/HelpPopover.tsx#L42) | 纯前端展示：面板内容由调用方以 children 传入，组件自身不拼接 HTML、不使用 `dangerouslySetInnerHTML`；钉住状态只往 `localStorage` 写一个布尔值。 | `localStorage` 键前缀 `cascade.help.open.v1.` 属本机非敏感状态；若将来把说明内容改成远端获取，本节需要重新评估（当前无远端内容）。 |
 
 ## 19. B站 上传新增（`bilibili` 分支，待复核）
@@ -265,12 +265,12 @@
 
 | 变更 | 位置 | 初步判断 | 需要复核的点 |
 | --- | --- | --- | --- |
-| B站 凭据文件读写 | [bili_auth.py](../backend/app/bili_auth.py#L278)、`POST/DELETE /api/bilibili/cookies` | 只读写 `data/bili_cookies.json`（路径由 [bili_cookie_path](../backend/app/config.py#L94) 给出）。`GET /api/bilibili/status` 与导入响应只回传**键名与计数**，不回传值、不回传前缀；导入时会用 [is_cookie_tracked_by_git](../backend/app/bili_auth.py#L390) 检查该文件是否被 git 跟踪并把结论显示出来。`data/` 已在 `.gitignore` 内（实测 `git check-ignore` 命中）。文件里除 cookies 外还写入 `token_info`（长期投稿令牌 + 刷新令牌 + `mid`）与 `platform: "BiliTV"` —— 这三项对 `biliup` 是必需的（缺了它连投稿请求都不会发，见 [011](../ai/bug-fix/011-biliup-refuses-a-token-less-cookie-file.md)），但**令牌本身等价于一次账号登录**，泄露面与 cookies 同级。 | 这是**与下载 cookies 完全独立的第二份账号态**：确认没有接口能把 `SESSDATA` / `bili_jct` / `access_token` / `refresh_token` 的值带出来（包括错误响应与日志）。`log_safety.py` 的 `_SECRET_NAMES` 覆盖了 `access_token` / `refresh_token`，本次还补上了它们的 **JSON 形态**（`"name":"value"`）—— 此前只认 `name=value`，实测 `{"access_token":"X"}` 会被原样放行（见 [011](../ai/bug-fix/011-biliup-refuses-a-token-less-cookie-file.md) 的附带修复）。清洗器管的是「进日志」，管不到「被写进文件」：后一条靠的是 `data/` 被 `.gitignore` 覆盖加「不回显」，所以要确认 `git check-ignore` 之外没有别的路径会把它写进仓库。 |
-| 扫码登录 | [bili_auth.py](../backend/app/bili_auth.py#L166)、`POST /api/bilibili/login/qrcode` + `.../poll` | 请求 `passport.bilibili.com` 的二维码生成与轮询接口，轮询由**服务端**发起、频率固定；凭据从回调 query 与 `Set-Cookie` 取，取到后落盘到上面那个文件。二维码 SVG 由纯 Python 的 `qrcode` 生成（不引入 Pillow，不联网渲染）。 | 轮询是**持续的外发请求**：确认有上限与超时、不会因为前端反复刷新而无限叠加；确认二维码本身（含 `qrcode_key`）不会进日志。 |
-| 换取投稿令牌（TV 端） | [`exchange_tv_token`](../backend/app/bili_auth.py#L142)，经 `BiliManager.save_login` / `ensure_upload_token` 触发 | 三步都发往 `passport.bilibili.com`（申请二维码 → 用 cookies 确认 → 轮询取 `token_info`），与扫码登录同一宿主。**第二步把用户自己的 `SESSDATA` + `bili_jct` 放进 `Cookie` 请求头**，此外只带 `Referer`；请求体按与 `biliup` 逐字节一致的规则签名。拿到的长期令牌写进上面那个凭据文件。 | 本次新增的**外发请求家族**，也是第一次把账号凭据放进请求头发出去。需复核：① 三个端点都是模块级常量、只指向 `passport.bilibili.com`，Cookie 头不会随重定向跑到别的域；② 三步都有超时，轮询有次数上限（`TV_POLL_ATTEMPTS`）而不是死循环；③ 失败文案只拼 `code` / `message`，不含响应正文 —— 否则成功响应里的令牌就有一次进日志的机会；④ **导入 cookies 这条路径会自动触发它**，等于用户点「导入」就顺带同意了一次联网换取令牌，这个副作用要在界面文案里说清。 |
-| B站 业务请求 | [bili_http.py](../backend/app/bili_http.py#L66)、[bili_api.py](../backend/app/bili_api.py) | 标准库 `urllib`，端点全部是模块级常量（稿件列表 / 稿件详情 / 合集创建与归集 / 评论），请求体只由元数据与 aid/cid 组成。**显式清空 `ProxyHandler`**：B站 侧一律直连，不走用户配置的 YouTube 代理，也避免代理把凭据转交给第三方。4xx/5xx 也带回正文与 `Set-Cookie` 供归类，但正文经 [sanitize_log_message](../backend/app/log_safety.py#L20) 后才进日志与记录的 `log_tail`。 | 「直连」是一个刻意的行为差异：确认它在代理环境下不会静默失败成「B站 上传永远连不上」而不给提示。另需确认响应正文不会被原样回显到界面。 |
-| 投稿子进程 | [bili_bin.py](../backend/app/bili_bin.py#L226)、[bili_bin.py](../backend/app/bili_bin.py#L288) | `subprocess.Popen(list(argv))` —— list 形式、不经 shell（见第 1 节）；可执行文件路径来自候选探测（含 WinGet 目录）或配置项，标题/简介/标签作为独立 argv 元素传入。读取放在后台线程 + 有界 join，超时分支必 `kill()`。**`--copyright` / `--source` 也是独立 argv 元素**：来源链接是用户可填的自由文本，与标题同属「不经 shell、不拼字符串」这条约束的适用范围；`effective_source` 决定自制稿不带 `--source`。 | `biliup` 路径可由配置指定，等价于「本机执行一个用户可指向的可执行文件」——与该仓库既有的 `YTDL_ARIA2C_PATH` 同类，需确认它不会被网页侧驱动。抽帧走 ffmpeg，输出写到 `data/bili_covers/`（同样在 `.gitignore` 内）。 |
-| 上传记录落库 | [models.py](../backend/app/models.py#L114) 的 `BiliUpload` / `#L150` 的 `BiliSeason` | 新增两张表，字段里保存**提交的元数据快照**与平台返回的标识；`log_tail` 只存末若干行且写入前过清洗。**不保存任何凭据**。 | 确认 `log_tail` 不会因为清洗漏项而带上 URL query 或 cookie。**已发现一处未处理的缺口：删任务不会连带删这两张表的行**（`JobManager.delete` 只删 `JobEvent` / `JobItem` / `Job`），因此 `GET /api/bilibili/uploads/summary` 会继续为已不存在的任务回记录。见 [ai/bug-fix 候选](../ai/feature/bilibili-upload/03-implementation.md#5-已知限制)。 |
+| B站 凭据文件读写 | [bili_auth.py](../backend/app/bilibili/bili_auth.py#L278)、`POST/DELETE /api/bilibili/cookies` | 只读写 `data/bili_cookies.json`（路径由 [bili_cookie_path](../backend/app/contracts/config.py#L94) 给出）。`GET /api/bilibili/status` 与导入响应只回传**键名与计数**，不回传值、不回传前缀；导入时会用 [is_cookie_tracked_by_git](../backend/app/bilibili/bili_auth.py#L390) 检查该文件是否被 git 跟踪并把结论显示出来。`data/` 已在 `.gitignore` 内（实测 `git check-ignore` 命中）。文件里除 cookies 外还写入 `token_info`（长期投稿令牌 + 刷新令牌 + `mid`）与 `platform: "BiliTV"` —— 这三项对 `biliup` 是必需的（缺了它连投稿请求都不会发，见 [011](../ai/bug-fix/011-biliup-refuses-a-token-less-cookie-file.md)），但**令牌本身等价于一次账号登录**，泄露面与 cookies 同级。 | 这是**与下载 cookies 完全独立的第二份账号态**：确认没有接口能把 `SESSDATA` / `bili_jct` / `access_token` / `refresh_token` 的值带出来（包括错误响应与日志）。`log_safety.py` 的 `_SECRET_NAMES` 覆盖了 `access_token` / `refresh_token`，本次还补上了它们的 **JSON 形态**（`"name":"value"`）—— 此前只认 `name=value`，实测 `{"access_token":"X"}` 会被原样放行（见 [011](../ai/bug-fix/011-biliup-refuses-a-token-less-cookie-file.md) 的附带修复）。清洗器管的是「进日志」，管不到「被写进文件」：后一条靠的是 `data/` 被 `.gitignore` 覆盖加「不回显」，所以要确认 `git check-ignore` 之外没有别的路径会把它写进仓库。 |
+| 扫码登录 | [bili_auth.py](../backend/app/bilibili/bili_auth.py#L166)、`POST /api/bilibili/login/qrcode` + `.../poll` | 请求 `passport.bilibili.com` 的二维码生成与轮询接口，轮询由**服务端**发起、频率固定；凭据从回调 query 与 `Set-Cookie` 取，取到后落盘到上面那个文件。二维码 SVG 由纯 Python 的 `qrcode` 生成（不引入 Pillow，不联网渲染）。 | 轮询是**持续的外发请求**：确认有上限与超时、不会因为前端反复刷新而无限叠加；确认二维码本身（含 `qrcode_key`）不会进日志。 |
+| 换取投稿令牌（TV 端） | [`exchange_tv_token`](../backend/app/bilibili/bili_auth.py#L142)，经 `BiliManager.save_login` / `ensure_upload_token` 触发 | 三步都发往 `passport.bilibili.com`（申请二维码 → 用 cookies 确认 → 轮询取 `token_info`），与扫码登录同一宿主。**第二步把用户自己的 `SESSDATA` + `bili_jct` 放进 `Cookie` 请求头**，此外只带 `Referer`；请求体按与 `biliup` 逐字节一致的规则签名。拿到的长期令牌写进上面那个凭据文件。 | 本次新增的**外发请求家族**，也是第一次把账号凭据放进请求头发出去。需复核：① 三个端点都是模块级常量、只指向 `passport.bilibili.com`，Cookie 头不会随重定向跑到别的域；② 三步都有超时，轮询有次数上限（`TV_POLL_ATTEMPTS`）而不是死循环；③ 失败文案只拼 `code` / `message`，不含响应正文 —— 否则成功响应里的令牌就有一次进日志的机会；④ **导入 cookies 这条路径会自动触发它**，等于用户点「导入」就顺带同意了一次联网换取令牌，这个副作用要在界面文案里说清。 |
+| B站 业务请求 | [bili_http.py](../backend/app/bilibili/bili_http.py#L66)、[bili_api.py](../backend/app/bilibili/bili_api.py) | 标准库 `urllib`，端点全部是模块级常量（稿件列表 / 稿件详情 / 合集创建与归集 / 评论），请求体只由元数据与 aid/cid 组成。**显式清空 `ProxyHandler`**：B站 侧一律直连，不走用户配置的 YouTube 代理，也避免代理把凭据转交给第三方。4xx/5xx 也带回正文与 `Set-Cookie` 供归类，但正文经 [sanitize_log_message](../backend/app/common/log_safety.py#L20) 后才进日志与记录的 `log_tail`。 | 「直连」是一个刻意的行为差异：确认它在代理环境下不会静默失败成「B站 上传永远连不上」而不给提示。另需确认响应正文不会被原样回显到界面。 |
+| 投稿子进程 | [bili_bin.py](../backend/app/bilibili/bili_bin.py#L226)、[bili_bin.py](../backend/app/bilibili/bili_bin.py#L288) | `subprocess.Popen(list(argv))` —— list 形式、不经 shell（见第 1 节）；可执行文件路径来自候选探测（含 WinGet 目录）或配置项，标题/简介/标签作为独立 argv 元素传入。读取放在后台线程 + 有界 join，超时分支必 `kill()`。**`--copyright` / `--source` 也是独立 argv 元素**：来源链接是用户可填的自由文本，与标题同属「不经 shell、不拼字符串」这条约束的适用范围；`effective_source` 决定自制稿不带 `--source`。 | `biliup` 路径可由配置指定，等价于「本机执行一个用户可指向的可执行文件」——与该仓库既有的 `YTDL_ARIA2C_PATH` 同类，需确认它不会被网页侧驱动。抽帧走 ffmpeg，输出写到 `data/bili_covers/`（同样在 `.gitignore` 内）。 |
+| 上传记录落库 | [models.py](../backend/app/contracts/models.py#L114) 的 `BiliUpload` / `#L150` 的 `BiliSeason` | 新增两张表，字段里保存**提交的元数据快照**与平台返回的标识；`log_tail` 只存末若干行且写入前过清洗。**不保存任何凭据**。 | 确认 `log_tail` 不会因为清洗漏项而带上 URL query 或 cookie。**已发现一处未处理的缺口：删任务不会连带删这两张表的行**（`JobManager.delete` 只删 `JobEvent` / `JobItem` / `Job`），因此 `GET /api/bilibili/uploads/summary` 会继续为已不存在的任务回记录。见 [ai/bug-fix 候选](../ai/feature/bilibili-upload/03-implementation.md#5-已知限制)。 |
 
 ## 20. 宣传视频基准 `0dd4b5d` 之后新增（待复核）
 
@@ -278,8 +278,8 @@
 
 | 变更 | 位置 | 初步判断 | 需要复核的点 |
 | --- | --- | --- | --- |
-| 「打开方式」（三级链） | [system_open.py](../backend/app/system_open.py#L71) 的 `open_path_with_chooser`，由 `POST .../open-subtitle`（缺省 `mode=chooser`）与 `mode=default` 下遇到无关联时的回退触发 | ① `SHOpenWithDialog`（文档化 API，本进程内画 `Shell_Dialog`）；② `subprocess.Popen(["rundll32.exe", "shell32.dll,OpenAs_RunDLL", path])` —— 命令名与 DLL 导出项都是常量、list 形式不经 shell，`path` 由后端从数据库推导；③ 自带 tkinter 对话框（模态，跑在 daemon 线程），候选读注册表 + 本机已安装的编辑器路径，另可「浏览…」由用户在**本机对话框**里指定 exe；选中后 `Popen([exe, file])`。非 Windows 退化成「默认程序打开」。 | 确认**没有任何「程序路径」来自 HTTP 请求**（前端只发 `POST .../open-subtitle`，不带参数）；确认候选枚举只读注册表/文件系统（`is_file()` 过滤），不写注册表、不改系统关联；确认三条子进程调用都是 list 形式、不经 shell、argv 里没有拼串；确认「降级提示框」只会被 `WM_CLOSE` 掉（不点它的按钮、不执行任何动作）；确认「窗口没出现就 400」不会吞掉错误（旧行为是 204 空转）。 |
-| B站 上传的短文件名硬链接 | [bili_upload.py](../backend/app/bili_upload.py#L228) 的 `_short_name_video` | 文件名 stem 超 80 字符时，在**视频所在目录**建一个 `cascade-*.mp4` 硬链接交给 `biliup`，`finally` 里删除；失败（FAT/exFAT、跨卷、权限）只记日志并退回原名。**不复制大文件、不读取内容、不离开该目录**。 | 链接名带 `uuid4` 前 8 位，确认不会与下载产物命名模板冲突；确认 `finally` 里的 `unlink` 失败只留日志（残留的只是同目录里一个硬链接，不丢内容、不多占空间）。 |
-| CC 字幕保存端点 | [bili_api.py](../backend/app/bili_api.py#L366) 的 `save_subtitle` → `https://api.bilibili.com/x/v2/dm/subtitle/draft/save` | 第 19 节登记 `bili_http`/`bili_api` 的端点家族时只列了稿件列表/详情/合集/评论，字幕保存是其后新增的第四个家族：URL 是模块级常量，请求体只由 BCC 转换结果与 `cid`（`oid`）组成，两个布尔按小写字面量发送；4xx/5xx 的正文与 `Set-Cookie` 由 `bili_http` 统一带回。 | ① 确认响应正文不会原样进界面或日志（当前只拼 `code`/`message`）；② 这一步的任何失败都落成 `failed` 结论而不抛异常，确认没有路径能把「已发布 + 字幕失败」翻成稿件失败；③ 语言标识只走平台白名单（`zh`/`en`/`zh-Hant`/`zh-TW`/`zh-HK`/`ja`/`ko`/`yue`/`fr`），确认没有分支把用户输入的值直接发出去。 |
-| 孤儿条目恢复 | [orphan_recovery.py](../backend/app/orphan_recovery.py#L77)、`YTDL_ORPHAN_RECOVERY` | 只改本库 `JobItem`/`Job` 状态并写一条 `jobs_recovered` 事件：不联网、不起子进程、不碰文件。环境变量只认 `resume`（默认）/`fail`，非法值收敛 `resume` 并打 warning。 | 与第 17 节「SQLite 补列」同族：确认恢复写库与启动时的 WAL checkpoint 不冲突；确认 `fail` 策略不会删文件（只标失败，`.part` 留着，见 [bug-fix README 遗留 23](../ai/bug-fix/README.md#已知但未处理的问题下一轮候选)）。 |
+| 「打开方式」（三级链） | [system_open.py](../backend/app/host/system_open.py#L71) 的 `open_path_with_chooser`，由 `POST .../open-subtitle`（缺省 `mode=chooser`）与 `mode=default` 下遇到无关联时的回退触发 | ① `SHOpenWithDialog`（文档化 API，本进程内画 `Shell_Dialog`）；② `subprocess.Popen(["rundll32.exe", "shell32.dll,OpenAs_RunDLL", path])` —— 命令名与 DLL 导出项都是常量、list 形式不经 shell，`path` 由后端从数据库推导；③ 自带 tkinter 对话框（模态，跑在 daemon 线程），候选读注册表 + 本机已安装的编辑器路径，另可「浏览…」由用户在**本机对话框**里指定 exe；选中后 `Popen([exe, file])`。非 Windows 退化成「默认程序打开」。 | 确认**没有任何「程序路径」来自 HTTP 请求**（前端只发 `POST .../open-subtitle`，不带参数）；确认候选枚举只读注册表/文件系统（`is_file()` 过滤），不写注册表、不改系统关联；确认三条子进程调用都是 list 形式、不经 shell、argv 里没有拼串；确认「降级提示框」只会被 `WM_CLOSE` 掉（不点它的按钮、不执行任何动作）；确认「窗口没出现就 400」不会吞掉错误（旧行为是 204 空转）。 |
+| B站 上传的短文件名硬链接 | [bili_upload.py](../backend/app/bilibili/bili_upload.py#L228) 的 `_short_name_video` | 文件名 stem 超 80 字符时，在**视频所在目录**建一个 `cascade-*.mp4` 硬链接交给 `biliup`，`finally` 里删除；失败（FAT/exFAT、跨卷、权限）只记日志并退回原名。**不复制大文件、不读取内容、不离开该目录**。 | 链接名带 `uuid4` 前 8 位，确认不会与下载产物命名模板冲突；确认 `finally` 里的 `unlink` 失败只留日志（残留的只是同目录里一个硬链接，不丢内容、不多占空间）。 |
+| CC 字幕保存端点 | [bili_api.py](../backend/app/bilibili/bili_api.py#L366) 的 `save_subtitle` → `https://api.bilibili.com/x/v2/dm/subtitle/draft/save` | 第 19 节登记 `bili_http`/`bili_api` 的端点家族时只列了稿件列表/详情/合集/评论，字幕保存是其后新增的第四个家族：URL 是模块级常量，请求体只由 BCC 转换结果与 `cid`（`oid`）组成，两个布尔按小写字面量发送；4xx/5xx 的正文与 `Set-Cookie` 由 `bili_http` 统一带回。 | ① 确认响应正文不会原样进界面或日志（当前只拼 `code`/`message`）；② 这一步的任何失败都落成 `failed` 结论而不抛异常，确认没有路径能把「已发布 + 字幕失败」翻成稿件失败；③ 语言标识只走平台白名单（`zh`/`en`/`zh-Hant`/`zh-TW`/`zh-HK`/`ja`/`ko`/`yue`/`fr`），确认没有分支把用户输入的值直接发出去。 |
+| 孤儿条目恢复 | [orphan_recovery.py](../backend/app/download/orphan_recovery.py#L77)、`YTDL_ORPHAN_RECOVERY` | 只改本库 `JobItem`/`Job` 状态并写一条 `jobs_recovered` 事件：不联网、不起子进程、不碰文件。环境变量只认 `resume`（默认）/`fail`，非法值收敛 `resume` 并打 warning。 | 与第 17 节「SQLite 补列」同族：确认恢复写库与启动时的 WAL checkpoint 不冲突；确认 `fail` 策略不会删文件（只标失败，`.part` 留着，见 [bug-fix README 遗留 23](../ai/bug-fix/README.md#已知但未处理的问题下一轮候选)）。 |
 | 完成提醒 | `YTDL_COMPLETION_NOTIFICATION` / `completion_notification`、[notifications.ts](../frontend/src/notifications.ts) | 纯偏好存储 + 浏览器内呈现：Web Audio 现场合成提示音（无音频文件）、右下角 DOM 浮层。**无新增网络、文件或子进程面**。 | 确认设置值有取值收敛（非法值回 `both`，不是原样透传）；确认前端拿不到也不发送任何凭据类字段。 |

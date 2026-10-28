@@ -11,13 +11,13 @@ from pathlib import Path
 
 from sqlmodel import Session
 
-from app.config import AppSettings
-from app.db import create_app_engine, init_db
-from app.events import EventBroker
-from app.job_manager import JobManager, new_id
-from app.models import Job, JobItem, JobStatus
-from app.schemas import DownloadOptions
-from app.subtitle_plan import SubtitleOrigin, SubtitlePlan
+from app.contracts.config import AppSettings
+from app.infra.db import create_app_engine, init_db
+from app.infra.events import EventBroker
+from app.download.job_manager import JobManager, new_id
+from app.contracts.models import Job, JobItem, JobStatus
+from app.contracts.schemas import DownloadOptions
+from app.download.subtitle_plan import SubtitleOrigin, SubtitlePlan
 
 from fakes import FakeYtDlpService
 

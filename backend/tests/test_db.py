@@ -6,9 +6,9 @@ from sqlalchemy import text
 
 from sqlmodel import Session
 
-from app.config import AppSettings
-from app.db import _configure_sqlite_connection, checkpoint_wal, create_app_engine, init_db
-from app.models import Job  # noqa: F401 — register SQLModel metadata
+from app.contracts.config import AppSettings
+from app.infra.db import _configure_sqlite_connection, checkpoint_wal, create_app_engine, init_db
+from app.contracts.models import Job  # noqa: F401 — register SQLModel metadata
 
 
 def test_sqlite_engine_enables_wal_and_busy_timeout(tmp_path: Path) -> None:
