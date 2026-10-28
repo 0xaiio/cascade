@@ -6,10 +6,12 @@ skinparam linetype ortho
 
 package "L0 entry" {
   [main.py\ncomposition root] as Main
+  [__main__.py\ncli entry] as Entry
   [api/routers/*\nHTTP endpoints] as Routers
   [api/api_context.py\nrequest dependencies] as ApiCtx
   [api/api_support.py\nendpoint helpers] as ApiSupport
   [download/job_artifacts.py\nartifact location] as Artifacts
+  [host/dev_server.py\nport probe, occupant] as DevServer
 }
 
 package "L1 contracts" {
@@ -21,6 +23,7 @@ package "L1 contracts" {
 package "L2 orchestration" {
   [download/job_manager.py\nqueue, workers, state machine] as Manager
   [download/job_read_model.py\nAPI projection] as ReadModel
+  [download/orphan_recovery.py\nstartup reconciliation] as Recovery
   [infra/events.py\nEventBroker] as Broker
   [bilibili/bili_manager.py\nbilibili queue, single worker] as BiliManager
   [bilibili/bili_read_model.py\nbilibili badges and read models] as BiliReadModel
@@ -29,6 +32,7 @@ package "L2 orchestration" {
 package "L3 domain and policy" {
   [download/ytdlp_service.py\nyt-dlp boundary] as Service
   [download/ytdlp_formats.py\nselectors, fallback math] as Formats
+  [download/subtitle_plan.py\nsubtitle decisions] as SubtitlePlan
   [download/stall_guard.py\nstall watchdog] as Stall
   [download/fallback_policy.py\nreason and message] as Fallback
   [download/resolution_decisions.py\ndowngrade decisions] as Decisions
@@ -41,6 +45,7 @@ package "L3 domain and policy" {
   [download/progress_persist.py\npersist gate] as Gate
   [download/transfer_stats.py\naverage speed] as Stats
   [download/output_paths.py\npath discovery] as Outputs
+  [download/safe_delete.py\ndeletion whitelist] as Deletion
   [host/system_open.py\nplayer and folder] as Opener
   [bilibili/bili_upload.py\nsingle upload flow] as BiliUpload
   [bilibili/bili_bin.py\nbiliup boundary] as BiliBin
@@ -48,6 +53,7 @@ package "L3 domain and policy" {
   [bilibili/bili_auth.py\nqr login, cookie file] as BiliAuth
   [bilibili/bili_meta.py\nmetadata and limits] as BiliMeta
   [bilibili/bili_policy.py\nbilibili messages, badges] as BiliPolicy
+  [bilibili/bili_subtitle.py\nCC subtitle upload] as BiliSubtitle
 }
 
 package "L4 infrastructure" {
@@ -66,16 +72,16 @@ Main --> Routers
 Main --> ApiCtx
 Main --> ApiSupport
 Main --> Config
-Main --> Schemas
 Main --> Manager
-Main --> ReadModel
 Main --> Service
 Main --> DB
-Main --> CookieHealth
-Main --> Connectivity
 Main --> Logging
 Main --> RuntimeEnv
 Main --> BiliManager
+Main --> Broker
+Main --> Opener
+Entry --> DevServer
+Entry --> Config
 Routers --> ApiCtx
 Routers --> ApiSupport
 Routers --> Artifacts
@@ -91,6 +97,9 @@ Routers --> BiliManager
 Routers --> BiliMeta
 Routers --> BiliReadModel
 Routers --> BiliUpload
+Routers --> Models
+Routers --> Outputs
+Routers --> Logging
 ApiCtx --> Manager
 ApiCtx --> Service
 ApiCtx --> DB
@@ -102,37 +111,29 @@ ApiSupport --> Schemas
 ApiSupport --> Service
 ApiSupport --> Proxy
 ApiSupport --> Paths
+ApiSupport --> Config
 Artifacts --> Models
 Artifacts --> Outputs
 Artifacts --> Opener
 Manager --> Models
 Manager --> Service
-Manager --> Advice
 Manager --> Progress
 Manager --> Gate
 Manager --> Stats
-Manager --> Stall
-Manager --> Fallback
 Manager --> Decisions
 Manager --> Outputs
 Manager --> Broker
-Manager --> Paths
 Manager --> LogSafe
+Manager --> Config
+Manager --> Schemas
+Manager --> Recovery
+Manager --> SubtitlePlan
+Manager --> Deletion
 ReadModel --> Models
 ReadModel --> Fallback
 ReadModel --> Outputs
-Service --> Formats
-Service --> Cookies
-Service --> Proxy
-Service --> Advice
-Service --> Stall
-Service --> LogSafe
-CookieHealth --> Connectivity
-CookieHealth --> Proxy
-Connectivity --> Proxy
-Advice --> LogSafe
-Decisions --> Fallback
-Decisions --> Formats
+ReadModel --> Schemas
+Recovery --> Models
 BiliManager --> Models
 BiliManager --> Schemas
 BiliManager --> Config
@@ -147,11 +148,32 @@ BiliManager --> BiliHttp
 BiliManager --> BiliMeta
 BiliManager --> BiliPolicy
 BiliManager --> BiliReadModel
+BiliManager --> SubtitlePlan
+BiliManager --> BiliSubtitle
+BiliManager --> LogSafe
 BiliReadModel --> Models
 BiliReadModel --> Schemas
 BiliReadModel --> BiliMeta
 BiliReadModel --> BiliPolicy
 BiliReadModel --> ReadModel : elapsed_seconds
+Service --> Formats
+Service --> Cookies
+Service --> Proxy
+Service --> Advice
+Service --> Stall
+Service --> LogSafe
+Service --> Schemas
+Service --> SubtitlePlan
+Formats --> Schemas
+Fallback --> Schemas
+Decisions --> Fallback
+Decisions --> Formats
+Decisions --> Schemas
+CookieHealth --> Connectivity
+CookieHealth --> Proxy
+Connectivity --> Proxy
+Advice --> LogSafe
+Outputs --> SubtitlePlan
 BiliUpload --> Models
 BiliUpload --> BiliApi
 BiliUpload --> BiliBin
@@ -159,14 +181,18 @@ BiliUpload --> BiliHttp
 BiliUpload --> BiliMeta
 BiliUpload --> BiliPolicy
 BiliUpload --> LogSafe
+BiliUpload --> BiliSubtitle
 BiliBin --> BiliMeta
 BiliBin --> BiliPolicy
 BiliApi --> BiliAuth
 BiliApi --> BiliHttp
 BiliAuth --> BiliHttp
+BiliMeta --> Schemas
 BiliPolicy --> Models
-DB --> Models
-Broker --> Schemas : JSON payloads
+BiliSubtitle --> SubtitlePlan
+BiliSubtitle --> BiliApi
+BiliSubtitle --> BiliHttp
+DB --> Config
 
 note bottom
 Dependency rule: arrows only point downwards.
@@ -190,6 +216,11 @@ The bilibili side repeats that split: bili_http.py knows no
 endpoint, bili_meta.py and bili_policy.py never send a
 request, and the "it really published" verdict lives in
 bili_upload.py only after bili_api.py reconciles the list.
+This figure is checked, not trusted: scripts/check_diagram_edges.py
+compares this edge set with the real imports in backend/app
+(an edge that no longer exists is an error, not a leftover).
+api/routers/* is the only aggregated node; a module that is
+not drawn here is reported by that script.
 Violations to watch: importing job_manager from
 ytdlp_service, or importing yt-dlp types into schemas.
 end note

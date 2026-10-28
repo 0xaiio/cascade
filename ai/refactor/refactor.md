@@ -183,7 +183,11 @@ hash 只能在**下一次触碰本目录时**回填；查某条改动用 `git lo
 | [005](005-safe-delete.md)          | 安全删除纯化：白名单判定可单测                 | 回填        | 路径安全判定收进 `safe_delete.py`（`DeleteScope` + 3 个纯函数）；16 例含「字符串前缀」陷阱与 Windows 大小写；8 处端到端删除回归（§4.1 第 2 项）                     |
 | [006](006-api-contract-drift.md)   | 契约漂移校验：单一来源是运行时 `app.openapi()` | 回填        | 新增 `scripts/check_api_contract.py`；`types.ts` 15 接口字段 + `openapi.yaml` 48 条目；两次注入式取证（§4.1 第 3 项，次优形态）                    |
 | [007](007-ci-and-layers.md)        | CI 门槛 + 分层依赖校验                  | 回填        | 新增 `.github/workflows/ci.yml` 与 `scripts/check_layers.py`（解析 design.md 的职责矩阵，顺带抓「新增模块忘登记」）；补齐 005 遗留的矩阵登记（§4.1 第 4 项，部分） |
+| [008](008-split-app-tests.md)      | 拆分 App 集成测试：一个文件一个功能面 | `f270e7a` | 1521 行 / 69 用例的单文件拆成 11 个功能面文件 + 3 个共享件，用例名逐字不变，且每个文件都能单独冷启动绿 |
+| [009](009-reclaim-compat-proxies.md) | 回收兼容代理：`ytdlp_service.py` 的 15 个转发层 | `e98abda` | 删掉「只有一条转发语句」的私有方法，cookies 三处注入接缝归位到 `browser_cookies`；1182 → 1130 行，方法 72 → 57 |
+| [010](010-baseline-sync-and-hash-backfill.md) | 收尾：回填提交 hash、同步基线、`ai/` 链接自查 | 待回填 | 六轮 hash 回填进记录与索引；总纲基线表换成 R9 实测值；`ai/**` 人工扫链修掉 9 处断链（`docs.py check` 不覆盖 `ai/`）；不改任何源码 |
 | [011](011-flat-modules-into-feature-packages.md) | 平铺模块按功能分包：46 个平铺文件 → 7 个能力包 | 回填        | `api/` `contracts/` `download/` `bilibili/` `host/` `infra/` `common/` 七个包，52 个文件 `git mv` 且**不改名**；`check_layers.py` 升级为按 `level` 解析多级相对导入、层号回退到最近的已登记祖先；后端 1223 passed、行锚 0 漂移 |
+| [012](012-make-the-dependency-diagram-true.md) | 让依赖图说真话：补 6 个模块、改 40 条边，并纳入机器校验 | 回填        | `module-dependencies.puml` 105 边里 10 条是拆分后留下的死箭头、另缺 30 条（连带 5 个模块没画）；边集改由代码生成（125 条，逐边一致），新增 `scripts/check_diagram_edges.py` + CI 一步 —— `docs.py check` 只管 SVG 与源同源，管不了图与代码同构 |
 
 ---
 

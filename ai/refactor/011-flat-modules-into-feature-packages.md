@@ -163,12 +163,14 @@ backend/app/
 
 ## 5. 未覆盖 / 如实说明
 
-1. **`module-dependencies.puml` 缺 4 个模块**（`orphan_recovery` / `safe_delete` / `subtitle_plan` / `bili_subtitle`）。
-   这是本轮之前就存在的缺口，本轮只改标签（加目录前缀）与说明文字，没有顺手补节点与边 —— 补边会改图的结构，
-   属另一件事。
+1. **`module-dependencies.puml` 当时缺 4 个模块**（`orphan_recovery` / `safe_delete` / `subtitle_plan` / `bili_subtitle`）。
+   本轮只改标签（加目录前缀）与说明文字，没有顺手补节点与边 —— 补边会改图的结构，属另一件事。
+   **已在下一轮补掉**：[012](012-make-the-dependency-diagram-true.md) 补齐 6 个组件（上面这 4 个，再加 `dev_server` 与 `__main__`）
+   与 30 条缺边、删掉 10 条过期边，并加了 `scripts/check_diagram_edges.py` 这个闸门。
 2. **UML 变宽约 8%**（`module-dependencies` 4098→4436px，`component-overview` 4782→5155px，
    `four-plus-one-development-view` 6363→6911px）。原因是标签从 `job_manager.py` 变成 `download/job_manager.py`，
    高度未变。可读性靠缩放，不换行 —— PlantUML 的 `\n` 会把目录与文件名拆成两行，反而更难扫。
+   （012 补边后 `module-dependencies` 进一步到 4969×1384，那部分变化归 012。）
 3. **`ai/` 历史记录里的路径已跟到新位置，行数与命令保持当时的值**。例如 `refactor.md` §2 基线快照里
    `backend/app/download/ytdlp_service.py` 与「取证命令 `ls backend/app/*.py | wc -l`」并存 ——
    前者是当前可点的链接，后者是当时的事实。历史记录不重写结论。

@@ -141,7 +141,7 @@
 
 ![后端模块依赖](assets/diagrams/module-dependencies.svg)
 
-PlantUML 源文件：[module-dependencies.puml](diagrams/module-dependencies.puml)。
+PlantUML 源文件：[module-dependencies.puml](diagrams/module-dependencies.puml)。这张图的**边集**由 `python scripts/check_diagram_edges.py` 与 `backend/app` 的实际 import 逐条对照（缺边、多边、图上有没画的模块都算错）—— 它与 `docs.py check` 分工不同：后者只保证 SVG 与 `.puml` 同源，两份一起过期时照样通过。
 
 规则：
 
