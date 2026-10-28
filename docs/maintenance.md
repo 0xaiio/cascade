@@ -27,6 +27,8 @@
 | 新增或删除用户关键操作 | [用户手册](user-manual.md)、[需求分析](requirements.md)、[4+1 架构视图](4-plus-1-view.md)、4+1 场景视图 |
 | 修改安全相关的文件操作、CORS、日志清洗、环境变量或依赖 | [安全审计报告](safety-review.md)（更新基线 commit 与审查日期；新增的网络/文件/环境访问面要登记进「待复核项」） |
 | 发布宣传视频、更新其基准提交，或需要对外说明「新版比旧版多了什么」 | [更新日志](changelog/CHANGELOG.md)（逐条记录基准提交之后的功能与修复，附关键 commit 与镜头建议）、[README 视频介绍](../README.md#视频介绍)、[ai/promotion](../ai/promotion/README.md) |
+| **移动 / 重命名 / 删除任何代码文件**（含 `backend/app` 分包与 `frontend/src` 分目录） | [开发文档](development.md) 的目录结构表、[设计文档](design.md) 的模块职责矩阵与前端目录表、[架构设计](architecture.md) 与 [4+1 架构视图](4-plus-1-view.md) 的模块枚举；跑 `check_layers.py` / `check_diagram_edges.py` / `check_doc_paths.py` 三道闸门 |
+| 新增或修改**护栏脚本**（`scripts/check_*.py`） | 同上被它守护的那份文档，并给脚本本身补直接用例（护栏自身的缺陷最危险：它会把人引去修一个不存在的模块，见 [ai/bug-fix/030](../ai/bug-fix/030-the-layer-check-blames-the-wrong-thing.md)） |
 
 ## 排障流程
 

@@ -56,6 +56,13 @@ FastAPI 应用由 [create_app](../backend/app/main.py#L40) 创建，启动时：
 
 事件有两份记录：内存中的 `EventBroker`（SSE 推送）和持久化的 `JobEvent` 行。worker 线程通过 [_publish_threadsafe](../backend/app/download/job_manager.py#L1228) 写库，再用 `loop.call_soon_threadsafe` 把推送调度回事件循环；纯异步路径直接用 [_publish](../backend/app/download/job_manager.py#L1215)。
 
+**订阅者必须被显式注销**：[EventBroker.subscribe](../backend/app/infra/events.py#L16) 是一个异步生成器，
+它在 `finally` 里把自己从订阅集合里 `discard` 掉。但 `async for` **不会**关闭子异步生成器（PEP 525 的老坑），
+只写 `async for message in broker.subscribe()` 的话，注销要等垃圾回收才发生 —— 每关一个标签页就留一个订阅者，
+而 `publish()` 仍会逐个喂它，队列是无界的。因此路由层显式持有订阅对象并在 `finally` 里
+[aclose](../backend/app/api/routers/events.py#L30)（见 [event_stream](../backend/app/api/routers/events.py#L20)）：
+**注销判据仍收在 `subscribe()` 一处**，HTTP 层只负责「保证它被调用」（见 [ai/bug-fix/027](../ai/bug-fix/027-sse-disconnect-keeps-the-listener.md)）。
+
 ### 进程退出与恢复
 
 队列是**内存**的：进程一退，`queued` 条目的 id 就没了，而 `jobitem.status` 还留着。重启后没有任何代码把这两个状态重新交给 worker，于是界面上是一排**永远不动、且看不出原因**的任务 —— 生产库曾累积 332 个 `queued` + 3 个 `running`（[`ai/perf/PLAN.md`](../ai/perf/PLAN.md) §8）。
@@ -220,6 +227,14 @@ B站 上传的界面由四个组件加一个图标组成：[BiliIcon](../fronten
 
 - [formatting.ts](../frontend/src/shared/formatting.ts)：时长、百分比、日期、文件大小、分辨率和速度格式化。
 - [quality.ts](../frontend/src/shared/quality.ts)：清晰度选项、可用高度、降级按钮标签和选中清晰度显示。
+
+**每个请求都有截止时间**：[api.ts](../frontend/src/shared/api.ts#L51) 的 `request()` 用 `AbortController` 挂一个定时器，
+默认 60 秒（[REQUEST_TIMEOUT_MS](../frontend/src/shared/api.ts#L51)），超时后把 `AbortError` 翻译成一句
+**能照做的话**（[timeoutError](../frontend/src/shared/api.ts#L59)：区分「没响应」与「失败」，并指向日志文件与重启后端）。
+唯一放宽的是**解析链接**（180 秒，[ANALYZE_TIMEOUT_MS](../frontend/src/shared/api.ts#L57)）—— 它要真的连 YouTube，
+实测能到半分钟以上。两个值都取自「服务端最长的一次合法阻塞」的实测（打开方式窗口 6 s、cookies 库约 10 s、B站 请求 20 s），
+所以看门狗不会误伤正常路径。**超时与用户主动取消必须分得开**：前者要报错，后者应该安静地结束，
+因此 `catch` 里用 `controller.signal.aborted` 判断而不是看异常类型。
 
 任务完成提醒同样分成**判定**与**呈现**两层：[notifications.ts](../frontend/src/notifications/notifications.ts) 是纯逻辑（哪些状态算终态、一条提醒写成什么话、浮层队列的 `useCompletionToasts` hook），[CompletionToasts.tsx](../frontend/src/notifications/CompletionToasts.tsx#L21) 只渲染队列，并用 Web Audio **现场合成**提示音（C6→G6 两个正弦音，第二个轻一点晚一点；仓库里没有任何音频文件）。三条实现约束值得单独记住：
 

@@ -112,9 +112,9 @@ Linux/macOS：bash init/start.sh dev
 
 | 路径 | 说明 |
 | --- | --- |
-| `backend/app` | FastAPI 应用、任务管理、yt-dlp 封装、数据库模型和 cookies 导入。 |
+| `backend/app` | FastAPI 应用、任务管理、yt-dlp 封装、数据库模型和 cookies 导入。**第一层按功能分包**（`api` `contracts` `download` `bilibili` `host` `infra` `common`），层号写在 [设计文档的模块职责矩阵](design.md#模块职责矩阵) 里而不是目录名上。 |
 | `backend/tests` | 后端 pytest 测试和 fake service。 |
-| `frontend/src` | React UI、API 客户端、类型、展示组件和测试夹具。 |
+| `frontend/src` | React UI、API 客户端、类型、展示组件和测试夹具。**按功能分目录**（`download-request` `task-center` `settings` `cookies` `bilibili` `notifications` `shared` `contracts` `test`），见 [设计文档的前端目录表](design.md#前端组件边界)。 |
 | `data` | 本地 SQLite、cookies，已被 Git 忽略。 |
 | `downloads` | 默认下载产物目录，已被 Git 忽略。 |
 | `docs` | 工程文档、PlantUML 源和渲染图；`docs/changelog/` 另存宣传视频基准提交之后的更新日志与分支对比。 |
@@ -122,8 +122,9 @@ Linux/macOS：bash init/start.sh dev
 | `.tools` | 文档工具自动下载的本机缓存，已被 Git 忽略。 |
 | `ai` | 任务计划、重构日志和文档生成 prompt。 |
 | `ai/perf/PLAN.md` | 下载性能与稳定性修复计划：根因分析、修复项、验证与回滚，是引用性能结论时的权威来源。 |
-| `ai/bug-fix/` | 逐条修复记录（001~019）与「已知但未处理」清单；写限制与遗留风险时以此为准。 |
+| `ai/bug-fix/` | 逐条修复记录（001~030）与「已知但未处理」清单；写限制与遗留风险时以此为准。 |
 | `ai/ui/` | 逐条界面缺陷记录与约定：能跑、不报错但呈现错位的问题记在这里，每条必须带可测量的像素证据；布局类缺陷的自动化覆盖边界（jsdom 不做布局）也在该目录说明。 |
+| `ai/refactor/` | 逐条重构记录（001~014）与总纲 [refactor.md](../ai/refactor/refactor.md)：模块边界怎么划的、每轮改了哪些依赖方向、基线快照如何刷新。**结构类改动看这里**，功能类改动看 `ai/bug-fix/`。 |
 | `ai/feature/` | 按功能组织的四件套记录（需求/设计/实现/测试），现有 `bilibili-upload/` 与 `subtitle-pipeline/`。 |
 | `ai/plan/` | 功能候选池 `brainstorming.md`（进度用复选框，`grep '^- \[ \]'` 即待办清单）与计划/任务清单。 |
 | `ai/promotion/` | 宣传视频成片、文稿、字幕与发布记录（含投稿结果与保真度说明）。 |

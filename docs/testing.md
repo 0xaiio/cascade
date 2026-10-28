@@ -12,7 +12,7 @@
 python -m compileall backend\app
 ```
 
-后端测试（当前基线：**1093 passed**，36 个 `test_*.py`）：
+后端测试（当前基线：**1274 passed**，45 个 `test_*.py`）：
 
 ```powershell
 python -m pytest backend\tests -q
@@ -58,6 +58,15 @@ git diff --check
 ```powershell
 python scripts\docs.py check
 ```
+
+文档里指向代码的**路径**（不只带 `#Lnn` 的行锚）是否真的存在：
+
+```powershell
+python scripts\check_doc_paths.py
+```
+
+它扫 `docs/`、`ai/` 与 README 里的 `frontend/src` / `backend/app` / `backend/tests` / `scripts` 路径；
+历史指称（`frontend/src/App.test.tsx` 等已删除对象）登记在脚本内的白名单里，每条写明理由。
 
 文档里的代码行锚点（Markdown 链接里带 `#Lnn` 的那些）会随代码漂移，可用脚本核对：
 
@@ -187,9 +196,12 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 
 ## 前端测试范围
 
-前端组件测试是对 `App` 的**集成测试**，按功能面拆成 `frontend/src/<功能目录>/*.test.tsx`（一个功能目录一至四个文件，目录划分见 [设计文档的前端目录表](design.md#前端组件边界)）：解析链接与下载选项（`analyzer.test.tsx`，11）、cookies 导入与校验（7）、设置面板与代理检测（10）、任务中心（控制/删除/展开 11、本地文件操作与链接 13、进度与详情呈现 6）、清晰度降级（4）、自检信息（2）、帮助浮层（3）、**B站 上传（`bili-upload.test.tsx`，73 例）**、**CC 字幕结论的呈现（`bili-subtitle-line.test.tsx`，5 例）**、完成通知（19）、版面与文案不变式（3），以及只读样式源文的 `styles.test.ts`（4）。当前 **21 个文件 / 286 passed**（13 个 `.tsx` 组件测试 + 8 个 `.ts` 纯函数测试）；`biliStatus.test.ts` 另含字幕两档判据与「已上传点进去打开哪一页」「待核对/部分失败该补哪几条」的判据（24 例）。
+前端组件测试是对 `App` 的**集成测试**，按功能面拆成 `frontend/src/<功能目录>/*.test.tsx`（一个功能目录一至四个文件，目录划分见 [设计文档的前端目录表](design.md#前端组件边界)）：解析链接与下载选项（[analyzer.test.tsx](../frontend/src/download-request/analyzer.test.tsx)，11）、cookies 导入与校验（[cookies.test.tsx](../frontend/src/cookies/cookies.test.tsx)，7）、设置面板与代理检测（[settings.test.tsx](../frontend/src/settings/settings.test.tsx)，10）、任务中心（控制/删除/展开 [task-center.test.tsx](../frontend/src/task-center/task-center.test.tsx)，11、本地文件操作与链接 [task-center-files.test.tsx](../frontend/src/task-center/task-center-files.test.tsx)，13、进度与详情呈现 [task-center-progress.test.tsx](../frontend/src/task-center/task-center-progress.test.tsx)，6）、清晰度降级（[resolution-fallback.test.tsx](../frontend/src/task-center/resolution-fallback.test.tsx)，4）、自检信息（[diagnostics.test.tsx](../frontend/src/settings/diagnostics.test.tsx)，2）、帮助浮层（[help-notes.test.tsx](../frontend/src/shared/ui/help-notes.test.tsx)，3）、**B站 上传（[bili-upload.test.tsx](../frontend/src/bilibili/bili-upload.test.tsx)，73 例）**、**CC 字幕结论的呈现（[bili-subtitle-line.test.tsx](../frontend/src/bilibili/bili-subtitle-line.test.tsx)，5 例）**、完成通知（[completion-notification.test.tsx](../frontend/src/notifications/completion-notification.test.tsx)，19）、版面与文案不变式（[layout.test.tsx](../frontend/src/layout.test.tsx)，3；只读样式源文的 [styles.test.ts](../frontend/src/styles.test.ts)，4）。当前 **21 个文件 / 286 passed**（13 个 `.tsx` 组件测试 + 8 个 `.ts` 纯函数测试）；`biliStatus.test.ts` 另含字幕两档判据与「已上传点进去打开哪一页」「待核对/部分失败该补哪几条」的判据（24 例）。
 
-另有六份**不挂载任何组件**的纯函数测试（`frontend/src/**/*.test.ts`，不经过 `App`，跟着被测模块所在的功能目录走）：B站 表单词汇表与本地预检 `biliForm.test.ts`（46 例）、B站 状态谓词 `biliStatus.test.ts`（24 例）、**上传进度的分段与聚合 `biliProgress.test.ts`（20 例）**、错误取值兜底 `errors.test.ts`（4 例）、**体检策略 `biliHealth.test.ts`（5 例）**、**请求超时兜底 `api-timeout.test.ts`（4 例）**。后者用假定时器把 60 s / 180 s 走完 —— 挂住的请求不会抛错、不会写日志，只能靠计时器抓（[025](../ai/bug-fix/025-requests-without-a-deadline.md)）。它们把原先内联在 `BiliUploadDialog.tsx` / `App.tsx` 里的判断抽成纯函数后再测，所以能在不渲染界面的前提下覆盖边界（例如「列表还在读」与「还没选合集」不能同时报出来，见 [ai/bug-fix/012](../ai/bug-fix/012-preflight-contradicts-itself-and-the-server.md)；`uploadedTargetUrl` 在两种空值下必须返回 `null`；合集的标题判据量的是**渲染后的每一条**而非模板，见 [ai/bug-fix/019](../ai/bug-fix/019-the-title-length-check-never-fires-for-collections.md)）。
+> **改动前端测试后要同步这张表**：文件名与用例数都写在这里，漏登记不会让任何检查变红 ——
+> 所以每次新增或拆分测试文件，都回到本段把文件名补上（用例数可用下一段的 JSON 报告复算）。
+
+另有六份**不挂载任何组件**的纯函数测试（`frontend/src/**/*.test.ts`，不经过 `App`，跟着被测模块所在的功能目录走）：B站 表单词汇表与本地预检 [biliForm.test.ts](../frontend/src/bilibili/biliForm.test.ts)（46 例）、B站 状态谓词 [biliStatus.test.ts](../frontend/src/bilibili/biliStatus.test.ts)（24 例）、**上传进度的分段与聚合 [biliProgress.test.ts](../frontend/src/bilibili/biliProgress.test.ts)（20 例）**、错误取值兜底 [errors.test.ts](../frontend/src/shared/errors.test.ts)（4 例）、**体检策略 [biliHealth.test.ts](../frontend/src/bilibili/biliHealth.test.ts)（5 例）**、**请求超时兜底 [api-timeout.test.ts](../frontend/src/shared/api-timeout.test.ts)（4 例）**。后者用假定时器把 60 s / 180 s 走完 —— 挂住的请求不会抛错、不会写日志，只能靠计时器抓（[025](../ai/bug-fix/025-requests-without-a-deadline.md)）。它们把原先内联在 `BiliUploadDialog.tsx` / `App.tsx` 里的判断抽成纯函数后再测，所以能在不渲染界面的前提下覆盖边界（例如「列表还在读」与「还没选合集」不能同时报出来，见 [ai/bug-fix/012](../ai/bug-fix/012-preflight-contradicts-itself-and-the-server.md)；`uploadedTargetUrl` 在两种空值下必须返回 `null`；合集的标题判据量的是**渲染后的每一条**而非模板，见 [ai/bug-fix/019](../ai/bug-fix/019-the-title-length-check-never-fires-for-collections.md)）。
 
 逐文件用例数可用 `npx vitest run --reporter=json --outputFile=<临时路径>` 复算（JSON 报告的 `testResults[].assertionResults` 长度即该文件用例数）。
 
