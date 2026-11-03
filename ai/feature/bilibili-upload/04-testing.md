@@ -993,8 +993,8 @@ Ep 125 上传时进度条显示「已提交 7:59:59」，跑的过程中出现�
 
 | 层 | 文件 | 测什么 |
 | --- | --- | --- |
-| 判据 | `backend/tests/test_bili_auto_retry.py`（20 条） | 退避、上限、限流、登记幂等、到点扫描、崩溃恢复 |
-| 端到端 | `backend/tests/test_bili_auto_retry_integration.py`（4 条） | 真 `BiliManager` + 假平台：**合集真的归好了、字幕真的补上了** |
+| 判据 | `backend/tests/test_bili_auto_retry.py`（27 条） | 退避、上限、限流、登记幂等、到点扫描、崩溃恢复、**策略每轮现取 / 睡眠分段**、五处防御分支 |
+| 端到端 | `backend/tests/test_bili_auto_retry_integration.py`（9 条） | 真 `BiliManager` + 假平台：**合集真的归好了、字幕真的补上了**；**改设置立刻生效**、手动成功后响应里已是 `done` |
 | 界面 | `frontend/src/bilibili/biliAutoRetryNote.test.tsx`（8 条）+ `bili-upload.test.tsx`（+1） | 倒计时、状态文案、与手动按钮并存 |
 
 **端到端那层断言的是「结果」而不是「调用」**：集成测试断言「合集真的 `grouped` 了」
@@ -1053,8 +1053,21 @@ headless Edge + CDP，拦截读模型换成一条「在等自动重试」的合�
   本轮只到「假平台说审核通过了」为止。
 - **调度循环的时间基准没验**：循环本身用的是 `asyncio.sleep`，集成测试直接调 `tick()`，
   所以「到点才问」这条在真实进程里没有被时间地验证过（只有 `due_rows` 的纯函数判据被测了）。
+  2026-11-03 补了 `test_a_shortened_interval_takes_effect_mid_sleep` 钉住「分段睡」的**时长**，
+  但它注入的是假 sleeper —— 真实时钟下循环跑满一轮仍没有用例。
 - **界面上那行倒计时只量到「可见」与宽高**（431 × 18 px，见 §17.5）：与按钮的间距、
   窄屏下的换行都没有实测 —— jsdom 不做布局，探针也只量了这一个视口。
+
+
+### 17.7 运行中改设置 / 收工后的响应（2026-11-03，两处缺陷）
+
+| 缺陷 | 用例 | 修复前 |
+| --- | --- | --- |
+| [032](../../bug-fix/032-auto-retry-settings-need-a-restart.md) 设置改完要重启才生效 | `test_a_policy_change_reaches_the_running_scheduler`、`test_turning_the_switch_off_stops_a_running_scheduler`、`test_the_scheduler_reads_the_policy_on_every_tick`、`test_a_shortened_interval_takes_effect_mid_sleep` | 关掉开关后 `tick()` 仍返回 1 并真的问了平台 |
+| [033](../../bug-fix/033-the-response-keeps-counting-after-success.md) 手动成功后响应还在倒计时 | `test_a_successful_manual_subtitle_retry_returns_the_finished_state`、`test_a_successful_manual_grouping_returns_the_finished_state` | `result.upload.auto_retry.state == "waiting"`（库里已是 `done`） |
+
+两组断言的共同点：**它们比的都是「两个地方说的是不是同一件事」** —— 设置与调度器、
+响应与库。单看任何一侧都是对的，所以既有的用例（只查库）全绿也说明不了问题。
 
 
 ## 18. 设置项的范围与禁用态（2026-11-03 调整）

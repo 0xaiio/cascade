@@ -457,9 +457,11 @@ class BiliManager:
         self._progress_lock = threading.Lock()
         # 自动重试调度器。**它调的就是下面那两个公开方法**（`retry_season` / `retry_upload`），
         # 所以手动按钮与自动重试走的是同一套业务逻辑（需求 FR-B38）。
+        # 策略传的是**方法本身**而不是它的返回值：三个旋钮都能在设置面板里改，
+        # 传快照的话改完要重启才生效（而设置接口承诺的是「改完立刻生效」）。
         self.auto_retry = BiliAutoRetryScheduler(
             engine,
-            self.auto_retry_policy(),
+            self.auto_retry_policy,
             retry_season=self.retry_season,
             retry_upload=self.retry_upload,
             on_change=lambda: self._publish_threadsafe({"type": "bili_auto_retry_changed"}),
@@ -543,11 +545,17 @@ class BiliManager:
 
         折成 `done` 而不是删行：界面上「已自动归集」这句话要有地方可显示，
         而删掉就变成了「什么都没发生过」。
+
+        **收工也要发事件**：调用方在收工之前已经把 `bili_upload_finished` /
+        `bili_season_finished` 发出去了，界面据那条事件刷新时读到的还是「在等」——
+        不发这条的话，倒计时会一直走到下一次无关刷新才消失。
         """
+        job_id: str | None = None
         with Session(self.engine) as session:
             row = session.get(BiliAutoRetry, target_id)
             if row is None or row.state == BiliAutoRetryState.done.value:
                 return
+            job_id = row.job_id
             row.state = BiliAutoRetryState.done.value
             row.next_attempt_at = None
             row.last_result = "done"
@@ -555,6 +563,7 @@ class BiliManager:
             row.updated_at = utc_now()
             session.add(row)
             session.commit()
+        self._publish_threadsafe({"type": "bili_auto_retry_changed", "job_id": job_id})
 
     # ------------------------------------------------------------ 登录态
     def current_jar(self) -> dict[str, str]:
@@ -1134,6 +1143,13 @@ class BiliManager:
                 )
                 if updated.subtitle_state == SUBTITLE_POSTED:
                     self._close_auto_retry(target_id=upload_id, message="字幕已补传")
+                    # **返回给界面的那份读模型要重读一次**：`updated` 是收工之前构造的，
+                    # 里面的 `auto_retry` 还停在 `waiting` —— 用户点完「重传字幕」，
+                    # 界面上那颗倒计时会继续走，看起来像机器还在等。
+                    with Session(self.engine) as session:
+                        row = session.get(BiliUpload, upload_id)
+                        assert row is not None
+                        updated = read_upload(row, index=index, auto_retry=read_auto_retry(session, row.id))
                 return BiliRetryRead(
                     action="reverify",
                     # 补传**可能还是失败**（稿件还在审核、cid 依旧取不到）。笼统说「已重新上传字幕」
@@ -1200,6 +1216,12 @@ class BiliManager:
         if read.status == BiliSeasonStatus.grouped.value:
             # 成了就别让自动重试再问一次（它会问出「已经归好了」这种没信息量的回执）。
             self._close_auto_retry(target_id=season_record_id, message="已归集")
+            # 与 `retry_upload` 同一个理由：这份读模型是收工之前构造的，重读一次才不带
+            # 那句「下一次自动重试 …」。
+            with Session(self.engine) as session:
+                season = session.get(BiliSeason, season_record_id)
+                assert season is not None
+                read = read_season(season, auto_retry=read_auto_retry(session, season.id))
         return BiliSeasonRetryRead(
             action=_season_retry_action(read.status),
             message=_season_retry_message(read),

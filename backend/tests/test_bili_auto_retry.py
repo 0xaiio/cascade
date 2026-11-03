@@ -418,3 +418,175 @@ async def test_a_crash_inside_the_business_call_is_recorded_not_raised(engine):
         row = session.get(BiliAutoRetry, "s1")
     assert row.state == BiliAutoRetryState.waiting.value
     assert "网络断了" in row.last_message
+
+
+# ==================================================== 策略是「每轮现取」的
+async def test_the_scheduler_reads_the_policy_on_every_tick(engine):
+    """上限从 3 提到 5 之后，已经试过 2 次的目标应该**继续等**，而不是被判「试够了」。
+
+    这条用例钉的是「策略不是构造时快照」：传快照的话，设置面板改了上限也没人看。
+    """
+    holder = {"policy": AutoRetryPolicy(interval_seconds=60, max_attempts=3)}
+
+    async def retry_season(target_id: str):
+        return _Outcome(season=_Season("pending"), message="视频还在排队审核")
+
+    scheduler = BiliAutoRetryScheduler(
+        engine,
+        lambda: holder["policy"],
+        retry_season=retry_season,
+        retry_upload=lambda target_id: _Outcome(upload=_Upload("failed")),
+    )
+    with Session(engine) as session:
+        row = register(session, target_id="s1", kind=BiliAutoRetryKind.season.value, job_id="job1")
+        row.attempts = 2
+        session.add(row)
+        session.commit()
+
+    holder["policy"] = AutoRetryPolicy(interval_seconds=60, max_attempts=5)
+    assert await scheduler.tick() == 1
+    with Session(engine) as session:
+        row = session.get(BiliAutoRetry, "s1")
+    # 旧策略（上限 3）在这里会判 exhausted —— 试过 2 次、这次是第 3 次。
+    assert row.state == BiliAutoRetryState.waiting.value
+    assert row.attempts == 3
+
+
+async def test_a_shortened_interval_takes_effect_mid_sleep(engine):
+    """间隔从 300 秒改成 5 秒时，**这一觉就该只睡 5 秒**，不用等旧的 300 秒走完。
+
+    否则「改完立刻生效」是句空话：用户改小间隔后还要再等五分钟。
+    """
+    holder = {"policy": AutoRetryPolicy(interval_seconds=300)}
+    calls: list[float] = []
+
+    async def sleeper(seconds: float) -> None:
+        calls.append(seconds)
+        if len(calls) == 1:
+            holder["policy"] = AutoRetryPolicy(interval_seconds=5)
+
+    scheduler = BiliAutoRetryScheduler(
+        engine,
+        lambda: holder["policy"],
+        retry_season=lambda target_id: _Outcome(season=_Season("pending")),
+        retry_upload=lambda target_id: _Outcome(upload=_Upload("failed")),
+        sleeper=sleeper,
+    )
+    await scheduler._sleep_one_round()
+
+    assert sum(calls) == pytest.approx(5.0)
+    # 每一段都不超过 1 秒：睡满一整轮就听不到设置了。
+    assert max(calls) <= 1.0
+
+
+# ==================================================== 防御分支（此前未覆盖）
+def test_a_zero_or_negative_attempt_count_still_waits_one_interval():
+    """`attempts=0` 是「一次都没问过」的初值，不能因此算出 0 秒或负数间隔。
+
+    间隔为 0 意味着死循环地问平台 —— 而这正是限流最容易被刷出来的形状。
+    """
+    policy = AutoRetryPolicy(interval_seconds=60)
+    assert policy.backoff_seconds(0) == 60
+    assert policy.backoff_seconds(-3) == 60
+
+
+async def test_an_unknown_target_kind_is_reported_not_swallowed(engine):
+    """目标类型对不上时，**说「不认识」并记下来**，而不是静默什么都不做。
+
+    静默的话，这一行会永远停在 `waiting`，用户看到的是一个永远不动的倒计时。
+    """
+    scheduler = BiliAutoRetryScheduler(
+        engine,
+        AutoRetryPolicy(interval_seconds=60),
+        retry_season=lambda target_id: _Outcome(season=_Season("pending")),
+        retry_upload=lambda target_id: _Outcome(upload=_Upload("failed")),
+    )
+    with Session(engine) as session:
+        register(session, target_id="x1", kind="mystery", job_id="job1")
+
+    assert await scheduler.tick() == 1
+    with Session(engine) as session:
+        row = session.get(BiliAutoRetry, "x1")
+    assert "不认识" in row.last_message
+    assert row.last_result == "failed"
+
+
+async def test_a_change_notification_fires_after_each_try(engine):
+    """每次尝试后都要通知界面刷新 —— 否则倒计时与「上次结果」要等下一次无关刷新才更新。"""
+    fired: list[int] = []
+    scheduler = BiliAutoRetryScheduler(
+        engine,
+        AutoRetryPolicy(interval_seconds=60),
+        retry_season=lambda target_id: _Outcome(season=_Season("pending")),
+        retry_upload=lambda target_id: _Outcome(upload=_Upload("failed")),
+        on_change=lambda: fired.append(1),
+    )
+    with Session(engine) as session:
+        register(session, target_id="s1", kind=BiliAutoRetryKind.season.value, job_id="job1")
+
+    await scheduler.tick()
+    assert len(fired) == 1
+    # 这一条已经排到一分钟之后了 ⇒ 第二轮没有到点目标，什么都不做、也不发通知。
+    assert await scheduler.tick() == 0
+    assert len(fired) == 1
+
+
+async def test_a_subtitle_failure_with_a_cid_is_a_failure_not_a_wait(engine):
+    """平台**已经给了**分P编号却还是没传上去 ⇒ 这是失败，不是「还在审核」。
+
+    判据是结构（`cid` 在不在），不是那句文案：说成「还在审核」会让用户一直等一个
+    不会自己好的东西。
+    """
+    from app.contracts.models import BiliUpload, utc_now
+
+    with Session(engine) as session:
+        upload = BiliUpload(
+            id="u1",
+            job_id="job1",
+            item_id="i1",
+            title="任务 第 1 集",
+            status="published",
+            cid=7001,
+            subtitle_state="failed",
+            subtitle_message="B站 说字幕格式不对",
+            created_at=utc_now(),
+            updated_at=utc_now(),
+        )
+        session.add(upload)
+        session.commit()
+        register(session, target_id="u1", kind=BiliAutoRetryKind.subtitle.value, job_id="job1")
+
+    async def retry_upload(target_id: str):
+        return _Outcome(upload=_Upload("failed", "B站 说字幕格式不对"))
+
+    scheduler = BiliAutoRetryScheduler(
+        engine,
+        AutoRetryPolicy(interval_seconds=60),
+        retry_season=lambda target_id: _Outcome(season=_Season("pending")),
+        retry_upload=retry_upload,
+    )
+    assert await scheduler.tick() == 1
+    with Session(engine) as session:
+        row = session.get(BiliAutoRetry, "u1")
+    assert row.last_result == "failed"
+    assert "字幕格式不对" in row.last_message
+
+
+async def test_starting_twice_keeps_one_loop_and_stop_is_safe(engine):
+    """`start()` 重复调用只该有一个循环；`stop()` 在没起过时也不能炸。
+
+    两个循环意味着同一条目标会被问两次 —— 平台频控按账号算，这一点直接踩线。
+    """
+    scheduler = BiliAutoRetryScheduler(
+        engine,
+        AutoRetryPolicy(interval_seconds=60),
+        retry_season=lambda target_id: _Outcome(season=_Season("pending")),
+        retry_upload=lambda target_id: _Outcome(upload=_Upload("failed")),
+    )
+    await scheduler.stop()  # 没起过也能停
+    await scheduler.start()
+    task = scheduler._task
+    await scheduler.start()  # 第二次是空操作
+    assert scheduler._task is task
+    await scheduler.stop()
+    assert scheduler._task is None

@@ -92,7 +92,7 @@
 | [bili_http.py](../backend/app/bilibili/bili_http.py#L66) | L4 基础设施 | B站 请求的 HTTP 接缝：标准库 `urllib` 实现、**强制直连（清空 ProxyHandler）**、4xx/5xx 也带回正文与 `Set-Cookie`。 | 不知道任何端点的语义（端点与参数在 `bili_api` / `bili_auth`）。 |
 | [paths.py](../backend/app/common/paths.py#L7) / [log_safety.py](../backend/app/common/log_safety.py#L20) | L5 纯工具 | 文件名安全化、日志敏感信息清洗。 | 无项目内依赖，可单独测试。 |
 | [time.py](../backend/app/common/time.py#L17) | L5 纯工具 | 时间的两种形态（aware / naive）互相收敛。SQLite 不存时区，读回来的一律是 naive 的 UTC —— 与 `utc_now()`（aware）直接比较会抛「can't compare offset-naive and offset-aware datetimes」。 | 无项目内依赖。**一个实现三处共用**（`contracts/schemas.py` 序列化、`download/job_read_model.py` 算已用时、`bilibili/bili_auto_retry.py` 排下一次），各自抄一份就会在某一处漏掉。 |
-| [bili_auto_retry.py](../backend/app/bilibili/bili_auto_retry.py#L47) | L2 编排 | 「等平台放行」的**判据与调度**：退避计算、尝试上限、限流加倍、待办落库（`bili_auto_retry` 表），以及那个到点问一次平台的调度循环。 | **只做调度**：问平台这件事交给 `BiliManager.retry_season` / `retry_upload`（手动按钮用的就是它），所以自动与手动走同一套业务逻辑；不自己发任何平台请求、不判定「审核过没过」（那是平台回读说的）。 |
+| [bili_auto_retry.py](../backend/app/bilibili/bili_auto_retry.py#L47) | L2 编排 | 「等平台放行」的**判据与调度**：退避计算、尝试上限、限流加倍、待办落库（`bili_auto_retry` 表），以及那个到点问一次平台的调度循环。调度器**每轮现取策略**（开关 / 间隔 / 上限改了立刻生效，睡眠按 1 秒分段），不要求重启。 | **只做调度**：问平台这件事交给 `BiliManager.retry_season` / `retry_upload`（手动按钮用的就是它），所以自动与手动走同一套业务逻辑；不自己发任何平台请求、不判定「审核过没过」（那是平台回读说的）。 |
 
 ## 前端组件边界
 
@@ -323,7 +323,7 @@ B站 上传有**自己的两套状态**，与 `JobStatus` 无关：
 - `BiliUpload.status`（8 态）：`queued` → `uploading` → 三选一分支 —— `submitted`（命令成功、还没对账）→ `published` / `reviewing` / `rejected`（平台稿件状态码折合）；命令失败或对账查不到则落到 `unverified`（待核对）或 `failed`。`unverified` **不是失败**：它表达「我们还不知道」，所以它的重试只重读平台，不重投。
 - `BiliSeason.status`（4 态）：`pending` → `grouping` → `grouped` / `failed`。`grouped` 的文案是「已提交归集（B站 需人工审核）」——平台侧还有一个看不见的人工审核环节，界面不能承诺「合集已上线」。
 
-界面上的那**一档徽标**（`none` / `uploading` / `uploaded` / `unverified` / `partial` / `failed`）不落库，由 [derive_badge](../backend/app/bilibili/bili_read_model.py#L68) 从「这个任务的全部记录 + 合集记录」现场算出来 —— 多条记录的聚合规则只有这一处，前端不参与。重启后的一致性靠 [resume_interrupted](../backend/app/bilibili/bili_manager.py#L487)：进程退出时停在 `uploading` 的记录（含 `queued`）一律折成**可重试的失败**，而不是永远停在「上传中」。
+界面上的那**一档徽标**（`none` / `uploading` / `uploaded` / `unverified` / `partial` / `failed`）不落库，由 [derive_badge](../backend/app/bilibili/bili_read_model.py#L68) 从「这个任务的全部记录 + 合集记录」现场算出来 —— 多条记录的聚合规则只有这一处，前端不参与。重启后的一致性靠 [resume_interrupted](../backend/app/bilibili/bili_manager.py#L489)：进程退出时停在 `uploading` 的记录（含 `queued`）一律折成**可重试的失败**，而不是永远停在「上传中」。
 
 ## 持久化设计
 

@@ -271,3 +271,241 @@ async def test_the_manual_button_still_works_and_closes_the_automaton(tmp_path):
     result = await harness.manager.retry_upload(harness.uploads("job1")[0].id)
     assert result.action == "reverify"
     await harness.manager.stop()
+
+
+# ============================================================ 运行中改设置
+async def test_a_policy_change_reaches_the_running_scheduler(tmp_path):
+    """设置面板改完三个旋钮，**不用重启**就该生效。
+
+    设置接口里写着「调度器每次问平台前都现取策略（`BiliManager.auto_retry_policy`），
+    所以不用重启」。如果调度器把策略当**启动时的快照**存下来，这句话就是假的：
+    用户关掉开关、把间隔从 300 秒改到 10 秒，机器仍按旧值跑。
+    """
+    from bili_fakes import FakeBiliTransport
+    from test_bili_manager import make_harness
+
+    harness = make_harness(tmp_path, transport=FakeBiliTransport())
+    harness.settings.bili_auto_retry_enabled = True
+    harness.settings.bili_auto_retry_interval_seconds = 300
+    harness.settings.bili_auto_retry_max_attempts = 3
+    assert harness.manager.auto_retry.policy.interval_seconds == 300
+
+    # 「设置面板」改的就是这三个字段。
+    harness.settings.bili_auto_retry_enabled = False
+    harness.settings.bili_auto_retry_interval_seconds = 10
+    harness.settings.bili_auto_retry_max_attempts = 7
+
+    policy = harness.manager.auto_retry.policy
+    assert policy.enabled is False
+    assert policy.interval_seconds == 10
+    assert policy.max_attempts == 7
+    await harness.manager.stop()
+
+
+async def test_turning_the_switch_off_stops_a_running_scheduler(tmp_path):
+    """关掉开关之后，**下一次 tick 就不许再问平台** —— 这是开关的全部意义。"""
+    from bili_fakes import FakeBiliTransport
+    from test_bili_manager import make_harness
+
+    harness = make_harness(tmp_path, transport=FakeBiliTransport())
+    with Session(harness.engine) as session:
+        from app.bilibili.bili_auto_retry import register
+
+        register(session, target_id="s1", kind=BiliAutoRetryKind.season.value, job_id="job1")
+
+    harness.settings.bili_auto_retry_enabled = False
+    assert await harness.manager.auto_retry.tick() == 0
+    with Session(harness.engine) as session:
+        assert session.get(BiliAutoRetry, "s1").state == BiliAutoRetryState.waiting.value
+    await harness.manager.stop()
+
+
+# ============================================================ 运行中改设置
+async def test_a_policy_change_reaches_the_running_scheduler(tmp_path):
+    """设置面板改完三个旋钮，**不用重启**就该生效。
+
+    设置接口里写着「调度器每次问平台前都现取策略（`BiliManager.auto_retry_policy`），
+    所以不用重启」。如果调度器把策略当**启动时的快照**存下来，这句话就是假的：
+    用户关掉开关、把间隔从 300 秒改到 10 秒，机器仍按旧值跑。
+    """
+    from bili_fakes import FakeBiliTransport
+    from test_bili_manager import make_harness
+
+    harness = make_harness(tmp_path, transport=FakeBiliTransport())
+    harness.settings.bili_auto_retry_enabled = True
+    harness.settings.bili_auto_retry_interval_seconds = 300
+    harness.settings.bili_auto_retry_max_attempts = 3
+    assert harness.manager.auto_retry.policy.interval_seconds == 300
+
+    # 「设置面板」改的就是这三个字段。
+    harness.settings.bili_auto_retry_enabled = False
+    harness.settings.bili_auto_retry_interval_seconds = 10
+    harness.settings.bili_auto_retry_max_attempts = 7
+
+    policy = harness.manager.auto_retry.policy
+    assert policy.enabled is False
+    assert policy.interval_seconds == 10
+    assert policy.max_attempts == 7
+    await harness.manager.stop()
+
+
+async def test_turning_the_switch_off_stops_a_running_scheduler(tmp_path):
+    """关掉开关之后，**下一次 tick 就不许再问平台** —— 这是开关的全部意义。"""
+    from bili_fakes import FakeBiliTransport
+    from test_bili_manager import make_harness
+
+    harness = make_harness(tmp_path, transport=FakeBiliTransport())
+    with Session(harness.engine) as session:
+        from app.bilibili.bili_auto_retry import register
+
+        register(session, target_id="s1", kind=BiliAutoRetryKind.season.value, job_id="job1")
+
+    harness.settings.bili_auto_retry_enabled = False
+    assert await harness.manager.auto_retry.tick() == 0
+    with Session(harness.engine) as session:
+        assert session.get(BiliAutoRetry, "s1").state == BiliAutoRetryState.waiting.value
+    await harness.manager.stop()
+
+
+async def test_a_successful_manual_subtitle_retry_returns_the_finished_state(tmp_path):
+    """手动补传字幕**成功**之后，接口返回的那份读模型也要说「结束了」。
+
+    用户点完「重传字幕」，界面上那颗倒计时如果继续走，就是在说「机器还在等下一次」——
+    而实际上自动重试已经收工了。库里是对的、响应里是旧值，这种「两个地方各说一套」
+    最难发现：下一次刷新（别的 SSE）才把界面纠正过来。
+    """
+    from test_bili_manager import drain, make_harness
+
+    transport = reviewing_transport(TITLE)
+    harness = make_harness(tmp_path, transport=transport)
+    items = harness.seed_job("job1", "任务", 1)
+    subtitle = Path(items[0]["path"]).with_suffix(".en.vtt")
+    subtitle.write_text("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHello\n", encoding="utf-8")
+    harness.set_item_subtitle(items[0]["id"], subtitle)
+    await harness.manager.submit_single(
+        job_id="job1",
+        item_id=items[0]["id"],
+        meta=harness.meta(),
+        video_path=Path(items[0]["path"]),
+        make_cover=False,
+        comment="",
+    )
+    await drain(harness.manager)
+
+    upload_id = harness.uploads("job1")[0].id
+    # 前提：审核中 ⇒ 字幕传不上去 ⇒ 自动重试已经登记了一条。
+    with Session(harness.engine) as session:
+        assert session.get(BiliAutoRetry, upload_id) is not None
+
+    transport.video = {"cid": 7001, "pic": "https://i0.hdslb.com/bfs/archive/pic.jpg"}
+    result = await harness.manager.retry_upload(upload_id)
+
+    assert result.upload.subtitle_state == "posted"
+    # 响应里那份读模型必须与库里一致。
+    assert result.upload.auto_retry is not None
+    assert result.upload.auto_retry.state == BiliAutoRetryState.done.value
+    await harness.manager.stop()
+
+
+async def test_a_successful_manual_grouping_returns_the_finished_state(tmp_path):
+    """手动「重试归集」成功时，返回的合集读模型里**不能再有「下一次自动重试」**。
+
+    与字幕那条同一个毛病：读模型在收工之前就构造好了，于是响应说 `waiting`、库里说
+    `done`。界面照着响应渲染，倒计时就会在「已归集」旁边继续走。
+    """
+    from app.bilibili.bili_meta import MetadataTemplate
+    from test_bili_manager import drain, make_harness
+
+    harness = make_harness(tmp_path, transport=reviewing_transport("合集任务 第 1 集"))
+    items = harness.seed_job("job2", "合集任务", 1)
+    targets = [
+        UploadTarget(
+            index=1,
+            title=items[0]["title"],
+            video_path=Path(items[0]["path"]),
+            source_url="https://youtu.be/x",
+            item_id=items[0]["id"],
+        )
+    ]
+    await harness.manager.submit_collection(
+        job_id="job2",
+        template=MetadataTemplate(title_template="{title}", desc_template="{title}", tags="t", tid="122"),
+        targets=targets,
+        paths=[Path(items[0]["path"])],
+        season_title="合集名",
+        season_desc="简介",
+        make_cover=False,
+        comment="",
+    )
+    await drain(harness.manager)
+
+    season = harness.season("job2")
+    assert season.status == "pending"
+    with Session(harness.engine) as session:
+        assert session.get(BiliAutoRetry, season.id) is not None
+
+    # 审核通过：平台给出 aid + cid。
+    harness.transport.archives = [
+        {"aid": 9, "bvid": "BV9", "title": items[0]["title"], "state": 0, "cid": 42927065206}
+    ]
+    harness.transport.video = {"cid": 42927065206, "pic": "https://i0.hdslb.com/bfs/archive/pic.jpg"}
+
+    result = await harness.manager.retry_season(season.id)
+    assert result.season.status == "grouped"
+    assert result.season.auto_retry is not None
+    assert result.season.auto_retry.state == BiliAutoRetryState.done.value
+    await harness.manager.stop()
+
+
+def test_the_settings_endpoint_reaches_the_scheduler(tmp_path):
+    """端到端（HTTP → 设置 → manager → 调度器）：`PUT /api/settings` 改完，调度器读到新值。
+
+    前面那条 `..._reaches_the_running_scheduler` 直接改的是内存里的 `settings`，
+    绕过了路由。这条补上**真正的入口**：用户是从设置面板点下去的，
+    中间还有 schema 校验、落库、`api_support` 三道。
+    """
+    from test_api import make_client
+
+    client = make_client(tmp_path)
+    manager = client.app.state.api_context.bili
+    assert manager.auto_retry.policy.enabled is True
+
+    response = client.put("/api/settings", json={"bili_auto_retry_enabled": False})
+    assert response.status_code == 200
+    assert manager.auto_retry.policy.enabled is False
+
+    response = client.put(
+        "/api/settings",
+        json={"bili_auto_retry_interval_seconds": 10, "bili_auto_retry_max_attempts": 7},
+    )
+    assert response.status_code == 200
+    policy = manager.auto_retry.policy
+    assert policy.interval_seconds == 10
+    assert policy.max_attempts == 7
+
+
+def test_the_settings_endpoint_reaches_the_scheduler(tmp_path):
+    """端到端（HTTP → 设置 → manager → 调度器）：`PUT /api/settings` 改完，调度器读到新值。
+
+    前面那条 `..._reaches_the_running_scheduler` 直接改的是内存里的 `settings`，
+    绕过了路由。这条补上**真正的入口**：用户是从设置面板点下去的，
+    中间还有 schema 校验、落库、`api_support` 三道。
+    """
+    from test_api import make_client
+
+    client = make_client(tmp_path)
+    manager = client.app.state.api_context.bili
+    assert manager.auto_retry.policy.enabled is True
+
+    response = client.put("/api/settings", json={"bili_auto_retry_enabled": False})
+    assert response.status_code == 200
+    assert manager.auto_retry.policy.enabled is False
+
+    response = client.put(
+        "/api/settings",
+        json={"bili_auto_retry_interval_seconds": 10, "bili_auto_retry_max_attempts": 7},
+    )
+    assert response.status_code == 200
+    policy = manager.auto_retry.policy
+    assert policy.interval_seconds == 10
+    assert policy.max_attempts == 7

@@ -22,15 +22,15 @@ python -m pytest backend\tests -q
 > 沙箱的批量删除守卫是**累积计数**的（一轮命令内累计到阈值就整条拒掉），于是 1069 个用例放在一个进程里跑会在中途被拦下。
 > 现象很好认：**大量 `at setup of ...` 的 error，而 `FAILED` 一个都没有** —— 那是环境问题，不是代码问题。
 >
-> 按下面的分块跑，六块相加应恰好等于 1274（各块 116～242 项；若某块仍被拦下，继续拆小即可）：
+> 按下面的分块跑，六块相加应恰好等于 1314（各块 133～278 项；若某块仍被拦下，继续拆小即可）：
 >
 > ```powershell
 > python -m pytest backend\tests\test_bili_policy.py backend\tests\test_bili_meta.py backend\tests\test_bili_auth.py backend\tests\test_bili_bin.py -q -p no:cacheprovider --basetemp=tmp_pytest\a   # 221
 > python -m pytest backend\tests\test_bili_read_model.py backend\tests\test_bili_subtitle.py backend\tests\test_bili_api.py -q -p no:cacheprovider --basetemp=tmp_pytest\b                                            # 201
-> python -m pytest backend\tests\test_bili_upload.py backend\tests\test_bili_manager.py backend\tests\test_api_bilibili.py -q -p no:cacheprovider --basetemp=tmp_pytest\c                                                # 242
-> python -m pytest backend\tests\test_ytdlp_service.py backend\tests\test_subtitle_plan.py backend\tests\test_subtitle_recording.py backend\tests\test_api.py -q -p no:cacheprovider --basetemp=tmp_pytest\d                # 224
+> python -m pytest backend\tests\test_bili_upload.py backend\tests\test_bili_manager.py backend\tests\test_bili_auto_retry.py backend\tests\test_bili_auto_retry_integration.py backend\tests\test_api_bilibili.py -q -p no:cacheprovider --basetemp=tmp_pytest\c                                                # 278
+> python -m pytest backend\tests\test_ytdlp_service.py backend\tests\test_subtitle_plan.py backend\tests\test_subtitle_recording.py backend\tests\test_api.py -q -p no:cacheprovider --basetemp=tmp_pytest\d                # 226
 > python -m pytest backend\tests\test_resolution_decisions.py backend\tests\test_output_paths.py backend\tests\test_safe_delete.py backend\tests\test_system_open.py backend\tests\test_open_with_registry.py backend\tests\test_dev_server.py backend\tests\test_config_paths.py backend\tests\test_proxy.py backend\tests\test_cookie_health.py backend\tests\test_stall_guard.py backend\tests\test_ytdlp_formats.py backend\tests\test_resolution_input.py backend\tests\test_job_routes.py -q -p no:cacheprovider --basetemp=tmp_pytest\e   # 255
-> python -m pytest backend\tests\test_error_advice.py backend\tests\test_connectivity.py backend\tests\test_download_progress.py backend\tests\test_runtime_env.py backend\tests\test_job_manager_finally.py backend\tests\test_finally_guards.py backend\tests\test_check_layers.py backend\tests\test_orphan_recovery.py backend\tests\test_completion_notification.py backend\tests\test_db.py backend\tests\test_logging_setup.py backend\tests\test_paths.py backend\tests\test_transfer_stats.py backend\tests\test_progress_persist.py backend\tests\test_log_safety.py backend\tests\test_events.py backend\tests\test_job_artifacts.py backend\tests\test_bili_http.py -q -p no:cacheprovider --basetemp=tmp_pytest\f   # 131
+> python -m pytest backend\tests\test_error_advice.py backend\tests\test_connectivity.py backend\tests\test_download_progress.py backend\tests\test_runtime_env.py backend\tests\test_job_manager_finally.py backend\tests\test_finally_guards.py backend\tests\test_check_layers.py backend\tests\test_orphan_recovery.py backend\tests\test_completion_notification.py backend\tests\test_db.py backend\tests\test_logging_setup.py backend\tests\test_paths.py backend\tests\test_transfer_stats.py backend\tests\test_progress_persist.py backend\tests\test_log_safety.py backend\tests\test_events.py backend\tests\test_job_artifacts.py backend\tests\test_bili_http.py -q -p no:cacheprovider --basetemp=tmp_pytest\f   # 133
 > ```
 >
 > 上面的块内数字不用手数：`python -m pytest backend\tests --collect-only -q -p no:cacheprovider` 会逐条打印用例 id，
@@ -132,7 +132,7 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 
 > **数字必须自己数一遍**，不要只信 `-q` 的汇总行。逐文件规模用
 > `pytest backend/tests/<文件> -q -p no:cacheprovider --co` 取，各文件之和应**恰等于**全集
-> （2026-10-28 实测：45 个文件逐项相加 = 1274 = 全集）。历史上有过把「收集不全的那一次」当成
+> （2026-11-03 实测：47 个文件逐项相加 = 1314 = 全集）。历史上有过把「收集不全的那一次」当成
 > 基线的教训（见过 267 / 286 / 289 三个数，真实基线一直是当时的 913）。
 
 > **夹具里被 worker 认领的状态会让「同步断言写库结果」变成竞态**（2026-10-21 修掉一条）：
@@ -188,8 +188,8 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 | [test_bili_subtitle.py](../backend/tests/test_bili_subtitle.py) | **38 例**（本轮新增）。SRT/VTT → BCC：时间戳解析（失败返回 `None` 不猜 0）、WEBVTT/NOTE 跳过、`<c>` 内联标签剥离、**只合并相邻且完全相同**的字幕、BCC 的 `from`/`to` 是秒、`utf-8-sig`；**语言白名单参数化**（`zh-CN`/`en-US`/`zh-Hans`/`en-GB` 必须映射成平台接受的值）；端点断言（`oid == cid`、`sign == "false"`、`submit == "true"`）；**任何失败都落成结论、绝不抛异常**。 |
 | [test_subtitle_recording.py](../backend/tests/test_subtitle_recording.py) | **6 例**（本轮新增）。下载结论的落库：按**磁盘证据**而不是计划、自动模式只请求计划里那一条轨、没有可用轨时请求族名（**不是空列表也不是 `["all"]`**）、文件缺失落成 `none`、非中英语种不记录、**重跑清掉旧结论**。 |
 | [test_bili_read_model.py](../backend/tests/test_bili_read_model.py) | 「多条记录 → 一档徽标」的**19 行真值表**参数化：8 成功 2 在跑 → 上传中、归集算在途、归集失败不等于全成功、全部待核对不报成功、被拒算失败；外加「成功 / 失败 / 在途三组集合**恰好归类一次**」的不相交性（唯一允许落在三组之外的是 `unverified`）；连同任务级/条目级投影、孤儿记录排最后、汇总按 job 排序；`season_upload_ids` 对合集 `upload_ids` 列的**七种内容形态加 `null` 列**容错（合法列表、空列表、空串、坏 JSON、**JSON 对象** —— `{"a": 1}` 必须当成空而不是 `["a"]`、非字符串元素 `[1, 2]` 折成字符串、`[null]` 不吞条目）、`latest_season` 取最新一行、`list_seasons` 的定序保证选择稳定。 |
-| [test_bili_auto_retry.py](../backend/tests/test_bili_auto_retry.py) | 自动重试的**判据**（纯函数）：退避序列与封顶、限流加倍、尝试上限、登记幂等与**不打断退避**、到点扫描、崩溃后折回等待。 |
-| [test_bili_auto_retry_integration.py](../backend/tests/test_bili_auto_retry_integration.py) | 自动重试的**端到端**：真 `BiliManager` + 假平台 —— 审核没通过时继续等、审核通过后**合集真的归好了**（且投稿命令只跑一次）、重启不丢待办、手动按钮照旧可用。 |
+| [test_bili_auto_retry.py](../backend/tests/test_bili_auto_retry.py) | 自动重试的**判据**（纯函数）：退避序列与封顶、`attempts<=0` 的钳制、限流加倍、尝试上限、登记幂等与**不打断退避**、到点扫描、崩溃后折回等待、未知目标类型要报「不认识」而不是静默、变更通知的时机、带 `cid` 的字幕失败算失败、`start()` 重复调用只有一个循环；以及**策略每轮现取**（上限改了立刻按新值判）与**睡眠分段**（间隔 300→5 秒时这一觉只睡 5 秒）。见 [032](../ai/bug-fix/032-auto-retry-settings-need-a-restart.md)。 |
+| [test_bili_auto_retry_integration.py](../backend/tests/test_bili_auto_retry_integration.py) | 自动重试的**端到端**：真 `BiliManager` + 假平台 —— 审核没通过时继续等、审核通过后**合集真的归好了**（且投稿命令只跑一次）、重启不丢待办、手动按钮照旧可用；以及三条**运行时一致性**：设置面板改完不用重启就生效（关掉开关后 `tick()` 不再问平台）、手动补传字幕 / 手动归集成功后**响应里的 `auto_retry` 已是 `done`**（见 [033](../ai/bug-fix/033-the-response-keeps-counting-after-success.md)）。 |
 | [test_bili_manager.py](../backend/tests/test_bili_manager.py) | 队列与编排：重投复用同一行并作废旧 `bvid`/`aid`、六种前置条件各自报错（含 **`missing_upload_token`**）、登录落盘时补令牌 / 交换失败仍留住 cookies、导入路径补令牌且**不重复换**、体检把缺令牌报成 blocker、重试三分支（已发布→什么都不做 / 在途→什么都不做 / 待核对→**只重新核对且不发命令** / 失败→重新投稿），以及**只补传字幕**的两条：审核中投稿第一次失败后可补、历史 `skipped` 行也能补，两者都断言**投稿命令不跑第二次**、重启收敛（`uploading` 与 `queued` 都折成可重试失败、幂等）、worker 崩溃可读且不带走 worker、体检（含 0 字节空壳与「没装」分开）、投稿间隔、**预填复用上一次投稿**（单视频逐字段复用、合集复用模板原文与合集名、坏模板降级不抛、单视频投稿不清空合集模板、改过的模板覆盖旧的）。 |
 | [test_api_bilibili.py](../backend/tests/test_api_bilibili.py) | 路由层：真 `BiliManager` + `TestClient` + 按数据库状态等完成（**不用队列空作完成信号**：worker 一 `get()` 走队列就空了，那时它还在跑）。覆盖体检 / 扫码（只有 `confirmed` 才落盘、`%2C` 解码）/ 导入清除 / 预填（单视频与合集、404、422、**复用上一次投稿走完整条 HTTP 链**）/ 读回 / 单视频与合集投稿（400 超限定位于第几条、409 列出未下载的、404）/ 重试与重试归集。 |
 | [bili_fakes.py](../backend/tests/bili_fakes.py) | B站 测试的共享替身：`FakeBiliTransport`（覆盖 14 个端点，含 TV 令牌交换那三个与 CC 字幕保存；记录 `calls`/`comments`/`topped`/`subtitles`、未知 URL 直接断言失败）、`StubTransport`、脚本化 runner/sleeper、`write_video()`。**`UNSET` 哨兵**是必须的：用 `None` 兼作「没传参数」时，`account=None`（未登录）与 `video=None`（查不到稿件）都会被当成「用默认值」，那两条用例根本测不到目标分支、只会绿着过去。字幕端点可用 `subtitle_code` / `subtitle_message` / `subtitle_error` 脚本化（`subtitle_code` 设为非 0 即模拟平台拒绝，用来验「字幕失败不翻稿件状态」）。 |

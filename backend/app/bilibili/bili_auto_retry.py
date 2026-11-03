@@ -48,6 +48,11 @@ logger = logging.getLogger(__name__)
 #: 审核超过十几分钟还没放行，等下一次和现在没有区别。
 MAX_BACKOFF_FACTOR = 16
 
+#: 调度循环一次睡眠的**最大**时长（秒）。睡一整轮（最长 300 秒）就听不到设置的变化：
+#: 用户把间隔从 300 秒改成 10 秒、或者干脆关掉开关，机器仍会按旧值睡完这一轮。
+#: 分段睡让改动在 1 秒内生效，代价只是每秒醒一次（可忽略）。
+POLL_SLICE_SECONDS = 1.0
+
 
 @dataclass(frozen=True)
 class AutoRetryPolicy:
@@ -286,12 +291,18 @@ class BiliAutoRetryScheduler:
        下一轮扫描能接着做（内存态的进度在重启后就全丢了）。
     3. **上限**：`max_attempts` 到了就转 `exhausted`，不再自动重试 ——
        无限重试在平台一直不放行时会把账号刷成限流状态。
+
+    **策略是「每轮现取」的，不是构造时快照**：三个旋钮（开关 / 间隔 / 上限）都能在
+    设置面板里改，而设置接口承诺「改完立刻生效，不用重启」。所以 `policy` 既可以传一个
+    `AutoRetryPolicy`（测试与一次性场景），也可以传一个**返回它的函数**（生产环境传
+    `BiliManager.auto_retry_policy`）。传快照的话，用户关掉开关机器还在问平台，
+    而且没有任何地方会报错。
     """
 
     def __init__(
         self,
         engine,
-        policy: AutoRetryPolicy,
+        policy: AutoRetryPolicy | Callable[[], AutoRetryPolicy],
         *,
         retry_season: Callable[[str], Awaitable["object"]],
         retry_upload: Callable[[str], Awaitable["object"]],
@@ -299,13 +310,19 @@ class BiliAutoRetryScheduler:
         on_change: Callable[[], None] | None = None,
     ) -> None:
         self.engine = engine
-        self.policy = policy
+        self._policy_source = policy
         self._retry_season = retry_season
         self._retry_upload = retry_upload
         self._sleep = sleeper or asyncio.sleep
         self._on_change = on_change
         self._task: asyncio.Task | None = None
         self._stopping = False
+
+    @property
+    def policy(self) -> AutoRetryPolicy:
+        """当前的策略。**每次都现取** —— 设置改了立刻生效，不需要重建调度器。"""
+        source = self._policy_source
+        return source() if callable(source) else source
 
     # -- 生命周期 ----------------------------------------------------------
     async def start(self) -> None:
@@ -324,12 +341,33 @@ class BiliAutoRetryScheduler:
     async def _loop(self) -> None:
         while not self._stopping:
             try:
-                await self._sleep(self.policy.interval_seconds)
+                await self._sleep_one_round()
+                # 睡到一半被叫停时**不许再问一次平台**：`stop()` 的语义是「立刻停」，
+                # 而在关机途中发出一个投稿/归集请求，用户看到的是「关不掉」。
+                if self._stopping:
+                    return
                 await self.tick()
             except asyncio.CancelledError:
                 raise
             except Exception:  # noqa: BLE001 - 一轮失败不能带走整个调度器
                 logger.exception("bili 自动重试这一轮失败了")
+
+    async def _sleep_one_round(self) -> None:
+        """睡到下一轮，**分段**睡并每段重读间隔。
+
+        为什么要分段：`interval_seconds` 最长 300 秒，而设置面板可以随时把它改小
+        （或者把开关关掉）。一觉睡满 300 秒就意味着「改完立刻生效」是句空话 ——
+        用户改完盯着界面，机器还要再等五分钟才按新值跑。分段到 1 秒后，
+        改动在下一段就被读到；每秒醒一次的代价可以忽略。
+        """
+        slept = 0.0
+        while not self._stopping:
+            interval = max(float(self.policy.interval_seconds), POLL_SLICE_SECONDS)
+            if slept >= interval:
+                return
+            piece = min(POLL_SLICE_SECONDS, interval - slept)
+            await self._sleep(piece)
+            slept += piece
 
     # -- 恢复 --------------------------------------------------------------
     def resume_interrupted(self) -> int:
