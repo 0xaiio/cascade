@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2, Copy, Loader2, PlugZap, RefreshCw, XCircle } from "lucide-react";
-import { getDiagnostics, getSettings, refreshRuntimeDiagnostics, testProxy } from "../shared/api";
+import { useState } from "react";
+import { CheckCircle2, Loader2, PlugZap, XCircle } from "lucide-react";
+import { testProxy } from "../shared/api";
 import { HelpPopover } from "../shared/ui/HelpPopover";
-import type { Diagnostics, ProxyTestResult, Settings } from "../contracts/types";
+import type { ProxyTestResult, Settings } from "../contracts/types";
 
 /**
- * 代理与运行环境的自检面板。
+ * 代理自检：`当前生效：…` 那行结论 + 两个检测按钮 + 一次探测的全部证据。
  *
  * 设计目标（用户视角）：
  * 1. **先给结论**：现在到底走没走代理、通不通、用了几毫秒，一眼看完；
@@ -15,6 +15,10 @@ import type { Diagnostics, ProxyTestResult, Settings } from "../contracts/types"
  *
  * 这里刻意**不**把失败只写成一行红字：每次失败都必须同时给出 next_steps，
  * 否则用户只能回来问「那我现在该干嘛」。
+ *
+ * **JS 运行时与日志位置不在这里**（`RuntimeSection.tsx`）。它们曾经因为共用
+ * `GET /api/diagnostics` 而长在本组件里，于是「代理填什么」和「本机装没装 Node」
+ * 挤在同一个视觉块里 —— 数据同源不等于功能同类（ai/ui/010）。
  */
 
 const PROXY_PRESETS = [
@@ -45,30 +49,6 @@ export function proxyHint(settings: Settings): string {
     return "当前直连：没有填写代理，也没发现 Windows 系统代理或 HTTP_PROXY/HTTPS_PROXY 环境变量。";
   }
   return `当前生效：${settings.proxy_effective}（来源：${proxySourceLabel(settings.proxy_source)}）`;
-}
-
-function CopyableCommand({ command, label }: { command: string; label?: string }) {
-  const [copied, setCopied] = useState(false);
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(command);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1600);
-    } catch {
-      setCopied(false);
-    }
-  }
-
-  return (
-    <span className="command-row">
-      <code className="command-code">{command}</code>
-      <button className="ghost-button command-copy" type="button" onClick={() => void copy()}>
-        <Copy size={14} />
-        {copied ? "已复制" : (label ?? "复制")}
-      </button>
-    </span>
-  );
 }
 
 /** 挂在代理输入框旁：常见代理软件在本机监听的端口，点一下即可填入。 */
@@ -139,27 +119,15 @@ export function ProxyTroubleshootingPopover() {
 
 export function ProxySection({
   settings,
-  draftProxy,
-  onDraftProxyChange,
-  onSettingsChange
+  draftProxy
 }: {
   settings: Settings;
-  /** 设置面板里那个输入框的当前值。测试/试连都用它，保证「试的就是你看到的」。 */
+  /** 设置面板里那个输入框的当前值。试连用它，保证「试的就是你看到的」。 */
   draftProxy: string;
-  onDraftProxyChange: (value: string) => void;
-  onSettingsChange: (settings: Settings) => void;
 }) {
   const [result, setResult] = useState<ProxyTestResult | null>(null);
   const [testing, setTesting] = useState<"saved" | "draft" | null>(null);
   const [error, setError] = useState("");
-  const [runtime, setRuntime] = useState<Diagnostics | null>(null);
-  const [runtimeBusy, setRuntimeBusy] = useState(false);
-
-  useEffect(() => {
-    void getDiagnostics()
-      .then(setRuntime)
-      .catch(() => setRuntime(null));
-  }, []);
 
   async function runTest(mode: "saved" | "draft") {
     setTesting(mode);
@@ -173,21 +141,6 @@ export function ProxySection({
       setTesting(null);
     }
   }
-
-  async function rerunRuntimeCheck() {
-    setRuntimeBusy(true);
-    try {
-      setRuntime(await refreshRuntimeDiagnostics());
-      onSettingsChange(await getSettings());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "自检失败");
-    } finally {
-      setRuntimeBusy(false);
-    }
-  }
-
-  const jsRuntimeReady = runtime?.dependencies?.js_runtime === true;
-  const jsRuntimeError = typeof runtime?.dependencies?.js_runtime_error === "string" ? runtime.dependencies.js_runtime_error : null;
 
   return (
     <div className="proxy-section">
@@ -245,46 +198,6 @@ export function ProxySection({
 
       <div className="diag-help-row">
         <ProxyTroubleshootingPopover />
-      </div>
-
-      <div className={`runtime-block ${jsRuntimeReady ? "is-ok" : "is-warn"}`}>
-        <span className="runtime-head">
-          {jsRuntimeReady ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
-          JS 运行时（解析 YouTube 的 n 参数，登录状态下必须）：{jsRuntimeReady ? "可用" : "不可用"}
-        </span>
-        {jsRuntimeReady ? (
-          <p className="hint">
-            {String(runtime?.dependencies?.js_runtime_name ?? "")}　{runtime?.dependencies?.js_runtime_path as string}　
-            v{runtime?.dependencies?.js_runtime_version as string}
-          </p>
-        ) : (
-          <>
-            <p className="hint">
-              装一个 Node 18+ 或 Deno 即可。装完点「重新自检」。
-              这个组件不可用时，最典型的症状是下载报 <code>The page needs to be reloaded.</code>，而不是给出任何有用的提示。
-            </p>
-            {jsRuntimeError && <p className="diag-error">自检报错：{jsRuntimeError}</p>}
-          </>
-        )}
-        {runtime?.sanitized_environment && runtime.sanitized_environment.length > 0 && (
-          <p className="hint">
-            启动时已自动摘除会打坏 JS 运行时的宿主环境变量：
-            {runtime.sanitized_environment.map((item) => `${item.name}（${item.reason.split("：")[0]}）`).join("、")}
-          </p>
-        )}
-        <div className="diag-actions">
-          <button className="ghost-button" type="button" onClick={() => void rerunRuntimeCheck()} disabled={runtimeBusy}>
-            {runtimeBusy ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
-            重新自检
-          </button>
-        </div>
-        {runtime?.log_file && (
-          <p className="hint">
-            日志文件：<code>{runtime.log_file}</code> —— 下载失败时先看这个文件的最后几十行。
-            <br />
-            <CopyableCommand command={runtime.log_file} label="复制路径" />
-          </p>
-        )}
       </div>
     </div>
   );

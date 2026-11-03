@@ -115,4 +115,29 @@ describe("styles.css · 源文不变式", () => {
     const text = bodies.get(".error-banner-text") ?? [];
     expect(text.join("\n")).toMatch(/overflow-wrap:\s*anywhere/);
   });
+
+  // 设置面板的五类事（落盘 / 联网 / 提醒 / 投稿 / 本机环境）原来是一条 16px 等距的平铺
+  // 列表：组内与组间的间距一样，边界只存在于文案里（ai/ui/010）。分区靠三样东西成立，
+  // 其中**间距差**是唯一能在滚动时被感知到的那个 —— 它由「组间 16 + 16 + 1px」与
+  // 「组内 16px」共同构成。`.field` 自带 16px 上边距，组内若不清零，两者叠加正好等于组间
+  // 距离，分区就退化成几个加粗小标题。jsdom 量不出间距，所以盯住这两条声明本身。
+  test("separates settings groups by a rule and a gap wider than inside a group", () => {
+    const bodies = cssRuleBodies(stylesCss);
+
+    const divider = bodies.get(".settings-group + .settings-group") ?? [];
+    expect(divider.length).toBeGreaterThan(0);
+    const declaration = divider.join("\n");
+    expect(declaration).toMatch(/border-top:\s*1px/);
+    expect(declaration).toMatch(/padding-top:\s*\d/);
+
+    // 组内间距只由 grid gap 给：字段自己的 margin-top 必须在这一层被清掉。
+    const reset = bodies.get(".settings-group-body > .field") ?? [];
+    expect(reset.length).toBeGreaterThan(0);
+    expect(reset.join("\n")).toMatch(/margin-top:\s*0/);
+
+    // 分区标题要比正文重，但不能重过面板标题（h2）—— 层级不能只写在标签名里。
+    const title = bodies.get(".settings-group-title") ?? [];
+    expect(title.length).toBeGreaterThan(0);
+    expect(title.join("\n")).toMatch(/font-weight:\s*\d/);
+  });
 });

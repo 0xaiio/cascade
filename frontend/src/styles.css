@@ -444,6 +444,68 @@ th {
   font-weight: 800;
 }
 
+/* ---------- 设置面板的功能分区 ----------
+   面板里有五类互不相干的事（落盘 / 联网 / 提醒 / 投稿 / 本机环境）。分区前它们是一条
+   16px 等距的平铺列表：任意两项之间的间距都一样，于是「哪几项是一件事」只能靠读文案猜。
+   这里同时用三样东西划边界，缺一样都会退化成「加粗的小标题」：
+   ① 标题（h3，比面板标题低一级）；② 组间那条 1px 分隔线；③ **间距差** ——
+   组内 16px、组间 16 + 16 + 1px。只有 ③ 能让人在滚动时感到「换了一段」。
+   实测与取舍见 ai/ui/010。 */
+
+.settings-group {
+  margin-top: 16px;
+  min-width: 0;
+}
+
+.settings-group + .settings-group {
+  padding-top: 16px;
+  border-top: 1px solid #e8edf6;
+}
+
+.settings-group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  /* 比字段标签（13px / #334155）更小、更淡：分区标题是「这一段讲什么」的旁注，
+     字段标签才是用户要读的那一行。两者同为 13px/800 时，标题只剩图标能区分。 */
+  color: #62718a;
+  font-size: 12.5px;
+  font-weight: 850;
+  line-height: 1.4;
+  letter-spacing: 0.05em;
+}
+
+/* 图标只是分区的路标，颜色比标题再轻一档 —— 它不该和标题抢注意力。 */
+.settings-group-title svg {
+  flex: 0 0 auto;
+  color: #7b8798;
+}
+
+.settings-group-body {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* `.field` 自带 `margin-top: 16px`（别的面板靠它把字段排开）。组内间距已经由
+   grid 的 gap 给了，两者同时生效会变成 32px —— 正好等于组间距离，边界又糊了。
+   这条声明是「组内 16 / 组间 33」这个判据的一半，styles.test.ts 钉住它。 */
+.settings-group-body > .field {
+  margin-top: 0;
+}
+
+/* 代理检测块原本贴着上面的输入框（margin-top: 6px）。组内已经统一给了间距。 */
+.settings-group-body > .proxy-section {
+  margin-top: 0;
+}
+
+.runtime-section {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
 .warning-note {
   margin: 0;
   color: #9a3412;
@@ -1982,12 +2044,10 @@ th {
   color: #b42318;
 }
 
-/* ------------------------------------------------- 设置面板里的 B站 区 */
-
-.bili-login-section {
-  padding-top: 16px;
-  border-top: 1px solid #e6ebf4;
-}
+/* ------------------------------------------------- 设置面板里的 B站 区
+   这一区曾经靠一条 `border-top` 把自己和上面的设置项隔开（那时它们在同一条平铺列表里）。
+   分区之后边界由 `.settings-group + .settings-group` 的分隔线与分区标题负责，
+   同一处不再叠第二道杠。 */
 
 /* 「重新体检」的落款。没有它，结论没变时点这个按钮**看不出任何变化** ——
    用户合理地认为按钮没实现（实测反馈就是这样来的）。等宽数字避免秒数跳动时左右晃。 */

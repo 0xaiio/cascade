@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
-import { Folder, Play, Settings as SettingsIcon } from "lucide-react";
+import { Bell, Folder, Globe, Play, Settings as SettingsIcon, Upload, Wrench } from "lucide-react";
 import { BiliLoginSection } from "../bilibili/BiliLoginSection";
+import { RuntimeSection } from "./RuntimeSection";
+import { SettingsGroup } from "./SettingsGroup";
 import { HelpPopover } from "../shared/ui/HelpPopover";
 import { ProxyPortsPopover, ProxySection } from "./ProxySection";
 import { selectDownloadDirectory, updateSettings } from "../shared/api";
@@ -8,7 +10,13 @@ import { COMPLETION_NOTIFICATION_OPTIONS } from "../notifications/notifications"
 import type { CompletionNotification, Settings } from "../contracts/types";
 
 /**
- * 设置面板：下载目录、并发、单视频并发下载数（aria2c）、代理（含连通性检测）、B站 上传、保存状态回显。
+ * 设置面板：下载目录、并发、单视频并发下载数（aria2c）、代理（含连通性检测）、B站 上传、
+ * 完成提醒、运行环境自检。
+ *
+ * **按功能域分成五个区**（`SettingsGroup`），顺序就是用户碰到它们的先后，判据在
+ * [ai/ui/010](../../../ai/ui/010-settings-panel-is-a-flat-list.md)：下载与存储 → 代理与网络 →
+ * 完成提醒 → B站 上传 → 运行环境。分区的意义在于「一眼看出哪几项是一件事」——
+ * 加项时先回答「它属于哪个区」，答不上来就别急着加（「其他」不是一个区）。
  *
  * 面板持有一份 `draft`（输入过程中不落库），**失焦即保存**（`onBlur`），保存成功由
  * `onSettingsChange` 把权威值回灌。因此「先试后改」在输入框上是安全的：没失焦就不发请求。
@@ -208,164 +216,182 @@ export function SettingsPanel({
         <SettingsIcon size={19} />
         <div>
           <h2>设置</h2>
+          {/* 面板没有「保存」按钮（失焦即存）。不写在最上面，用户会先去找那颗按钮。 */}
+          <p>改完即存，不需要点保存。</p>
         </div>
       </div>
-      <label className="field">
-        <span>下载目录</span>
-        <div className="directory-picker-row">
-          <input value={draft.download_dir ?? ""} readOnly />
-          <button className="ghost-button" type="button" onClick={() => void chooseDownloadDirectory()}>
-            <Folder size={16} />
-            选择文件夹
-          </button>
-        </div>
-      </label>
-      <label className="field settings-number-field">
-        <span>并发（同时下载的视频数；单个视频无效）</span>
-        <input
-          type="number"
-          min={1}
-          value={draft.default_concurrency ?? 5}
-          onChange={(event) => setDraft({ ...draft, default_concurrency: Number(event.target.value) })}
-          onBlur={(event) => void saveConcurrency(Number(event.currentTarget.value))}
-        />
-      </label>
-      <div className="field settings-number-field">
-        <div className="field-label-row">
-          <label className="field-label" htmlFor="aria2c-connections">
-            单视频并发下载数（1–4）
-          </label>
-          <Aria2cHelpPopover />
-        </div>
-        <input
-          id="aria2c-connections"
-          type="number"
-          min={1}
-          max={4}
-          value={draft.aria2c_connections ?? 2}
-          onChange={(event) => setDraft({ ...draft, aria2c_connections: Number(event.target.value) })}
-          onBlur={(event) => void saveAria2cConnections(Number(event.currentTarget.value))}
-        />
-      </div>
-      <div className="field">
-        <div className="field-label-row">
-          <label className="field-label" htmlFor="bili-auto-retry-enabled">
-            B站 自动重试（等审核通过后自动归集 / 自动补字幕）
-          </label>
-          {/* 勾选框就挂在这句话右边：它管的就是这一句说的那件事。
-              单独占一行会让人以为下面是另外一项设置。 */}
+
+      {/* 分区顺序 = 用户碰到它们的先后：先决定文件落在哪、下多快；连不上时才找代理；
+          提醒是「跑完之后」的事；B站 上传只有投稿用户在下载跑通后才用得上；
+          运行环境是排障入口，放最后不打扰。见 ai/ui/010。 */}
+      <SettingsGroup id="storage" title="下载与存储" icon={Folder}>
+        <label className="field">
+          <span>下载目录</span>
+          <div className="directory-picker-row">
+            <input value={draft.download_dir ?? ""} readOnly />
+            <button className="ghost-button" type="button" onClick={() => void chooseDownloadDirectory()}>
+              <Folder size={16} />
+              选择文件夹
+            </button>
+          </div>
+        </label>
+        <label className="field settings-number-field">
+          <span>并发（同时下载的视频数；单个视频无效）</span>
           <input
-            id="bili-auto-retry-enabled"
-            className="field-checkbox"
-            type="checkbox"
-            checked={autoRetryEnabled}
-            onChange={(event) =>
-              void saveAutoRetry({ bili_auto_retry_enabled: event.target.checked })
-            }
+            type="number"
+            min={1}
+            value={draft.default_concurrency ?? 5}
+            onChange={(event) => setDraft({ ...draft, default_concurrency: Number(event.target.value) })}
+            onBlur={(event) => void saveConcurrency(Number(event.currentTarget.value))}
+          />
+        </label>
+        <div className="field settings-number-field">
+          <div className="field-label-row">
+            <label className="field-label" htmlFor="aria2c-connections">
+              单视频并发下载数（1–4）
+            </label>
+            <Aria2cHelpPopover />
+          </div>
+          <input
+            id="aria2c-connections"
+            type="number"
+            min={1}
+            max={4}
+            value={draft.aria2c_connections ?? 2}
+            onChange={(event) => setDraft({ ...draft, aria2c_connections: Number(event.target.value) })}
+            onBlur={(event) => void saveAria2cConnections(Number(event.currentTarget.value))}
           />
         </div>
-      </div>
-      <div className={`field settings-number-field${autoRetryEnabled ? "" : " is-disabled"}`}>
-        <div className="field-label-row">
-          <label className="field-label" htmlFor="bili-auto-retry-interval">
-            自动重试间隔（秒，10–300）
-          </label>
+      </SettingsGroup>
+
+      <SettingsGroup id="network" title="代理与网络" icon={Globe}>
+        <div className="field">
+          <div className="field-label-row">
+            <label className="field-label" htmlFor="proxy-address">
+              代理（留空 = 自动；填 direct 强制直连）
+            </label>
+            <ProxyPortsPopover onPick={(value) => setDraft({ ...draft, proxy: value })} />
+          </div>
+          <input
+            id="proxy-address"
+            value={draft.proxy ?? ""}
+            placeholder="例如 127.0.0.1:7890"
+            onChange={(event) => setDraft({ ...draft, proxy: event.target.value })}
+            onBlur={(event) => void saveProxy(event.currentTarget.value)}
+          />
         </div>
-        <input
-          id="bili-auto-retry-interval"
-          type="number"
-          min={10}
-          max={300}
-          // 关掉自动重试时这两个数字改不动：给一个不会跑的东西调参数只会让人以为它还在跑。
-          disabled={!autoRetryEnabled}
-          value={draft.bili_auto_retry_interval_seconds ?? 60}
-          onChange={(event) =>
-            setDraft({ ...draft, bili_auto_retry_interval_seconds: Number(event.target.value) })
-          }
-          onBlur={(event) => {
-            const next = Math.min(300, Math.max(10, Number(event.currentTarget.value) || 60));
-            if (next === settings.bili_auto_retry_interval_seconds) return;
-            void saveAutoRetry({ bili_auto_retry_interval_seconds: next });
-          }}
-        />
-      </div>
-      <div className={`field settings-number-field${autoRetryEnabled ? "" : " is-disabled"}`}>
-        <div className="field-label-row">
-          <label className="field-label" htmlFor="bili-auto-retry-max-attempts">
-            自动重试上限（次，1–10）
-          </label>
+        <ProxySection settings={settings} draftProxy={draft.proxy ?? ""} />
+      </SettingsGroup>
+
+      <SettingsGroup id="notify" title="完成提醒" icon={Bell}>
+        <div className="field">
+          <div className="field-label-row">
+            <label className="field-label" htmlFor="completion-notification">
+              任务完成提醒
+            </label>
+          </div>
+          <div className="notification-mode-row">
+            <select
+              id="completion-notification"
+              aria-label="任务完成提醒方式"
+              value={draft.completion_notification ?? "both"}
+              onChange={(event) => void saveCompletionNotification(event.target.value as CompletionNotification)}
+            >
+              {COMPLETION_NOTIFICATION_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="ghost-button"
+              disabled={(draft.completion_notification ?? "both") === "off"}
+              title={(draft.completion_notification ?? "both") === "off" ? "当前已关闭提醒" : "按当前方式演示一次"}
+              onClick={onPreviewNotification}
+            >
+              <Play size={14} />
+              预览
+            </button>
+          </div>
+          <p className="notification-mode-hint">{notificationHint}</p>
         </div>
-        <input
-          id="bili-auto-retry-max-attempts"
-          type="number"
-          min={1}
-          max={10}
-          disabled={!autoRetryEnabled}
-          value={draft.bili_auto_retry_max_attempts ?? 3}
-          onChange={(event) =>
-            setDraft({ ...draft, bili_auto_retry_max_attempts: Number(event.target.value) })
-          }
-          onBlur={(event) => {
-            const next = Math.min(10, Math.max(1, Number(event.currentTarget.value) || 3));
-            if (next === settings.bili_auto_retry_max_attempts) return;
-            void saveAutoRetry({ bili_auto_retry_max_attempts: next });
-          }}
-        />
-      </div>
-      <div className="field">
-        <div className="field-label-row">
-          <label className="field-label" htmlFor="completion-notification">
-            任务完成提醒
-          </label>
+      </SettingsGroup>
+
+      <SettingsGroup id="bili" title="B站 上传" icon={Upload}>
+        {/* 登录在自动重试之前：没有登录，那三个旋钮调了也没有意义。 */}
+        <BiliLoginSection onError={onError} />
+        <div className="field">
+          <div className="field-label-row">
+            <label className="field-label" htmlFor="bili-auto-retry-enabled">
+              B站 自动重试（等审核通过后自动归集 / 自动补字幕）
+            </label>
+            {/* 勾选框就挂在这句话右边：它管的就是这一句说的那件事。
+                单独占一行会让人以为下面是另外一项设置。 */}
+            <input
+              id="bili-auto-retry-enabled"
+              className="field-checkbox"
+              type="checkbox"
+              checked={autoRetryEnabled}
+              onChange={(event) =>
+                void saveAutoRetry({ bili_auto_retry_enabled: event.target.checked })
+              }
+            />
+          </div>
         </div>
-        <div className="notification-mode-row">
-          <select
-            id="completion-notification"
-            aria-label="任务完成提醒方式"
-            value={draft.completion_notification ?? "both"}
-            onChange={(event) => void saveCompletionNotification(event.target.value as CompletionNotification)}
-          >
-            {COMPLETION_NOTIFICATION_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            className="ghost-button"
-            disabled={(draft.completion_notification ?? "both") === "off"}
-            title={(draft.completion_notification ?? "both") === "off" ? "当前已关闭提醒" : "按当前方式演示一次"}
-            onClick={onPreviewNotification}
-          >
-            <Play size={14} />
-            预览
-          </button>
+        <div className={`field settings-number-field${autoRetryEnabled ? "" : " is-disabled"}`}>
+          <div className="field-label-row">
+            <label className="field-label" htmlFor="bili-auto-retry-interval">
+              自动重试间隔（秒，10–300）
+            </label>
+          </div>
+          <input
+            id="bili-auto-retry-interval"
+            type="number"
+            min={10}
+            max={300}
+            // 关掉自动重试时这两个数字改不动：给一个不会跑的东西调参数只会让人以为它还在跑。
+            disabled={!autoRetryEnabled}
+            value={draft.bili_auto_retry_interval_seconds ?? 60}
+            onChange={(event) =>
+              setDraft({ ...draft, bili_auto_retry_interval_seconds: Number(event.target.value) })
+            }
+            onBlur={(event) => {
+              const next = Math.min(300, Math.max(10, Number(event.currentTarget.value) || 60));
+              if (next === settings.bili_auto_retry_interval_seconds) return;
+              void saveAutoRetry({ bili_auto_retry_interval_seconds: next });
+            }}
+          />
         </div>
-        <p className="notification-mode-hint">{notificationHint}</p>
-      </div>
-      <div className="field">
-        <div className="field-label-row">
-          <label className="field-label" htmlFor="proxy-address">
-            代理（留空 = 自动；填 direct 强制直连）
-          </label>
-          <ProxyPortsPopover onPick={(value) => setDraft({ ...draft, proxy: value })} />
+        <div className={`field settings-number-field${autoRetryEnabled ? "" : " is-disabled"}`}>
+          <div className="field-label-row">
+            <label className="field-label" htmlFor="bili-auto-retry-max-attempts">
+              自动重试上限（次，1–10）
+            </label>
+          </div>
+          <input
+            id="bili-auto-retry-max-attempts"
+            type="number"
+            min={1}
+            max={10}
+            disabled={!autoRetryEnabled}
+            value={draft.bili_auto_retry_max_attempts ?? 3}
+            onChange={(event) =>
+              setDraft({ ...draft, bili_auto_retry_max_attempts: Number(event.target.value) })
+            }
+            onBlur={(event) => {
+              const next = Math.min(10, Math.max(1, Number(event.currentTarget.value) || 3));
+              if (next === settings.bili_auto_retry_max_attempts) return;
+              void saveAutoRetry({ bili_auto_retry_max_attempts: next });
+            }}
+          />
         </div>
-        <input
-          id="proxy-address"
-          value={draft.proxy ?? ""}
-          placeholder="例如 127.0.0.1:7890"
-          onChange={(event) => setDraft({ ...draft, proxy: event.target.value })}
-          onBlur={(event) => void saveProxy(event.currentTarget.value)}
-        />
-      </div>
-      <ProxySection
-        settings={settings}
-        draftProxy={draft.proxy ?? ""}
-        onDraftProxyChange={(value) => setDraft({ ...draft, proxy: value })}
-        onSettingsChange={onSettingsChange}
-      />
-      <BiliLoginSection onError={onError} />
+      </SettingsGroup>
+
+      <SettingsGroup id="runtime" title="运行环境" icon={Wrench}>
+        <RuntimeSection onSettingsChange={onSettingsChange} />
+      </SettingsGroup>
+
       {saveMessage && <span className="settings-save-status">{saveMessage}</span>}
     </section>
   );

@@ -172,7 +172,9 @@ export function BiliLoginSection({ onError }: { onError: (message: string | null
   return (
     <div className="field bili-login-section">
       <div className="field-label-row">
-        <span className="field-label">B站 上传</span>
+        {/* 不再写「B站 上传」：它现在是分区的标题，同一个词在标题与标签上各出现一次，
+            层级就没了（见 ai/ui/010）。这一行说的是这一区里「先看什么」。 */}
+        <span className="field-label">登录与投稿工具</span>
         {checkedAt && <span className="bili-checked-at">上次体检 {checkedAt}</span>}
         <button className="bili-link" type="button" onClick={() => void refresh()} disabled={checking}>
           <RefreshCw size={14} />

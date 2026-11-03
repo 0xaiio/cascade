@@ -108,7 +108,7 @@
 | [download-request/](../frontend/src/download-request/) | 发起下载：解析链接（`UrlAnalyzer`）、解析结果（`AnalysisPanel`）、下载选项（`DownloadOptionsPanel` / `SearchableLanguageSelect`） | 依赖 `shared` / `cookies` |
 | [cookies/](../frontend/src/cookies/) | 浏览器 cookies 的导入、校验与锁库映射（`CookieSection` / `cookieLock`） | 依赖 `shared` |
 | [task-center/](../frontend/src/task-center/) | 任务中心：控制 / 删除 / 展开、进度与明细、本地文件操作、清晰度降级的重启（`JobQueue` / `SubtitleOpenButton`） | 依赖 `shared` / `bilibili` |
-| [settings/](../frontend/src/settings/) | 设置、代理检测与运行环境自检（`SettingsPanel` / `ProxySection`） | 依赖 `shared` / `bilibili`（登录区） |
+| [settings/](../frontend/src/settings/) | 设置、代理检测与运行环境自检（`SettingsPanel` / `SettingsGroup` / `ProxySection` / `RuntimeSection`） | 依赖 `shared` / `bilibili`（登录区） |
 | [bilibili/](../frontend/src/bilibili/) | B站 上传：入口、表单、进度、状态明细、登录区，以及 `biliForm` / `biliStatus` / `biliProgress` / `biliHealth` 四块判定与文案 | 依赖 `shared` / `contracts` |
 | [notifications/](../frontend/src/notifications/) | 任务完成提醒：终态判定与浮层队列（`notifications`）、右下角浮层（`CompletionToasts`） | 依赖 `contracts` |
 | [test/](../frontend/src/test/) | 共享夹具 `appFixtures` / `appHarness` / `cssRules` / `setup`，不含业务判断 | 只被测试 import |
@@ -131,10 +131,12 @@
 | [AnalysisPanel.tsx](../frontend/src/download-request/AnalysisPanel.tsx#L12) | 解析结果：缩略图/标题/时长、playlist 条目勾选表、单视频汇总行。 | 不持有选中集合（状态归 `App`，提交要用同一份）。 |
 | [DownloadOptionsPanel.tsx](../frontend/src/download-request/DownloadOptionsPanel.tsx#L19) | 下载选项：模式、清晰度、字幕语言/来源/格式、开关项、限速与重试、提交按钮。 | 不持有状态：所有值来自 `options`，改动经 `onOptionChange` 回到 `App`。 |
 | [SearchableLanguageSelect.tsx](../frontend/src/download-request/SearchableLanguageSelect.tsx#L16) | 可搜索的字幕语言多选。标签里 join 的是**语言代码**，项数无上界 —— 不许 `nowrap`，见 [ai/ui/003](../ai/ui/003-language-trigger-label-overflows-the-page.md)。 | 不拉取可用语言（由 `App` 从解析结果里汇总）。 |
-| [SettingsPanel.tsx](../frontend/src/settings/SettingsPanel.tsx#L69) | 设置：下载目录、并发、单视频并发下载数（aria2c）、代理（含连通性检测）。持有一份 `draft`，**失焦即保存**；单视频并发下载数旁挂一个说明浮层（`Aria2cHelpPopover`）。 | 不解析代理来源（后端回传 `proxy_source`），不决定代理语义（留空=自动、`direct`=直连由后端定义）；也不判断「aria2c 此刻是否真的在用」——那由后端的 profile 链决定，界面只解释怎么启用。 |
+| [SettingsPanel.tsx](../frontend/src/settings/SettingsPanel.tsx#L78) | 设置：按功能域分成五区 —— 下载与存储 / 代理与网络 / 完成提醒 / B站 上传 / 运行环境，**顺序 = 用户碰到它们的先后**（见下行的 `SettingsGroup` 与 [ai/ui/010](../ai/ui/010-settings-panel-is-a-flat-list.md)）。持有一份 `draft`，**失焦即保存**；单视频并发下载数旁挂一个说明浮层（`Aria2cHelpPopover`）。 | 不解析代理来源（后端回传 `proxy_source`），不决定代理语义（留空=自动、`direct`=直连由后端定义）；也不判断「aria2c 此刻是否真的在用」——那由后端的 profile 链决定，界面只解释怎么启用。 |
+| [SettingsGroup.tsx](../frontend/src/settings/SettingsGroup.tsx#L19) | **设置面板的分区外壳**：`section` + `aria-labelledby`（→ `role="region"`）+ `h3` 标题 + 图标。五个分区共用它，分组语义与标题层级只在这里定义一次。 | 不含任何设置项，也不决定分区顺序（顺序由 `SettingsPanel` 的书写顺序决定）。 |
+| [RuntimeSection.tsx](../frontend/src/settings/RuntimeSection.tsx#L41) | **运行环境**：JS 运行时（解析 YouTube 的 `n` 参数）是否有、装的是什么、`sanitized_environment` 摘掉了哪些宿主变量，以及日志文件位置与「复制路径」「重新自检」。 | 不判断代理（那是 `ProxySection` 的事）——它曾因共用 `GET /api/diagnostics` 长在代理块里，见 [ai/ui/010](../ai/ui/010-settings-panel-is-a-flat-list.md)；也不决定探测策略（后端返回）。 |
 | [Toggle.tsx](../frontend/src/shared/ui/Toggle.tsx#L4) / [StatusPill.tsx](../frontend/src/shared/ui/StatusPill.tsx#L4) | 基础件：勾选行、顶栏状态点。 | 不含业务判断（`ok === undefined` 一律按警告渲染）。 |
 | [CookieSection.tsx](../frontend/src/cookies/CookieSection.tsx#L121) | cookies 状态、校验按钮与结论展示；两个说明浮层（[获取方式](../frontend/src/cookies/CookieSection.tsx#L53)、[结论解读](../frontend/src/cookies/CookieSection.tsx#L96)）就近挂在这里。 | 不决定用哪份 cookies（后端决定），不构造请求体。 |
-| [ProxySection.tsx](../frontend/src/settings/ProxySection.tsx#L140) | 代理检测结果展示与「真的发一次请求」的入口；[常用端口](../frontend/src/settings/ProxySection.tsx#L75)与[排查顺序](../frontend/src/settings/ProxySection.tsx#L112)两个说明浮层。 | 不解析代理来源（后端回传 `proxy_source`），不保存设置（保存由 `SettingsPanel` 触发）。 |
+| [ProxySection.tsx](../frontend/src/settings/ProxySection.tsx#L120) | 代理检测结果展示与「真的发一次请求」的入口；[常用端口](../frontend/src/settings/ProxySection.tsx#L55)与[排查顺序](../frontend/src/settings/ProxySection.tsx#L92)两个说明浮层。 | 不解析代理来源（后端回传 `proxy_source`），不保存设置（保存由 `SettingsPanel` 触发）。 |
 | [HelpPopover.tsx](../frontend/src/shared/ui/HelpPopover.tsx#L42) | **通用非模态说明浮层**：定位、钉住、关闭、记忆，以及窄屏抽屉形态。所有辅助说明共用它。 | 不含任何业务文案（文案由调用方以 children 传入）。 |
 | [ErrorBanner.tsx](../frontend/src/shared/ui/ErrorBanner.tsx#L23) | **页面级错误回执条**：`position: sticky` + `top: 12px`，不滚动时排在页头下方、滚过之后贴住视口顶边，任何滚动位置都在视野里；`role="alert"`、可关闭、焦点在条内时按 `Esc` 也能关。 | 不含业务文案（文案由 `App` 的 `error` 状态给）；不判断哪条失败该不该上升到这里（调用点决定，判据见 [ai/ui/009](../ai/ui/009-page-level-errors-scroll-out-of-view.md)）；**没有计时器** —— 不自动消失。 |
 | [JobQueue.tsx](../frontend/src/task-center/JobQueue.tsx#L23) | 任务中心展示与本地文件操作入口（播放 / 打开文件夹 / 打开字幕 / 删除）。 | 不直接访问本机文件系统（一律走后端受控打开/删除接口）。 |
