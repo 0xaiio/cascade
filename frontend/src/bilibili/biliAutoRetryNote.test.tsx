@@ -67,7 +67,7 @@ describe("自动重试的倒计时", () => {
           state: "exhausted",
           attempts: 12,
           last_result: "failed",
-          last_message: "自动重试已试 12 次，先停在这里；可以手动重试。（上次：合集建好了，但视频没能加进去）"
+          last_message: "自动重试已试 10 次，先停在这里；可以手动重试。（上次：合集建好了，但视频没能加进去）"
         })}
       />
     );

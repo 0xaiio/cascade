@@ -557,6 +557,41 @@ def test_settings_endpoint_rejects_aria2c_connections_above_four(tmp_path: Path)
     assert response.status_code == 422
 
 
+def test_bili_auto_retry_settings_default_to_three_attempts_every_minute(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+
+    settings = client.get("/api/settings").json()
+
+    assert settings["bili_auto_retry_enabled"] is True
+    assert settings["bili_auto_retry_interval_seconds"] == 60
+    # 默认 3 次：先替用户试几下，不成把手动按钮交回给他。
+    assert settings["bili_auto_retry_max_attempts"] == 3
+
+
+def test_bili_auto_retry_settings_are_validated_at_the_door(tmp_path: Path) -> None:
+    """间隔 10–300 秒、上限 1–10 次。
+
+    判据必须在**入口**（schema 上），不是界面上的 `min`/`max` 装饰：绕过界面直接调接口
+    是常见的事，而调度器会照着这个数去问平台 —— 一个没人验证过的间隔意味着
+    「账号被限流」或「审核过了还在干等」。
+    """
+    client = make_client(tmp_path)
+
+    assert client.put("/api/settings", json={"bili_auto_retry_max_attempts": 11}).status_code == 422
+    assert client.put("/api/settings", json={"bili_auto_retry_max_attempts": 0}).status_code == 422
+    assert client.put("/api/settings", json={"bili_auto_retry_interval_seconds": 301}).status_code == 422
+    assert client.put("/api/settings", json={"bili_auto_retry_interval_seconds": 9}).status_code == 422
+
+    # 边界值是**闭区间**：10 秒 / 10 次都收。
+    accepted = client.put(
+        "/api/settings",
+        json={"bili_auto_retry_interval_seconds": 10, "bili_auto_retry_max_attempts": 10},
+    )
+    assert accepted.status_code == 200
+    assert accepted.json()["bili_auto_retry_interval_seconds"] == 10
+    assert accepted.json()["bili_auto_retry_max_attempts"] == 10
+
+
 def test_settings_and_cookies_endpoints_do_not_expose_cookie_body(tmp_path: Path) -> None:
     client = make_client(tmp_path)
 

@@ -103,6 +103,10 @@ export function SettingsPanel({
           COMPLETION_NOTIFICATION_OPTIONS.find((option) => option.value === notificationMode)?.hint ?? ""
         }。要不要提醒由下载选项里的「完成后通知」逐任务决定。`;
 
+  // 自动重试的开关还决定下面那两个数字能不能改。默认开（与后端默认一致）：
+  // `null` 只可能是「后端还没回」的极短一瞬，那一刻按「开」显示不会误导。
+  const autoRetryEnabled = draft.bili_auto_retry_enabled ?? true;
+
   async function saveConcurrency(value: number) {
     const nextConcurrency = Math.max(1, Number(value) || settings.default_concurrency);
     if (nextConcurrency === settings.default_concurrency) return;
@@ -248,71 +252,65 @@ export function SettingsPanel({
           <label className="field-label" htmlFor="bili-auto-retry-enabled">
             B站 自动重试（等审核通过后自动归集 / 自动补字幕）
           </label>
-        </div>
-        <div className="notification-mode-row">
+          {/* 勾选框就挂在这句话右边：它管的就是这一句说的那件事。
+              单独占一行会让人以为下面是另外一项设置。 */}
           <input
             id="bili-auto-retry-enabled"
+            className="field-checkbox"
             type="checkbox"
-            checked={draft.bili_auto_retry_enabled ?? true}
+            checked={autoRetryEnabled}
             onChange={(event) =>
               void saveAutoRetry({ bili_auto_retry_enabled: event.target.checked })
             }
           />
-          <span className="field-hint">
-            {draft.bili_auto_retry_enabled
-              ? "平台审核没通过时，应用会自己隔一段时间问一次；手动按钮仍然可以随时点。"
-              : "已关闭：审核没通过时只会提示，等你要点「重试归集」「重传字幕」才动。"}
-          </span>
         </div>
       </div>
-      <div className="field settings-number-field">
+      <div className={`field settings-number-field${autoRetryEnabled ? "" : " is-disabled"}`}>
         <div className="field-label-row">
           <label className="field-label" htmlFor="bili-auto-retry-interval">
-            自动重试间隔（秒，5–3600）
+            自动重试间隔（秒，10–300）
           </label>
         </div>
         <input
           id="bili-auto-retry-interval"
           type="number"
-          min={5}
-          max={3600}
+          min={10}
+          max={300}
+          // 关掉自动重试时这两个数字改不动：给一个不会跑的东西调参数只会让人以为它还在跑。
+          disabled={!autoRetryEnabled}
           value={draft.bili_auto_retry_interval_seconds ?? 60}
           onChange={(event) =>
             setDraft({ ...draft, bili_auto_retry_interval_seconds: Number(event.target.value) })
           }
           onBlur={(event) => {
-            const next = Math.min(3600, Math.max(5, Number(event.currentTarget.value) || 60));
+            const next = Math.min(300, Math.max(10, Number(event.currentTarget.value) || 60));
             if (next === settings.bili_auto_retry_interval_seconds) return;
             void saveAutoRetry({ bili_auto_retry_interval_seconds: next });
           }}
         />
-        <span className="field-hint">
-          问一次平台之后等这么久再问（失败会按倍数往后延）。B站 审核通常要几分钟到几小时，
-          别调得太短 —— 问得太勤只是白白发请求，还可能被限流。
-        </span>
       </div>
-      <div className="field settings-number-field">
+      <div className={`field settings-number-field${autoRetryEnabled ? "" : " is-disabled"}`}>
         <div className="field-label-row">
           <label className="field-label" htmlFor="bili-auto-retry-max-attempts">
-            自动重试上限（次，1–200）
+            自动重试上限（次，1–10）
           </label>
         </div>
         <input
           id="bili-auto-retry-max-attempts"
           type="number"
           min={1}
-          max={200}
-          value={draft.bili_auto_retry_max_attempts ?? 12}
+          max={10}
+          disabled={!autoRetryEnabled}
+          value={draft.bili_auto_retry_max_attempts ?? 3}
           onChange={(event) =>
             setDraft({ ...draft, bili_auto_retry_max_attempts: Number(event.target.value) })
           }
           onBlur={(event) => {
-            const next = Math.min(200, Math.max(1, Number(event.currentTarget.value) || 12));
+            const next = Math.min(10, Math.max(1, Number(event.currentTarget.value) || 3));
             if (next === settings.bili_auto_retry_max_attempts) return;
             void saveAutoRetry({ bili_auto_retry_max_attempts: next });
           }}
         />
-        <span className="field-hint">试够这么多次就停下来，把手动按钮交回给你（不会一直刷平台）。</span>
       </div>
       <div className="field">
         <div className="field-label-row">

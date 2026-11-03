@@ -1826,11 +1826,33 @@ th {
   color: #b45309;
 }
 
-/* 设置面板里每个旋钮下面那一句说明。 */
-.field-hint {
-  color: #64748b;
-  font-size: 12px;
-  line-height: 1.5;
+/* 设置面板里的勾选框**与标签同处一行**（标签说「B站 自动重试」，框就在它右边）。
+   全局 `input` 规则给了 `width: 100%` —— 不在这里收回去，勾选框会横着占满整行。 */
+.field-checkbox {
+  flex: none;
+  width: auto;
+  margin: 0;
+  padding: 0;
+  accent-color: #1f6feb;
+}
+
+/* 关掉「B站 自动重试」时，下面两个数字是**真正 disabled** 的（改不动），
+   所以外观也必须说同一句话：灰底、灰字、不可点的光标。
+   只加 `disabled` 属性不改样子等于「点不动但看着能点」—— 那比不 disable 更让人困惑。 */
+.settings-number-field.is-disabled .field-label {
+  color: #94a3b8;
+}
+
+.settings-number-field input:disabled {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.settings-number-field input:disabled:focus {
+  border-color: #e2e8f0;
+  box-shadow: none;
 }
 
 .bili-warn-icon {

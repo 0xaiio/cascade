@@ -12,7 +12,7 @@
 python -m compileall backend\app
 ```
 
-后端测试（当前基线：**1300 passed**，47 个 `test_*.py`）：
+后端测试（当前基线：**1302 passed**，47 个 `test_*.py`）：
 
 ```powershell
 python -m pytest backend\tests -q
@@ -39,7 +39,7 @@ python -m pytest backend\tests -q
 >
 > `--basetemp` 指向的目录**必须不存在**，否则 pytest 会先 `rmtree` 它、同样会触发守卫（`tmp_pytest\` 已在 `.gitignore` 里）。
 
-前端测试和构建（当前基线：**308 passed**，23 个文件；`tsc --noEmit` 与 `vite build` 通过）：
+前端测试和构建（当前基线：**310 passed**，23 个文件；`tsc --noEmit` 与 `vite build` 通过）：
 
 ```powershell
 cd frontend
@@ -128,7 +128,7 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 
 ## 后端测试范围
 
-后端测试位于 [backend/tests](../backend/tests/)（47 个 `test_*.py` + [fakes.py](../backend/tests/fakes.py) / [bili_fakes.py](../backend/tests/bili_fakes.py)，当前 **1300 passed**）：
+后端测试位于 [backend/tests](../backend/tests/)（47 个 `test_*.py` + [fakes.py](../backend/tests/fakes.py) / [bili_fakes.py](../backend/tests/bili_fakes.py)，当前 **1302 passed**）：
 
 > **数字必须自己数一遍**，不要只信 `-q` 的汇总行。逐文件规模用
 > `pytest backend/tests/<文件> -q -p no:cacheprovider --co` 取，各文件之和应**恰等于**全集
@@ -198,7 +198,7 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 
 ## 前端测试范围
 
-前沿组件测试是对 `App` 的**集成测试**，按功能面拆成 `frontend/src/<功能目录>/*.test.tsx`（一个功能目录一至四个文件，目录划分见 [设计文档的前端目录表](design.md#前端组件边界)）：解析链接与下载选项（[analyzer.test.tsx](../frontend/src/download-request/analyzer.test.tsx)，11）、cookies 导入与校验（[cookies.test.tsx](../frontend/src/cookies/cookies.test.tsx)，7）、设置面板与代理检测（[settings.test.tsx](../frontend/src/settings/settings.test.tsx)，10）、任务中心（控制/删除/展开 [task-center.test.tsx](../frontend/src/task-center/task-center.test.tsx)，11、本地文件操作与链接 [task-center-files.test.tsx](../frontend/src/task-center/task-center-files.test.tsx)，13、进度与详情呈现 [task-center-progress.test.tsx](../frontend/src/task-center/task-center-progress.test.tsx)，6）、清晰度降级（[resolution-fallback.test.tsx](../frontend/src/task-center/resolution-fallback.test.tsx)，4）、自检信息（[diagnostics.test.tsx](../frontend/src/settings/diagnostics.test.tsx)，2）、帮助浮层（[help-notes.test.tsx](../frontend/src/shared/ui/help-notes.test.tsx)，3）、**页面级错误回执（[error-banner.test.tsx](../frontend/src/shared/ui/error-banner.test.tsx)，7）**、**B站 上传（[bili-upload.test.tsx](../frontend/src/bilibili/bili-upload.test.tsx)，77 例）**、**自动重试的倒计时（[biliAutoRetryNote.test.tsx](../frontend/src/bilibili/biliAutoRetryNote.test.tsx)，8 例）**、**CC 字幕结论的呈现（[bili-subtitle-line.test.tsx](../frontend/src/bilibili/bili-subtitle-line.test.tsx)，5 例）**、完成通知（[completion-notification.test.tsx](../frontend/src/notifications/completion-notification.test.tsx)，19）、版面与文案不变式（[layout.test.tsx](../frontend/src/layout.test.tsx)，3；只读样式源文的 [styles.test.ts](../frontend/src/styles.test.ts)，5）。当前 **23 个文件 / 308 passed**（15 个 `.tsx` 组件测试 + 8 个 `.ts` 纯函数测试）；`biliStatus.test.ts` 另含字幕两档判据与「已上传点进去打开哪一页」「待核对/部分失败该补哪几条」的判据（24 例）。
+前沿组件测试是对 `App` 的**集成测试**，按功能面拆成 `frontend/src/<功能目录>/*.test.tsx`（一个功能目录一至四个文件，目录划分见 [设计文档的前端目录表](design.md#前端组件边界)）：解析链接与下载选项（[analyzer.test.tsx](../frontend/src/download-request/analyzer.test.tsx)，11）、cookies 导入与校验（[cookies.test.tsx](../frontend/src/cookies/cookies.test.tsx)，7）、设置面板与代理检测（[settings.test.tsx](../frontend/src/settings/settings.test.tsx)，12）、任务中心（控制/删除/展开 [task-center.test.tsx](../frontend/src/task-center/task-center.test.tsx)，11、本地文件操作与链接 [task-center-files.test.tsx](../frontend/src/task-center/task-center-files.test.tsx)，13、进度与详情呈现 [task-center-progress.test.tsx](../frontend/src/task-center/task-center-progress.test.tsx)，6）、清晰度降级（[resolution-fallback.test.tsx](../frontend/src/task-center/resolution-fallback.test.tsx)，4）、自检信息（[diagnostics.test.tsx](../frontend/src/settings/diagnostics.test.tsx)，2）、帮助浮层（[help-notes.test.tsx](../frontend/src/shared/ui/help-notes.test.tsx)，3）、**页面级错误回执（[error-banner.test.tsx](../frontend/src/shared/ui/error-banner.test.tsx)，7）**、**B站 上传（[bili-upload.test.tsx](../frontend/src/bilibili/bili-upload.test.tsx)，77 例）**、**自动重试的倒计时（[biliAutoRetryNote.test.tsx](../frontend/src/bilibili/biliAutoRetryNote.test.tsx)，8 例）**、**CC 字幕结论的呈现（[bili-subtitle-line.test.tsx](../frontend/src/bilibili/bili-subtitle-line.test.tsx)，5 例）**、完成通知（[completion-notification.test.tsx](../frontend/src/notifications/completion-notification.test.tsx)，19）、版面与文案不变式（[layout.test.tsx](../frontend/src/layout.test.tsx)，3；只读样式源文的 [styles.test.ts](../frontend/src/styles.test.ts)，5）。当前 **23 个文件 / 310 passed**（15 个 `.tsx` 组件测试 + 8 个 `.ts` 纯函数测试）；`biliStatus.test.ts` 另含字幕两档判据与「已上传点进去打开哪一页」「待核对/部分失败该补哪几条」的判据（24 例）。
 
 > **改动前端测试后要同步这张表**：文件名与用例数都写在这里，漏登记不会让任何检查变红 ——
 > 所以每次新增或拆分测试文件，都回到本段把文件名补上（用例数可用下一段的 JSON 报告复算）。
@@ -236,7 +236,7 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 - 辅助说明浮层：四个入口（获取方式 / 结论解读 / 常用端口 / 排查顺序）默认收起，悬停或点击可读，`Esc`、点击空白处、右上角 × 都能关闭，展开状态写入 `localStorage` 并在刷新后恢复。
 - 字幕语言标签：选中几种就**逐个列出**几种语言代码（不许改成「已选 N 项」式的 JS 侧截断 —— 标签太长时正确的解法是让它换行，见 [ai/ui/003](../ai/ui/003-language-trigger-label-overflows-the-page.md)）。
 - B站 投稿失败的**分类**：`21104 标题过长` 必须单独认出来，成功日志里的「通过cookie登录」不得把结论带回「登录已失效」；文件名 stem > 80 时上传走 `cascade-*.mp4` 硬链接（原文件不动、不复制、用完删除）。
-- **B站 自动重试**：投稿后处于审核中时，合集行与字幕行会出现「下一次自动重试 MM:SS · 已尝试 N 次 · <上次结果>」，倒计时**按秒走**；设置面板里可改「开关 / 间隔（秒）/ 上限（次）」且**改完立刻生效**（不用重启）。关掉开关后界面不再出现倒计时，手动「重试归集」「重传字幕」按钮**照旧可用**。见 [ai/bug-fix 与 FR-B38](../ai/feature/bilibili-upload/02-design.md)。
+- **B站 自动重试**：投稿后处于审核中时，合集行与字幕行会出现「下一次自动重试 MM:SS · 已尝试 N 次 · <上次结果>」，倒计时**按秒走**；设置面板里可改「开关 / 间隔（10–300 秒）/ 上限（1–10 次）」且**改完立刻生效**（不用重启）。**勾选框在标签右侧**，未勾选时「间隔」与「上限」两项是**真 disabled**（灰底、改不动，`settings.test.tsx` 用 `toBeDisabled()` 钉住）；边界值由**接口入口**把关（11 次 / 301 秒 / 9 秒都是 422，10 与 10 收，见 `test_api.py`）。关掉开关后界面不再出现倒计时，手动「重试归集」「重传字幕」按钮**照旧可用**。见 [ai/bug-fix 与 FR-B38](../ai/feature/bilibili-upload/02-design.md)。
 - 「重新体检」：点击后按钮禁用且写「体检中…」，结束后出现 `上次体检 HH:MM:SS`；账号探测**超时与失败**都退回离线结论并说明是哪一种（`biliHealth.test.ts` 用 20ms 时限覆盖四条分支）；预算 25 秒**必须大于**后端那 20 秒（前端先放弃时那句「超时」是假话）。
 - **B站 请求只走 IPv4、且 timeout 是整次请求的预算**：`getaddrinfo` 必须带 `AF_INET`；多个地址共享一个截止时刻（用完就不再试下一个）。判据是**解析时传的 family** 与**总耗时**，不是「连没连上」—— 本机 IPv6 是黑洞，连不上也会「最终失败」，只是慢 160 秒。见 [ai/bug-fix/031](../ai/bug-fix/031-bili-requests-fall-into-an-ipv6-black-hole.md)。
 - B站 上传进度：上传中时任务卡片里出现**四段轨迹**（排队/传输/提交/核对），当前段带 `is-active`、前序段 `is-done`；「已用」按秒推进且起点取服务端 `started_at`；合集显示「第 2/2 条」与「已有 1/2 条确认在平台上」；审核中四段全 `is-done` 且不再有 active，**秒表停在上传用时那个定值上**（`上传用时 00:53`，两次读数必须相同 —— 审核不是我们的传输，见 [ai/ui/008](../ai/ui/008-the-upload-clock-counts-the-review.md)）；已发布/失败/待核对**不渲染**进度块。后端另有两条用例：`_store_progress` 只在值真的变大时发 `bili_upload_progress`（同值重放与倒退都不发），以及结论落账后迟到的回调既不写库也不发事件。

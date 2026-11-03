@@ -203,4 +203,64 @@ describe("App · 设置面板与代理检测", () => {
       expect.objectContaining({ method: "PUT" })
     );
   });
+
+  test("自动重试：勾选框与标签同行，三个数字按新范围显示", async () => {
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
+    const name = "B站 自动重试（等审核通过后自动归集 / 自动补字幕）";
+    const label = screen.getByText(name);
+    const checkbox = screen.getByRole("checkbox", { name });
+
+    // 「放在字样右侧」= 同一个标签行里、在标签**之后**。
+    // jsdom 不做布局，所以判据只能是 DOM 顺序 —— 量坐标在这里量不出东西。
+    const row = label.parentElement as HTMLElement;
+    expect(row).toHaveClass("field-label-row");
+    expect(row.contains(checkbox)).toBe(true);
+    expect(label.compareDocumentPosition(checkbox) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    const interval = screen.getByLabelText("自动重试间隔（秒，10–300）");
+    expect(interval).toHaveValue(60);
+    expect(interval).toHaveAttribute("min", "10");
+    expect(interval).toHaveAttribute("max", "300");
+
+    const attempts = screen.getByLabelText("自动重试上限（次，1–10）");
+    expect(attempts).toHaveValue(3);
+    expect(attempts).toHaveAttribute("min", "1");
+    expect(attempts).toHaveAttribute("max", "10");
+  });
+
+  test("自动重试：关掉开关后两个数字真的改不动", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const name = "B站 自动重试（等审核通过后自动归集 / 自动补字幕）";
+    const checkbox = await screen.findByRole("checkbox", { name });
+    const interval = screen.getByLabelText("自动重试间隔（秒，10–300）");
+    const attempts = screen.getByLabelText("自动重试上限（次，1–10）");
+    expect(checkbox).toBeChecked();
+    expect(interval).toBeEnabled();
+    expect(attempts).toBeEnabled();
+
+    await user.click(checkbox);
+
+    // 关掉这件事**要真的发给后端**：界面关了而机器还在问，是两套状态。
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/settings",
+        expect.objectContaining({
+          method: "PUT",
+          body: JSON.stringify({ bili_auto_retry_enabled: false })
+        })
+      );
+    });
+    // 给一个不会跑的东西调参数只会让人以为它还在跑 ⇒ 两项都得 disabled。
+    await waitFor(() => expect(interval).toBeDisabled());
+    expect(attempts).toBeDisabled();
+
+    await user.click(checkbox);
+
+    await waitFor(() => expect(interval).toBeEnabled());
+    expect(attempts).toBeEnabled();
+  });
 });

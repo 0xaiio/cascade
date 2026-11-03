@@ -55,8 +55,9 @@ class AutoRetryPolicy:
 
     #: 一次问平台之间的最小间隔（秒）。同时是退避的基数。
     interval_seconds: int = 60
-    #: 最多自动试几次。
-    max_attempts: int = 12
+    #: 最多自动试几次。默认与 `AppSettings.bili_auto_retry_max_attempts` 一致 ——
+    #: 两处各写一个数就会在某处对不上（这里只是构造时的兜底，运行时永远由设置注入）。
+    max_attempts: int = 3
     #: 总开关。关掉时调度器连扫描都不做。
     enabled: bool = True
 

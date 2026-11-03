@@ -91,10 +91,12 @@ class AppSettings(BaseSettings):
     bili_auto_retry_enabled: bool = True
     # 轮询间隔（秒）。它同时是**退避的基数**：第一次等这么久，之后按倍数拉长。
     # 默认 60 秒：B站 的审核通常是几分钟到几小时的量级，问得太勤只是白白发请求。
-    bili_auto_retry_interval_seconds: int = Field(default=60, ge=5, le=3600)
+    # 上限 300 秒（5 分钟）：再长就轮到「审核刚过还要干等半小时」，退避本身已经负责拉长。
+    bili_auto_retry_interval_seconds: int = Field(default=60, ge=10, le=300)
     # 最多自动试几次。超过就转 `exhausted`，不再自动重试（手动按钮仍然在）。
-    # 默认 12 次 × 退避 ≈ 覆盖两三个小时的审核期。
-    bili_auto_retry_max_attempts: int = Field(default=12, ge=1, le=200)
+    # 默认 3 次：先替用户试几下，不成把手动按钮交回给他 —— 审核要多久我们并不知道，
+    # 假装能等到它不如早点停下。要覆盖更长的审核期就调大它（上限 10 次）。
+    bili_auto_retry_max_attempts: int = Field(default=3, ge=1, le=10)
 
     @property
     def cookies_path(self) -> Path:

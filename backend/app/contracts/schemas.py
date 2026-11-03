@@ -262,7 +262,7 @@ class SettingsRead(BaseModel):
     # B站 自动重试（等平台放行后自动归集 / 自动重传字幕）。
     bili_auto_retry_enabled: bool = True
     bili_auto_retry_interval_seconds: int = 60
-    bili_auto_retry_max_attempts: int = 12
+    bili_auto_retry_max_attempts: int = 3
 
 
 class SettingsUpdate(BaseModel):
@@ -279,8 +279,8 @@ class SettingsUpdate(BaseModel):
     # 「等多久问一次」与「最多试几次」是用户按自己账号的审核速度定的，
     # 写死成常量就等于让它对所有人只有一个脾气。
     bili_auto_retry_enabled: bool | None = None
-    bili_auto_retry_interval_seconds: int | None = Field(default=None, ge=5, le=3600)
-    bili_auto_retry_max_attempts: int | None = Field(default=None, ge=1, le=200)
+    bili_auto_retry_interval_seconds: int | None = Field(default=None, ge=10, le=300)
+    bili_auto_retry_max_attempts: int | None = Field(default=None, ge=1, le=10)
 
 
 class CookieStatus(BaseModel):

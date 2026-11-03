@@ -2602,20 +2602,23 @@ components:
             upload once the review passes. The manual buttons keep working either way.
         bili_auto_retry_interval_seconds:
           type: integer
-          minimum: 5
-          maximum: 3600
+          minimum: 10
+          maximum: 300
           default: 60
           description: >-
             How long to wait between two polls. Also the base of the backoff: a failed
             attempt waits twice as long, four times as long, and so on (capped at 16x).
+            Capped at 300 s because waiting longer than that is the backoff's job.
         bili_auto_retry_max_attempts:
           type: integer
           minimum: 1
-          maximum: 200
-          default: 12
+          maximum: 10
+          default: 3
           description: >-
             How many times to try before giving up. After that the manual buttons are
-            handed back to the user instead of polling forever.
+            handed back to the user instead of polling forever. The default is small on
+            purpose: how long a review takes is not knowable from here, so the app tries
+            a few times and then hands the decision back.
 
     SettingsUpdate:
       type: object
@@ -2625,12 +2628,12 @@ components:
           type: [boolean, "null"]
         bili_auto_retry_interval_seconds:
           type: [integer, "null"]
-          minimum: 5
-          maximum: 3600
+          minimum: 10
+          maximum: 300
         bili_auto_retry_max_attempts:
           type: [integer, "null"]
           minimum: 1
-          maximum: 200
+          maximum: 10
         download_dir:
           type: [string, "null"]
         default_concurrency:

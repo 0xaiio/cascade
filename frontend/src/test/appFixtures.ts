@@ -240,7 +240,7 @@ export const settingsPayload: Settings = {
   // B站 自动重试的三个旋钮。
   bili_auto_retry_enabled: true,
   bili_auto_retry_interval_seconds: 60,
-  bili_auto_retry_max_attempts: 12
+  bili_auto_retry_max_attempts: 3
 };
 
 export const lockedEdgeCookieDetail = {

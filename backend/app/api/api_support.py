@@ -200,11 +200,11 @@ def apply_stored_settings(session: Session, settings: AppSettings, service: YtDl
         )
     if stored.get("bili_auto_retry_interval_seconds"):
         settings.bili_auto_retry_interval_seconds = _clamp_int(
-            stored["bili_auto_retry_interval_seconds"], 5, 3600, settings.bili_auto_retry_interval_seconds
+            stored["bili_auto_retry_interval_seconds"], 10, 300, settings.bili_auto_retry_interval_seconds
         )
     if stored.get("bili_auto_retry_max_attempts"):
         settings.bili_auto_retry_max_attempts = _clamp_int(
-            stored["bili_auto_retry_max_attempts"], 1, 200, settings.bili_auto_retry_max_attempts
+            stored["bili_auto_retry_max_attempts"], 1, 10, settings.bili_auto_retry_max_attempts
         )
 
 
