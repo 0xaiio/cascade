@@ -177,6 +177,12 @@ export interface Settings {
   ffmpeg: Record<string, boolean>;
   /** 任务跑到终态时怎么提醒。`off` 时前端一个都不发。 */
   completion_notification: CompletionNotification;
+  /** B站 自动重试：等平台放行后自动归集 / 自动重传字幕。 */
+  bili_auto_retry_enabled: boolean;
+  /** 问平台的间隔（秒），也是退避的基数。 */
+  bili_auto_retry_interval_seconds: number;
+  /** 最多自动试几次；超过就停下来，把手动按钮交回给用户。 */
+  bili_auto_retry_max_attempts: number;
 }
 
 export interface CookieStatus {
@@ -465,11 +471,27 @@ export interface BiliUpload {
   error: string | null;
   advice: string | null;
   attempt: number;
+  /** 这一条有没有在等自动重试（字幕那一步）。`null` = 没有在等。 */
+  auto_retry: BiliAutoRetry | null;
   created_at: string;
   updated_at: string;
   started_at: string | null;
   finished_at: string | null;
   elapsed_seconds: number;
+}
+
+/** 一条「等平台放行」的自动重试状态。界面上的倒计时与「上次结果」由它决定。 */
+export interface BiliAutoRetry {
+  /** `waiting` 在等 / `running` 正在问平台 / `done` 成了 / `exhausted` 试够了。 */
+  state: "waiting" | "running" | "done" | "exhausted";
+  /** 已经问过平台几次。 */
+  attempts: number;
+  /** 下一次到点的时间（ISO）。倒计时就是它减现在；`null` = 不再自动重试。 */
+  next_attempt_at: string | null;
+  /** 上一次的结果：`done` / `waiting`（还在审核）/ `failed`。 */
+  last_result: string;
+  /** 上一次给用户看的那句话（失败原因 /「还在审核」/「已自动归集」）。 */
+  last_message: string;
 }
 
 export interface BiliSeason {
@@ -483,6 +505,8 @@ export interface BiliSeason {
   upload_ids: string[];
   error: string | null;
   advice: string | null;
+  /** 这一批有没有在等自动重试（归集那一步）。`null` = 没有在等。 */
+  auto_retry: BiliAutoRetry | null;
 }
 
 /**

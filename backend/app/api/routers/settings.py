@@ -72,6 +72,21 @@ async def update_app_settings(update: SettingsUpdate, session: SessionDep, ctx: 
         # 取值合法由 `SettingsUpdate` 的 Literal 保证，不需要在这里再兜一遍。
         settings.completion_notification = update.completion_notification
         api_support.set_setting(session, "completion_notification", update.completion_notification)
+    # B站 自动重试的三个旋钮。**改完立刻生效**：调度器每次问平台前都现取策略
+    # （`BiliManager.auto_retry_policy`），所以不用重启。
+    if update.bili_auto_retry_enabled is not None:
+        settings.bili_auto_retry_enabled = update.bili_auto_retry_enabled
+        api_support.set_setting(session, "bili_auto_retry_enabled", "1" if update.bili_auto_retry_enabled else "0")
+    if update.bili_auto_retry_interval_seconds is not None:
+        settings.bili_auto_retry_interval_seconds = update.bili_auto_retry_interval_seconds
+        api_support.set_setting(
+            session, "bili_auto_retry_interval_seconds", str(update.bili_auto_retry_interval_seconds)
+        )
+    if update.bili_auto_retry_max_attempts is not None:
+        settings.bili_auto_retry_max_attempts = update.bili_auto_retry_max_attempts
+        api_support.set_setting(
+            session, "bili_auto_retry_max_attempts", str(update.bili_auto_retry_max_attempts)
+        )
     if runtime_options_changed:
         await ctx.manager.set_runtime_download_defaults(
             settings.default_speed_limit_kbps,

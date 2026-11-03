@@ -92,10 +92,16 @@ from .bili_policy import (
 )
 from .bili_subtitle import SUBTITLE_FAILED, SUBTITLE_POSTED
 from ..download.subtitle_plan import subtitle_summary
+from .bili_auto_retry import (
+    AutoRetryPolicy,
+    BiliAutoRetryScheduler,
+    register as register_auto_retry,
+)
 from .bili_read_model import (
     IN_FLIGHT_STATUSES,
     latest_season,
     list_seasons,
+    read_auto_retry,
     read_job_uploads,
     read_season,
     read_upload,
@@ -117,6 +123,9 @@ from ..contracts.config import REPO_ROOT, AppSettings
 from ..infra.events import EventBroker
 from ..common.log_safety import sanitize_log_message
 from ..contracts.models import (
+    BiliAutoRetry,
+    BiliAutoRetryKind,
+    BiliAutoRetryState,
     BiliSeason,
     BiliSeasonStatus,
     BiliUpload,
@@ -446,6 +455,15 @@ class BiliManager:
         self._login: BiliLoginSession | None = None
         self._last_upload_finished_at: float | None = None
         self._progress_lock = threading.Lock()
+        # 自动重试调度器。**它调的就是下面那两个公开方法**（`retry_season` / `retry_upload`），
+        # 所以手动按钮与自动重试走的是同一套业务逻辑（需求 FR-B38）。
+        self.auto_retry = BiliAutoRetryScheduler(
+            engine,
+            self.auto_retry_policy(),
+            retry_season=self.retry_season,
+            retry_upload=self.retry_upload,
+            on_change=lambda: self._publish_threadsafe({"type": "bili_auto_retry_changed"}),
+        )
 
     # ------------------------------------------------------------ 生命周期
     async def start(self) -> None:
@@ -454,6 +472,9 @@ class BiliManager:
         self._loop = asyncio.get_running_loop()
         self._queue = asyncio.Queue()
         self._workers.append(asyncio.create_task(self._worker()))
+        # 自动重试的调度器与上传 worker **一起起、一起停**：它要问平台，
+        # 而平台的限流是账号级的 —— 两条线同时打平台是最容易把自己限流的做法。
+        await self.auto_retry.start()
 
     async def stop(self) -> None:
         for worker in self._workers:
@@ -461,6 +482,7 @@ class BiliManager:
         await asyncio.gather(*self._workers, return_exceptions=True)
         self._workers.clear()
         self._queue = None
+        await self.auto_retry.stop()
 
     async def resume_interrupted(self) -> int:
         """把重启前留在 `queued`/`uploading` 的记录折成可重试的失败，并返回条数。
@@ -490,7 +512,49 @@ class BiliManager:
             await self._publish(
                 {"type": "bili_upload_finished", "job_id": job_id, "upload_id": upload_id}
             )
+        # 自动重试那一半同理：停在 `running` 的行折回 `waiting`，重启后接着问。
+        self.auto_retry.resume_interrupted()
         return len(touched)
+
+    # ------------------------------------------------------------ 自动重试
+    def auto_retry_policy(self) -> AutoRetryPolicy:
+        """当前的自动重试参数。**每次现取** —— 设置可以在运行时改（见设置面板）。"""
+        return AutoRetryPolicy(
+            interval_seconds=self.settings.bili_auto_retry_interval_seconds,
+            max_attempts=self.settings.bili_auto_retry_max_attempts,
+            enabled=self.settings.bili_auto_retry_enabled,
+        )
+
+    def _register_auto_retry(self, *, target_id: str, kind: str, job_id: str) -> None:
+        """登记一个「等平台放行」的目标。
+
+        **幂等**（`register` 内部保证），所以「手动重试过一次」与「自动重试登记过」
+        不会变成两行。登记完发一条事件，让界面立刻看到倒计时 —— 否则用户要等下一次
+        SSE 才看见「它在等」。
+        """
+        if not self.settings.bili_auto_retry_enabled:
+            return
+        with Session(self.engine) as session:
+            register_auto_retry(session, target_id=target_id, kind=kind, job_id=job_id)
+        self._publish_threadsafe({"type": "bili_auto_retry_changed", "job_id": job_id})
+
+    def _close_auto_retry(self, *, target_id: str, message: str = "") -> None:
+        """一个目标**不再需要自动重试**了（手动重试成功了，或它已经好了）。
+
+        折成 `done` 而不是删行：界面上「已自动归集」这句话要有地方可显示，
+        而删掉就变成了「什么都没发生过」。
+        """
+        with Session(self.engine) as session:
+            row = session.get(BiliAutoRetry, target_id)
+            if row is None or row.state == BiliAutoRetryState.done.value:
+                return
+            row.state = BiliAutoRetryState.done.value
+            row.next_attempt_at = None
+            row.last_result = "done"
+            row.last_message = message
+            row.updated_at = utc_now()
+            session.add(row)
+            session.commit()
 
     # ------------------------------------------------------------ 登录态
     def current_jar(self) -> dict[str, str]:
@@ -714,7 +778,11 @@ class BiliManager:
                 create_if_missing=mode != GROUP_MODE_NONE,
             )
             session.commit()
-            read = read_upload(row, index=self._index_for(session, job_id, item_id))
+            read = read_upload(
+                row,
+                index=self._index_for(session, job_id, item_id),
+                auto_retry=read_auto_retry(session, row.id),
+            )
         await self._enqueue(row.id)
         return read
 
@@ -1029,7 +1097,11 @@ class BiliManager:
             if row is None:
                 raise KeyError(upload_id)
             status = row.status
-            read = read_upload(row, index=self._index_for(session, row.job_id, row.item_id))
+            read = read_upload(
+                row,
+                index=self._index_for(session, row.job_id, row.item_id),
+                auto_retry=read_auto_retry(session, row.id),
+            )
             title, item_id = row.title, row.item_id
             index = read.index
             if status in IN_FLIGHT_STATUSES:
@@ -1060,6 +1132,8 @@ class BiliManager:
                     subtitle_path,
                     subtitle_language,
                 )
+                if updated.subtitle_state == SUBTITLE_POSTED:
+                    self._close_auto_retry(target_id=upload_id, message="字幕已补传")
                 return BiliRetryRead(
                     action="reverify",
                     # 补传**可能还是失败**（稿件还在审核、cid 依旧取不到）。笼统说「已重新上传字幕」
@@ -1102,7 +1176,7 @@ class BiliManager:
             row.updated_at = utc_now()
             session.add(row)
             session.commit()
-            read = read_upload(row, index=index)
+            read = read_upload(row, index=index, auto_retry=read_auto_retry(session, row.id))
         await self._enqueue(upload_id)
         return BiliRetryRead(action="reupload", message="已重新排队上传", upload=read)
 
@@ -1123,6 +1197,9 @@ class BiliManager:
                 raise KeyError(season_record_id)
             job_id = season.job_id
         read = await asyncio.to_thread(self._group_work, job_id, season_record_id, refresh=True)
+        if read.status == BiliSeasonStatus.grouped.value:
+            # 成了就别让自动重试再问一次（它会问出「已经归好了」这种没信息量的回执）。
+            self._close_auto_retry(target_id=season_record_id, message="已归集")
         return BiliSeasonRetryRead(
             action=_season_retry_action(read.status),
             message=_season_retry_message(read),
@@ -1154,7 +1231,7 @@ class BiliManager:
         with Session(self.engine) as session:
             row = session.get(BiliUpload, upload_id)
             assert row is not None
-            return read_upload(row, index=index)
+            return read_upload(row, index=index, auto_retry=read_auto_retry(session, row.id))
 
     def _job_of(self, upload_id: str) -> str | None:
         with Session(self.engine) as session:
@@ -1394,6 +1471,16 @@ class BiliManager:
             row.updated_at = row.finished_at
             session.add(row)
             session.commit()
+            job_id = row.job_id
+        # 字幕这一步挂了且平台还没给分P编号 ⇒ 登记一条「等平台放行」的自动重试。
+        # 判据是**结构**（`subtitle_state == failed` 且 `cid` 为空），不是文案：
+        # 文案会改，结构不会。
+        if result.subtitle_state == SUBTITLE_FAILED and not row.cid:
+            self._register_auto_retry(
+                target_id=upload_id,
+                kind=BiliAutoRetryKind.subtitle.value,
+                job_id=job_id,
+            )
 
     # ------------------------------------------------------------ 归集
     def _maybe_group(self, upload_id: str) -> None:
@@ -1510,7 +1597,7 @@ class BiliManager:
             rows = [row for row in rows if row is not None]
             if any(row.status in IN_FLIGHT_STATUSES for row in rows):
                 # 还有在跑的条目：结论会是「pending」，写库反而是降级，直接不改。
-                return read_season(season)
+                return read_season(season, auto_retry=read_auto_retry(session, season.id))
             # 结果列表在会话内构造：`commit()` 之后对象会过期，跨出 `with` 再读属性会抛异常。
             results = [
                 UploadResult(
@@ -1557,7 +1644,16 @@ class BiliManager:
             season.updated_at = utc_now()
             session.add(season)
             session.commit()
-            read = read_season(season)
+            read = read_season(season, auto_retry=read_auto_retry(session, season.id))
+        # 归集没成（多半是平台还没给分P编号）⇒ 登记一条「等平台放行」的自动重试。
+        # **手动点「重试归集」也会走到这里**：手动那一下发现还在审核时，自动重试
+        # 就该接手 —— 否则用户点完还是得一直盯着。
+        if outcome.status == BiliSeasonStatus.pending.value:
+            self._register_auto_retry(
+                target_id=season_record_id,
+                kind=BiliAutoRetryKind.season.value,
+                job_id=job_id,
+            )
         self._publish_threadsafe({"type": "bili_season_finished", "job_id": job_id, "season_id": season_record_id})
         return read
 

@@ -35,8 +35,16 @@ from .bili_policy import (
     upload_status_text,
 )
 from ..download.job_read_model import elapsed_seconds
-from ..contracts.models import BiliSeason, BiliSeasonStatus, BiliUpload, BiliUploadStatus, JobItem
+from ..contracts.models import (
+    BiliAutoRetry,
+    BiliSeason,
+    BiliSeasonStatus,
+    BiliUpload,
+    BiliUploadStatus,
+    JobItem,
+)
 from ..contracts.schemas import (
+    BiliAutoRetryRead,
     BiliJobUploadsRead,
     BiliJobUploadsSummaryRead,
     BiliSeasonRead,
@@ -91,7 +99,12 @@ def derive_badge(uploads: Sequence[BiliUpload], season: BiliSeason | None) -> st
     return BADGE_UNVERIFIED
 
 
-def read_upload(upload: BiliUpload, *, index: int = 1) -> BiliUploadRead:
+def read_upload(
+    upload: BiliUpload,
+    *,
+    index: int = 1,
+    auto_retry: BiliAutoRetryRead | None = None,
+) -> BiliUploadRead:
     badge = derive_badge([upload], None)
     return BiliUploadRead(
         id=upload.id,
@@ -124,11 +137,34 @@ def read_upload(upload: BiliUpload, *, index: int = 1) -> BiliUploadRead:
         error=upload.error,
         advice=upload.advice,
         attempt=upload.attempt,
+        auto_retry=auto_retry,
         created_at=upload.created_at,
         updated_at=upload.updated_at,
         started_at=upload.started_at,
         finished_at=upload.finished_at,
         elapsed_seconds=elapsed_seconds(upload.started_at, upload.finished_at),
+    )
+
+
+def read_auto_retry(session: Session, target_id: str) -> BiliAutoRetryRead | None:
+    """这个目标的自动重试状态。**没有在等就返回 `None`**。
+
+    为什么用 `None` 而不是「一个 state=idle 的对象」：`None` 让前端不必再判一档
+    「没有在等」的状态 —— 界面上「不显示」与「显示成等待中」是两件事，
+    前者对用户更安静，后者会让人以为机器在忙。
+
+    **用调用方传进来的 session**，不在这里另开一个：读模型不该自己拿连接
+    （那会让「一次读回」变成两次事务，也让调用方的 `with Session(...)` 失效）。
+    """
+    row = session.get(BiliAutoRetry, target_id)
+    if row is None:
+        return None
+    return BiliAutoRetryRead(
+        state=row.state,
+        attempts=row.attempts,
+        next_attempt_at=row.next_attempt_at,
+        last_result=row.last_result,
+        last_message=row.last_message,
     )
 
 
@@ -151,7 +187,11 @@ def season_upload_ids(season: BiliSeason) -> list[str]:
     return [str(item) for item in parsed]
 
 
-def read_season(season: BiliSeason) -> BiliSeasonRead:
+def read_season(
+    season: BiliSeason,
+    *,
+    auto_retry: BiliAutoRetryRead | None = None,
+) -> BiliSeasonRead:
     upload_ids = season_upload_ids(season)
     return BiliSeasonRead(
         id=season.id,
@@ -164,6 +204,7 @@ def read_season(season: BiliSeason) -> BiliSeasonRead:
         upload_ids=upload_ids,
         error=season.error,
         advice=season.advice,
+        auto_retry=auto_retry,
     )
 
 
@@ -227,10 +268,18 @@ def read_job_uploads(session: Session, job_id: str) -> BiliJobUploadsRead:
         badge_text=badge_text(badge),
         badge_tone=badge_tone(badge),
         uploads=[
-            read_upload(upload, index=indexes.get(upload.item_id or "", 1))
+            read_upload(
+                upload,
+                index=indexes.get(upload.item_id or "", 1),
+                auto_retry=read_auto_retry(session, upload.id),
+            )
             for upload in uploads
         ],
-        season=read_season(season) if season is not None else None,
+        season=(
+            read_season(season, auto_retry=read_auto_retry(session, season.id))
+            if season is not None
+            else None
+        ),
     )
 
 

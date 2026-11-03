@@ -5,6 +5,8 @@ from typing import Annotated, Literal, get_args
 from pydantic import BaseModel, Field, HttpUrl
 from pydantic.functional_validators import BeforeValidator
 
+from ..common.time import as_aware_utc
+
 DownloadMode = Literal["video_subtitles", "video_only", "subtitles_only"]
 SubtitleSource = Literal["human", "auto", "both"]
 SubtitleFormat = Literal["best", "srt", "vtt"]
@@ -20,9 +22,11 @@ def _as_aware_utc(value: object) -> object:
     这类偏差**不报错、只是数字变大**，所以用例里全是带 `Z` 的假时间戳时它一直藏着。
 
     判据：**跨接口的时间必须自带偏移量**，让「什么时候」不依赖读它的人猜。
+
+    实现在 `common/time`（三处共用一个，见那里的说明）。
     """
-    if isinstance(value, datetime) and value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
+    if isinstance(value, datetime):
+        return as_aware_utc(value)
     return value
 
 
@@ -255,6 +259,10 @@ class SettingsRead(BaseModel):
     # 任务跑到终态时怎么提醒。默认 `both`；`off` 时前端一个都不发 —— 下载选项里那个逐任务
     # 开关会显示成不可勾并说明原因，否则「勾了不响」又是一次名实不符。
     completion_notification: CompletionNotification = DEFAULT_COMPLETION_NOTIFICATION
+    # B站 自动重试（等平台放行后自动归集 / 自动重传字幕）。
+    bili_auto_retry_enabled: bool = True
+    bili_auto_retry_interval_seconds: int = 60
+    bili_auto_retry_max_attempts: int = 12
 
 
 class SettingsUpdate(BaseModel):
@@ -267,6 +275,12 @@ class SettingsUpdate(BaseModel):
     aria2c_connections: int | None = Field(default=None, ge=1, le=4)
     proxy: str | None = None
     completion_notification: CompletionNotification | None = None
+    # B站 自动重试的三个旋钮。**都能在设置面板里改**：
+    # 「等多久问一次」与「最多试几次」是用户按自己账号的审核速度定的，
+    # 写死成常量就等于让它对所有人只有一个脾气。
+    bili_auto_retry_enabled: bool | None = None
+    bili_auto_retry_interval_seconds: int | None = Field(default=None, ge=5, le=3600)
+    bili_auto_retry_max_attempts: int | None = Field(default=None, ge=1, le=200)
 
 
 class CookieStatus(BaseModel):
@@ -551,6 +565,25 @@ class BiliCollectionCreate(BaseModel):
     season_id: int | None = None
 
 
+class BiliAutoRetryRead(BaseModel):
+    """一条「等平台放行」的自动重试状态。**界面上那行「下一次自动重试 …」就是它。**
+
+    它是**读模型**而不是动作入口：用户点「重试归集」「重传字幕」时走的是原来的手动接口，
+    这一层只负责把「机器在等什么、等多久、上次结果如何」说出来。
+    """
+
+    #: `waiting` 在等 / `running` 正在问平台 / `done` 成了 / `exhausted` 试够了。
+    state: str = "waiting"
+    #: 已经问过平台几次。
+    attempts: int = 0
+    #: 下一次到点的时间。**界面上的倒计时就是它减现在**（`null` = 不再自动重试）。
+    next_attempt_at: UtcDateTime | None = None
+    #: 上一次的结果：`done` / `waiting`（还在审核）/ `failed`。
+    last_result: str = ""
+    #: 上一次给用户看的那句话（失败原因 /「还在审核」/「已自动归集」）。
+    last_message: str = ""
+
+
 class BiliUploadRead(BaseModel):
     id: str
     job_id: str
@@ -589,6 +622,8 @@ class BiliUploadRead(BaseModel):
     error: str | None = None
     advice: str | None = None
     attempt: int = 1
+    #: 这一条有没有在等自动重试（字幕那一步）。`None` = 没有在等。
+    auto_retry: BiliAutoRetryRead | None = None
     created_at: UtcDateTime
     updated_at: UtcDateTime
     started_at: UtcDateTime | None = None
@@ -607,6 +642,8 @@ class BiliSeasonRead(BaseModel):
     upload_ids: list[str] = Field(default_factory=list)
     error: str | None = None
     advice: str | None = None
+    #: 这一批有没有在等自动重试（归集那一步）。`None` = 没有在等。
+    auto_retry: BiliAutoRetryRead | None = None
 
 
 class BiliJobUploadsRead(BaseModel):

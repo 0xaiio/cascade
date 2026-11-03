@@ -348,6 +348,31 @@ def _dropped_while_sending_video(haystack: str) -> bool:
     return False
 
 
+# 「请求太频繁」这类**账号侧临时限流**的判据。
+#
+# 与 `FAILURE_PATTERNS` 里投稿那条 `("601",)` 不是一回事：那边判的是「biliup 报了什么」，
+# 这里判的是「**平台接口**回了一句限流」—— 归集与字幕走的都是 `member.bilibili.com` 的
+# JSON 接口，它们用的是另一组码（-799 / -509 / -412 / 601），而投稿那条输出里没有这些。
+#
+# 为什么要单独判：限流要求「**再等久一点**」，别的失败要求「照原样再试」。
+# 认错方向的后果是反的 —— 把限流当普通失败 ⇒ 退避不够 ⇒ 继续踩在限流线上，
+# 把一次临时限流升级成账号风险。
+RATE_LIMIT_CODES = ("-799", "-509", "-412", "-601", '"code":601', '"code": 601')
+RATE_LIMIT_PHRASES = ("too many requests", "请求过于频繁", "请求太频繁", "操作频繁", "上传得太快")
+
+
+def rate_limited(output: str) -> bool:
+    """这段输出/错误里说的是不是「账号侧临时限流」。
+
+    判据是**错误码或限流短语**，不是「有 601 这三个数字」—— 稿件 id、标题、时间戳里
+    都可能出现这串数字。
+    """
+    haystack = (output or "").lower()
+    if any(code in haystack for code in RATE_LIMIT_CODES):
+        return True
+    return any(phrase in haystack for phrase in RATE_LIMIT_PHRASES)
+
+
 def classify_failure(output: str) -> tuple[str, str]:
     """把 `biliup` 的输出归类成（结论, 下一步）。**命中不了就如实说不知道，不猜原因。**"""
     haystack = (output or "").lower()

@@ -1,6 +1,7 @@
 import { Fragment, useState } from "react";
 import { AlertTriangle, ExternalLink, RotateCcw } from "lucide-react";
 import { jobUploadProgress } from "./biliProgress";
+import { BiliAutoRetryNote } from "./BiliAutoRetryNote";
 import {
   isBadSeason,
   isBadSubtitle,
@@ -96,6 +97,9 @@ export function BiliJobStatus({
                 {retrying ? "归集中…" : "重试归集"}
               </button>
               {retriedAt && <span className="bili-retry-stamp">上次重试 {retriedAt}</span>}
+              {/* 自动重试的倒计时挂在**同一个位置**：这两件事是同一件事的两条路 ——
+                  手动点一下，或等机器自己试。分成两处会让用户以为要二选一。 */}
+              <BiliAutoRetryNote retry={season.auto_retry} />
             </>
           )}
         </div>
@@ -157,6 +161,7 @@ export function BiliJobStatus({
                     重传字幕
                   </button>
                 )}
+                <BiliAutoRetryNote retry={upload.auto_retry} />
               </div>
             )}
           </Fragment>

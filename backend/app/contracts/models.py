@@ -207,3 +207,60 @@ class BiliSeason(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utc_now)
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
+
+
+class BiliAutoRetryKind(StrEnum):
+    """自动重试盯着的**两种目标**。它们是两个独立生命周期，必须分开记。"""
+
+    #: 归集：稿件已提交但还没能加进合集（平台审核没通过时没有分P编号）。
+    season = "season"
+    #: 字幕：稿件已在平台上，但 CC 字幕那次没传上去。
+    subtitle = "subtitle"
+
+
+class BiliAutoRetryState(StrEnum):
+    """一条自动重试任务的**状态**。界面上的倒计时与「上次结果」由它决定。"""
+
+    #: 已登记，等下一次到点再问平台。
+    waiting = "waiting"
+    #: 正在问平台（跑的过程中界面显示「自动重试中…」）。
+    running = "running"
+    #: 这件事成了：合集归好了，或字幕传上去了。**不再自动重试**，但行留着当记录。
+    done = "done"
+    #: 试够了，放弃自动重试。手动按钮仍然可用。
+    exhausted = "exhausted"
+
+
+class BiliAutoRetry(SQLModel, table=True):
+    """一个「等平台放行」的目标 = 一行。
+
+    **为什么单独一张表，而不是给 `bili_upload` / `bili_season` 各加几列**：
+
+    1. **两个目标的生命周期不同**（归集 vs 字幕），但**调度逻辑完全相同**（到点 → 问一次 →
+       不行就退避再等）。分开记会让「下一次什么时候问」有两处真相；合成一张表则调度器
+       只有一个扫描口。
+    2. 归集这一行的主键是**合集记录 id**，字幕那一行是**稿件记录 id** —— 两者不在同一个
+       命名空间里，所以这张表自带 `kind` 才分得清谁是谁。
+
+    **落库是硬要求**：审核要等几分钟到几小时，其间进程可能重启。状态只在内存里的话，
+    重启后这一批就永远停在「等待归集」—— 而这正是本功能要解决的症状。
+    """
+
+    __tablename__ = "bili_auto_retry"
+
+    #: 目标 id：归集是 `bili_season.id`，字幕是 `bili_upload.id`。与 `kind` 一起才唯一。
+    target_id: str = Field(primary_key=True)
+    kind: str = Field(index=True)
+    job_id: str = Field(index=True)
+    state: str = Field(default=BiliAutoRetryState.waiting.value, index=True)
+    #: 已经问过平台几次。**上限判定只看它**（`max_attempts`）。
+    attempts: int = 0
+    #: 下一次到点的时间。**界面上的倒计时就是它减现在**。
+    next_attempt_at: Optional[datetime] = Field(default=None, index=True)
+    #: 上一次的动作名（`group` / `subtitle`）与结论（`waiting` / `done` / `failed`）。
+    last_action: str = ""
+    last_result: str = ""
+    #: 上一次的失败原因或「还在审核」这类说明，**原样显示给用户**。
+    last_message: str = ""
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)

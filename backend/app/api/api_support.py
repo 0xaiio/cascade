@@ -139,6 +139,15 @@ def cookie_import_status_code(exc: BrowserCookieImportError) -> int:
     return 409 if exc.code == "browser_locked" else 400
 
 
+def _clamp_int(raw: str, low: int, high: int, fallback: int) -> int:
+    """把一个字符串读成区间内的整数。**读不出来就用兜底值**，不抛也不越界。"""
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return fallback
+    return max(low, min(high, value))
+
+
 def set_setting(session: Session, key: str, value: str) -> None:
     setting = session.get(Setting, key) or Setting(key=key, value=value)
     setting.value = value
@@ -180,6 +189,23 @@ def apply_stored_settings(session: Session, settings: AppSettings, service: YtDl
     stored_notification = stored.get("completion_notification")
     if stored_notification in COMPLETION_NOTIFICATION_MODES:
         settings.completion_notification = stored_notification
+    # B站 自动重试的三个旋钮。**值从库里读回时要做范围校验**：这是一张用户可写的表，
+    # 写坏了（手改、或者老版本写过更大的值）不该让调度器按一个荒谬的间隔跑。
+    if "bili_auto_retry_enabled" in stored:
+        settings.bili_auto_retry_enabled = stored["bili_auto_retry_enabled"].strip().lower() not in (
+            "0",
+            "false",
+            "off",
+            "no",
+        )
+    if stored.get("bili_auto_retry_interval_seconds"):
+        settings.bili_auto_retry_interval_seconds = _clamp_int(
+            stored["bili_auto_retry_interval_seconds"], 5, 3600, settings.bili_auto_retry_interval_seconds
+        )
+    if stored.get("bili_auto_retry_max_attempts"):
+        settings.bili_auto_retry_max_attempts = _clamp_int(
+            stored["bili_auto_retry_max_attempts"], 1, 200, settings.bili_auto_retry_max_attempts
+        )
 
 
 def settings_response(session: Session, settings: AppSettings, service: YtDlpService) -> SettingsRead:
@@ -199,6 +225,9 @@ def settings_response(session: Session, settings: AppSettings, service: YtDlpSer
         cookies_enabled=settings.cookies_path.exists(),
         ffmpeg=service.get_ffmpeg_status(),
         completion_notification=_completion_notification(settings.completion_notification),
+        bili_auto_retry_enabled=settings.bili_auto_retry_enabled,
+        bili_auto_retry_interval_seconds=settings.bili_auto_retry_interval_seconds,
+        bili_auto_retry_max_attempts=settings.bili_auto_retry_max_attempts,
     )
 
 

@@ -236,7 +236,11 @@ export const settingsPayload: Settings = {
   proxy_effective: null,
   cookies_enabled: false,
   ffmpeg: { ffmpeg: true, ffprobe: true },
-  completion_notification: "both"
+  completion_notification: "both",
+  // B站 自动重试的三个旋钮。
+  bili_auto_retry_enabled: true,
+  bili_auto_retry_interval_seconds: 60,
+  bili_auto_retry_max_attempts: 12
 };
 
 export const lockedEdgeCookieDetail = {
@@ -533,7 +537,9 @@ export const biliUploadPayload: BiliUpload = {
   // 字幕三件套：**独立于稿件状态**。这条当时没有可用字幕（`skipped` 是出厂态）。
   subtitle_state: "skipped",
   subtitle_lan: "",
-  subtitle_message: "没有已下载的字幕，跳过字幕上传"
+  subtitle_message: "没有已下载的字幕，跳过字幕上传",
+  // 默认**没有**在等自动重试（要等的那一条由用例单独造）。
+  auto_retry: null
 };
 
 /** 一条失败稿件：有 `error` 与 `advice`，因此任务卡片里会渲染出明细与重试按钮。 */

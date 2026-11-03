@@ -121,6 +121,19 @@ export function SettingsPanel({
     }
   }
 
+  /** B站 自动重试的三个旋钮。**改完立刻生效**，不用重启后端。 */
+  async function saveAutoRetry(patch: Partial<Settings>) {
+    setSaveMessage("保存中...");
+    try {
+      onSettingsChange(await updateSettings(patch));
+      setSaveMessage("已保存");
+    } catch {
+      setSaveMessage("保存失败");
+    } finally {
+      window.setTimeout(() => setSaveMessage(""), 1800);
+    }
+  }
+
   async function saveAria2cConnections(value: number) {
     const nextConnections = Math.min(4, Math.max(1, Number(value) || settings.aria2c_connections));
     if (nextConnections === settings.aria2c_connections) return;
@@ -229,6 +242,77 @@ export function SettingsPanel({
           onChange={(event) => setDraft({ ...draft, aria2c_connections: Number(event.target.value) })}
           onBlur={(event) => void saveAria2cConnections(Number(event.currentTarget.value))}
         />
+      </div>
+      <div className="field">
+        <div className="field-label-row">
+          <label className="field-label" htmlFor="bili-auto-retry-enabled">
+            B站 自动重试（等审核通过后自动归集 / 自动补字幕）
+          </label>
+        </div>
+        <div className="notification-mode-row">
+          <input
+            id="bili-auto-retry-enabled"
+            type="checkbox"
+            checked={draft.bili_auto_retry_enabled ?? true}
+            onChange={(event) =>
+              void saveAutoRetry({ bili_auto_retry_enabled: event.target.checked })
+            }
+          />
+          <span className="field-hint">
+            {draft.bili_auto_retry_enabled
+              ? "平台审核没通过时，应用会自己隔一段时间问一次；手动按钮仍然可以随时点。"
+              : "已关闭：审核没通过时只会提示，等你要点「重试归集」「重传字幕」才动。"}
+          </span>
+        </div>
+      </div>
+      <div className="field settings-number-field">
+        <div className="field-label-row">
+          <label className="field-label" htmlFor="bili-auto-retry-interval">
+            自动重试间隔（秒，5–3600）
+          </label>
+        </div>
+        <input
+          id="bili-auto-retry-interval"
+          type="number"
+          min={5}
+          max={3600}
+          value={draft.bili_auto_retry_interval_seconds ?? 60}
+          onChange={(event) =>
+            setDraft({ ...draft, bili_auto_retry_interval_seconds: Number(event.target.value) })
+          }
+          onBlur={(event) => {
+            const next = Math.min(3600, Math.max(5, Number(event.currentTarget.value) || 60));
+            if (next === settings.bili_auto_retry_interval_seconds) return;
+            void saveAutoRetry({ bili_auto_retry_interval_seconds: next });
+          }}
+        />
+        <span className="field-hint">
+          问一次平台之后等这么久再问（失败会按倍数往后延）。B站 审核通常要几分钟到几小时，
+          别调得太短 —— 问得太勤只是白白发请求，还可能被限流。
+        </span>
+      </div>
+      <div className="field settings-number-field">
+        <div className="field-label-row">
+          <label className="field-label" htmlFor="bili-auto-retry-max-attempts">
+            自动重试上限（次，1–200）
+          </label>
+        </div>
+        <input
+          id="bili-auto-retry-max-attempts"
+          type="number"
+          min={1}
+          max={200}
+          value={draft.bili_auto_retry_max_attempts ?? 12}
+          onChange={(event) =>
+            setDraft({ ...draft, bili_auto_retry_max_attempts: Number(event.target.value) })
+          }
+          onBlur={(event) => {
+            const next = Math.min(200, Math.max(1, Number(event.currentTarget.value) || 12));
+            if (next === settings.bili_auto_retry_max_attempts) return;
+            void saveAutoRetry({ bili_auto_retry_max_attempts: next });
+          }}
+        />
+        <span className="field-hint">试够这么多次就停下来，把手动按钮交回给你（不会一直刷平台）。</span>
       </div>
       <div className="field">
         <div className="field-label-row">

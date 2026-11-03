@@ -986,3 +986,51 @@ Ep 125 上传时进度条显示「已提交 7:59:59」，跑的过程中出现�
   也全是 `state=0`。它的凭据是单测 + 浏览器探针里用**合成响应**量到的界面。
 - 本轮**没有为了验证秒表而再投一条稿**：`已用`（在跑）那一档没有新的真实读数，只有单测与修复前的探针。
 - 归集成功后，页顶回执可能被「徽标翻成已上传」的播报盖掉：两条都真，本轮未做优先级仲裁。
+
+## 17. 自动重试：等平台放行（FR-B38）
+
+### 17.1 测的是两层
+
+| 层 | 文件 | 测什么 |
+| --- | --- | --- |
+| 判据 | `backend/tests/test_bili_auto_retry.py`（20 条） | 退避、上限、限流、登记幂等、到点扫描、崩溃恢复 |
+| 端到端 | `backend/tests/test_bili_auto_retry_integration.py`（4 条） | 真 `BiliManager` + 假平台：**合集真的归好了、字幕真的补上了** |
+| 界面 | `frontend/src/bilibili/biliAutoRetryNote.test.tsx`（8 条）+ `bili-upload.test.tsx`（+1） | 倒计时、状态文案、与手动按钮并存 |
+
+**端到端那层断言的是「结果」而不是「调用」**：集成测试断言「合集真的 `grouped` 了」
+而不是「调度器调了 `retry_season`」—— 这正是「自动与手动复用同一套业务逻辑」的可核对证据。
+
+### 17.2 需求点名的五种情形，逐条对应
+
+| 情形 | 用例 | 判据 |
+| --- | --- | --- |
+| 审核未通过 | `test_a_review_not_passed_keeps_waiting_and_says_so` | `last_result == "waiting"`，**不是** `failed` |
+| 审核通过 | `test_a_review_passed_ends_the_automaton` | 状态转 `done`，不再排下一次 |
+| 接口限流 | `test_a_rate_limited_failure_is_recorded_as_failed_not_waiting` | 记成 `failed`，且下一次等 **> 100 s**（一个间隔的两倍） |
+| 轮询超时 | `test_still_under_review_schedules_the_next_try` | 排下一次，且等一个间隔 |
+| 重试成功 / 失败 | 集成测试两条 | 成功 ⇒ `subtitle_state == "posted"` 且**投稿命令只跑一次**；失败 ⇒ 继续等 |
+
+### 17.3 写这批用例时踩到的三个坑
+
+1. **「还没成」≠「失败」**：第一版把「还在审核」记成 `failed`，界面上于是显示
+   「自动重试失败」—— 用户以为要去查什么，而平台的审核不是我们能修的东西。
+2. **退避会被「登记」打断**：调度器每问一次都会经过登记那一步。顺手把
+   `next_attempt_at` 拨回「现在」的话，每一次尝试后都被拉回「立刻再试」，
+   指数退避等于没有。`test_registering_again_does_not_reset_the_backoff` 钉住这一条。
+3. **naive 与 aware 不能直接比**：库里读出来的是 naive 的 UTC，而 `utc_now()` 是 aware 的
+   ⇒ `TypeError: can't compare offset-naive and offset-aware datetimes`。
+   修法是新增 `common/time.py`（`as_aware_utc`）并让三处共用一个实现。
+
+### 17.4 承重
+
+- 把 `register()` 改成「每次登记都重置时间」⇒ `test_registering_again_does_not_reset_the_backoff` 转红。
+- 把「限流加倍」去掉 ⇒ `test_a_rate_limited_failure_is_recorded_as_failed_not_waiting` 转红。
+
+### 17.5 未覆盖 / 如实说明
+
+- **没有在真实账号上跑满一轮审核**：那要等几小时，且会真的建合集、真的传字幕。
+  本轮只到「假平台说审核通过了」为止。
+- **调度循环的时间基准没验**：循环本身用的是 `asyncio.sleep`，集成测试直接调 `tick()`，
+  所以「到点才问」这条在真实进程里没有被时间地验证过（只有 `due_rows` 的纯函数判据被测了）。
+- **界面上那行倒计时的真实排版没量**（jsdom 不做布局）：宽度、换行、与按钮的间距
+  都是按样式源文写的，没有 CDP 探针的实测。

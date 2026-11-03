@@ -1436,6 +1436,45 @@ describe("App · B站 稿件明细与重试", () => {
     expect(mockState.biliRetrySeasonIds).toEqual(["season-1"]);
   });
 
+  test("自动重试在等待时：卡片上出现下一次倒计时与上次结果", async () => {
+    // 这一行是自动重试**唯一的可见痕迹**：用户没法从别处知道机器在等什么、等多久。
+    mockState.jobs = [downloadedJob()];
+    mockState.biliUploads = [
+      jobUploads(
+        [],
+        {
+          job_id: "job-running",
+          season: {
+            id: "season-1",
+            job_id: "job-running",
+            title: "合集",
+            desc: "",
+            season_id: 9001,
+            status: "pending",
+            status_text: "等待归集",
+            upload_ids: [biliUploadPayload.id],
+            error: "视频还在 B站 排队审核，暂时没法加进合集",
+            advice: "等 B站 审核通过后点「重试归集」—— 它会先去平台核对分P编号，再归集",
+            auto_retry: {
+              state: "waiting",
+              attempts: 2,
+              next_attempt_at: new Date(Date.now() + 125_000).toISOString(),
+              last_result: "waiting",
+              last_message: "视频还在 B站 排队审核，暂时没法加进合集"
+            }
+          }
+        }
+      )
+    ];
+    render(<App />);
+
+    await screen.findByRole("button", { name: "重试归集" });
+    expect(screen.getByText(/下一次自动重试/)).toBeInTheDocument();
+    expect(screen.getByText(/已尝试 2 次/)).toBeInTheDocument();
+    // 手动按钮**照旧在**：自动重试是加法，不是替换。
+    expect(screen.getByRole("button", { name: "重试归集" })).toBeEnabled();
+  });
+
   test("announces only a real transition into a settled badge", async () => {
     mockState.jobs = [downloadedJob()];
     mockState.biliUploads = [jobUploads()];

@@ -2594,11 +2594,43 @@ components:
             How to remind the user when a job reaches a terminal state. The reminder is
             produced in the browser (synthesised chime and/or a bottom-right toast).
           example: both
+        bili_auto_retry_enabled:
+          type: boolean
+          default: true
+          description: >-
+            Whether the app polls Bilibili on its own and retries grouping / subtitle
+            upload once the review passes. The manual buttons keep working either way.
+        bili_auto_retry_interval_seconds:
+          type: integer
+          minimum: 5
+          maximum: 3600
+          default: 60
+          description: >-
+            How long to wait between two polls. Also the base of the backoff: a failed
+            attempt waits twice as long, four times as long, and so on (capped at 16x).
+        bili_auto_retry_max_attempts:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 12
+          description: >-
+            How many times to try before giving up. After that the manual buttons are
+            handed back to the user instead of polling forever.
 
     SettingsUpdate:
       type: object
       description: Partial update; omitted fields keep their stored value.
       properties:
+        bili_auto_retry_enabled:
+          type: [boolean, "null"]
+        bili_auto_retry_interval_seconds:
+          type: [integer, "null"]
+          minimum: 5
+          maximum: 3600
+        bili_auto_retry_max_attempts:
+          type: [integer, "null"]
+          minimum: 1
+          maximum: 200
         download_dir:
           type: [string, "null"]
         default_concurrency:
@@ -3403,6 +3435,11 @@ components:
         attempt:
           type: integer
           default: 1
+        auto_retry:
+          oneOf:
+            - $ref: "#/components/schemas/BiliAutoRetryRead"
+            - type: "null"
+          description: Present when this submission is waiting for Bilibili's review (subtitle step).
         created_at:
           type: string
           format: date-time
@@ -3418,6 +3455,38 @@ components:
         elapsed_seconds:
           type: integer
           default: 0
+
+    BiliAutoRetryRead:
+      type: object
+      description: >
+        The state of one "waiting for the platform" target. The app polls Bilibili
+        on its own and retries the grouping / subtitle upload once the review passes;
+        this is the only visible trace of that: when it fires, how long until the
+        next try, and what the last try concluded.
+      properties:
+        state:
+          type: string
+          enum: [waiting, running, done, exhausted]
+          default: waiting
+          description: >
+            `waiting` = scheduled for the next poll, `running` = asking the platform
+            right now, `done` = finished successfully, `exhausted` = out of attempts.
+        attempts:
+          type: integer
+          default: 0
+          description: How many times the platform has been asked so far.
+        next_attempt_at:
+          type: [string, "null"]
+          format: date-time
+          description: When the next poll is due. The UI counts down to it.
+        last_result:
+          type: string
+          default: ""
+          description: "'done', 'waiting' (still under review) or 'failed'."
+        last_message:
+          type: string
+          default: ""
+          description: One line explaining the last attempt.
 
     BiliSeasonRead:
       type: object
@@ -3446,6 +3515,11 @@ components:
         status_text:
           type: string
           default: ""
+        auto_retry:
+          oneOf:
+            - $ref: "#/components/schemas/BiliAutoRetryRead"
+            - type: "null"
+          description: Present when this collection is waiting for Bilibili's review (grouping step).
         upload_ids:
           type: array
           items:

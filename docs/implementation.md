@@ -11,7 +11,7 @@ FastAPI 应用由 [create_app](../backend/app/main.py#L40) 创建，启动时：
 - 创建 `EventBroker`。
 - 创建 `YtDlpService` 并注入 PO token、chunk、throttled rate、aria2c 等配置。
 - 创建 `JobManager` 并在 lifespan 中启动/停止 worker。
-- 创建 [BiliManager](../backend/app/bilibili/bili_manager.py#L423)（B站 投稿队列，单 worker）并同样在 lifespan 中启停；启动时会先把上次退出时停在 `uploading` 的记录折成可重试的失败。
+- 创建 [BiliManager](../backend/app/bilibili/bili_manager.py#L432)（B站 投稿队列，单 worker）并同样在 lifespan 中启停；启动时会先把上次退出时停在 `uploading` 的记录折成可重试的失败。
 - 把这些依赖装进 [ApiContext](../backend/app/api/api_context.py#L28) 并挂到 `app.state`。
 
 `create_app` 只做装配：HTTP 路由按资源拆到 [routers/](../backend/app/api/routers/__init__.py#L21) 下（`diagnostics` / `cookies` / `analyze` / `jobs` / `job_files` / `settings` / `events` / `bilibili`），由 `API_ROUTERS` 统一挂载。路由只做「取参 → 调辅助 → 定状态码」：请求级依赖经 [api_context.py](../backend/app/api/api_context.py#L45) 的 `ContextDep` / `SessionDep` 取，跨路由复用的任务/条目定位、设置读写与 cookies 处理在 [api_support.py](../backend/app/api/api_support.py#L26)，产物定位与本机打开在 [job_artifacts.py](../backend/app/download/job_artifacts.py#L31)。任务序列化逻辑委托给 [job_read_model.py](../backend/app/download/job_read_model.py#L12)，状态转换一律委托 `JobManager`；B站 那一组同理由 [bili_manager.py](../backend/app/bilibili/bili_manager.py) 承担，读模型投影在 [bili_read_model.py](../backend/app/bilibili/bili_read_model.py#L60)。
@@ -150,11 +150,11 @@ yt-dlp 对字幕、缩略图、HTTP chunk 和分离视频/音频流会多次发�
 
 **下载有字节级进度，上传没有**：`biliup` 在管道模式（非 TTY）下不输出已传字节数，只在三个节点各打一行（`pre_upload` / `Upload completed` / `APP接口投稿成功`），[_PROGRESS_STAGES](../backend/app/bilibili/bili_bin.py#L196) 把它们折成 0.2 / 0.6 / 0.95。所以界面上给的是**四段轨迹**（排队 / 传输 / 提交 / 核对）与「已用时间」，不是百分比条 —— 一个停在 20% 不动的数字比没有数字更糟。阶段映射与聚合在 [biliProgress.ts](../frontend/src/bilibili/biliProgress.ts#L23)。
 
-事件侧有一条与下载不同的约定：[_store_progress](../backend/app/bilibili/bili_manager.py#L1326) **只在进度值真的变大时才发 `bili_upload_progress`**。`on_progress` 是每读一行输出回调一次，不判「变没变」会往 SSE 里灌几百条同值事件；判了之后，一次投稿最多 3 条。前端沿用「收到任何一条事件就重拉」的既有口径，因此不需要为进度维护第二份状态。
+事件侧有一条与下载不同的约定：[_store_progress](../backend/app/bilibili/bili_manager.py#L1403) **只在进度值真的变大时才发 `bili_upload_progress`**。`on_progress` 是每读一行输出回调一次，不判「变没变」会往 SSE 里灌几百条同值事件；判了之后，一次投稿最多 3 条。前端沿用「收到任何一条事件就重拉」的既有口径，因此不需要为进度维护第二份状态。
 
 ## 读模型
 
-API 返回不直接暴露 SQLModel，而由 [read_job](../backend/app/download/job_read_model.py#L12) 生成：
+API 返回不直接暴露 SQLModel，而由 [read_job](../backend/app/download/job_read_model.py#L14) 生成：
 
 - 计算任务级实际分辨率和格式。
 - 将多个子项不同结果聚合为 `混合分辨率` 或 `混合格式`。
@@ -164,7 +164,7 @@ API 返回不直接暴露 SQLModel，而由 [read_job](../backend/app/download/j
 - 投影字幕结论（`subtitle_language` / `subtitle_source`）。**不在这里拼展示文案**：投稿表单里那句
   `en · 人工` 由 [`subtitle_summary`](../backend/app/download/subtitle_plan.py#L92) 在服务端的预填阶段算好
   （`BiliPrefillItem.subtitle`），前端原样显示 —— 两处各拼一遍就会出现「界面写自动生成、后端写 ASR」。
-- 把逐任务的「完成后通知」开关从 `options_json` 抬进读模型（[_notify_on_complete](../backend/app/download/job_read_model.py#L44)）。
+- 把逐任务的「完成后通知」开关从 `options_json` 抬进读模型（[_notify_on_complete](../backend/app/download/job_read_model.py#L46)）。
   它只存在于 `options_json` 里，而 SSE 的每个事件只是让前端重拉 `/api/jobs` —— 不抬出来的话，
   「这次会话里提交的任务会提醒、重开页面后同一个任务就不提醒」。提醒本身在浏览器里做，
   后端只存偏好（`completion_notification`）与这个逐任务开关，见 [FR-48](requirements.md#功能需求)。
@@ -188,9 +188,9 @@ B站 上传是一条与下载完全解耦的链路，模块划分（详见 [设�
 
 几个必须知道的实现细节：
 
-- **`run_command` 的读取放在后台线程**。早先是「主线程 `for line in process.stdout` 读完再 `wait(timeout)`」—— 阻塞在管道上时那段 `wait` 根本执行不到，于是一个**不打印任何输出就挂住**的投稿会让超时形同虚设（记录永远停在「上传中」），而「挂死」恰恰是这个超时唯一要防的东西。现在读取是 daemon 线程 + 有界 `join`，超时会 kill 并写入 `local-upload-deadline-reached` 标记，该标记会被 [classify_failure](../backend/app/bilibili/bili_policy.py#L351) 翻成「这次上传等得太久」。
+- **`run_command` 的读取放在后台线程**。早先是「主线程 `for line in process.stdout` 读完再 `wait(timeout)`」—— 阻塞在管道上时那段 `wait` 根本执行不到，于是一个**不打印任何输出就挂住**的投稿会让超时形同虚设（记录永远停在「上传中」），而「挂死」恰恰是这个超时唯一要防的东西。现在读取是 daemon 线程 + 有界 `join`，超时会 kill 并写入 `local-upload-deadline-reached` 标记，该标记会被 [classify_failure](../backend/app/bilibili/bili_policy.py#L376) 翻成「这次上传等得太久」。
 - **`--submit` 照传，但它在 0.2.4 里不起作用**：上游 `uploader.rs` 的 `match submit` 两个分支都调 `submit_by_app`，实际提交永远走 `/x/vu/app/add`。真正会拦住投稿的是**登录文件里缺 `token_info.access_token`** —— `login_by_cookies` 会先拿它去 `oauth2/info` 校验，空串换来 `-400 请求错误` 之后 biliup 直接退出。[exchange_tv_token](../backend/app/bilibili/bili_auth.py#L142) 补上 TV 端三步交换，并把 `platform` 写成 `BiliTV`（biliup 靠它挑续期用的 appkey），见 [011](../ai/bug-fix/011-biliup-refuses-a-token-less-cookie-file.md)。
-- **失败时 biliup 的原始输出会逐行进日志**（前缀 `biliup 输出 | `，`WARNING` 级）。此前 `UploadContext.on_log` 没有任何调用方，用户照着失败建议去 `app.log` 搜只会扑空；现在这条通道由 [bili_manager._log_biliup_line](../backend/app/bilibili/bili_manager.py#L184) 提供，落盘前过 `sanitize_log_message`。
+- **失败时 biliup 的原始输出会逐行进日志**（前缀 `biliup 输出 | `，`WARNING` 级）。此前 `UploadContext.on_log` 没有任何调用方，用户照着失败建议去 `app.log` 搜只会扑空；现在这条通道由 [bili_manager._log_biliup_line](../backend/app/bilibili/bili_manager.py#L193) 提供，落盘前过 `sanitize_log_message`。
 - **传输层断线也是一类结论**。`biliup` 被对端断开时输出里**没有业务码**（`error sending request` → `connection error` → `peer closed connection … close_notify`），旧分类表一条也命中不了，界面只剩「没能识别出具体原因」。现在 `TRANSPORT_FAILURE_NEEDLES` 收这一类，并按「失败那一行的 URL 是不是上传 CDN」决定敢不敢承诺「重试不会投重」——承诺的成立只依赖「字节没传完 ⇒ 提交接口没被调用过」（见 [021](../ai/bug-fix/021-a-dropped-upload-link-looks-like-nothing-at-all.md)）。
 - **对账按标题前缀匹配，且两侧都做 `strip()`**。平台会对标题做首尾空白处理；只归一不比较的写法会让用户多打一个尾随空格就永远查不到，于是一次成功投稿被标成「待核对」。
 - **请求参数风格在两个端点上不一致**：`season/add` 的 `csrf` 走 form 且返回 `data` 为 `season_id`；`season/section/episodes/add` 的 `csrf` 走 **query**，body 用 **camelCase**（`sectionId` / `episodes`）。两处都由 `bili_api` 封装，调用方不用记。
@@ -206,7 +206,7 @@ B站 上传是一条与下载完全解耦的链路，模块划分（详见 [设�
   所以 `zh-Hans` 压成 `zh`、繁体三档原样保留、认不出来退 `en`。
   这条实测靠 `submit=false`（只存草稿、不发布）逐个枚举候选值得到 —— 它是唯一能在
   **不动任何已发布稿件**的前提下验证接口形态的方式。
-- **字幕路径只在 `JobItem` 上存一份**（[`_subtitle_of`](../backend/app/bilibili/bili_manager.py#L1268) 从那里读），
+- **字幕路径只在 `JobItem` 上存一份**（[`_subtitle_of`](../backend/app/bilibili/bili_manager.py#L1345) 从那里读），
   投稿记录里不复制；读的时候还要**再看一次文件在不在**，不在就当没有。
 - **字幕失败有专门的补救动作**：已发布/审核中且 `subtitle_state=failed` 的稿件，重试走
   `_reverify_work` 并带上字幕，回执「已重新上传字幕」。**绝不**为了字幕重投一次视频。
@@ -215,7 +215,7 @@ B站 上传是一条与下载完全解耦的链路，模块划分（详见 [设�
 
 前端 API 调用集中在 [api.ts](../frontend/src/shared/api.ts#L40)。共享类型集中在 [types.ts](../frontend/src/contracts/types.ts)。[App.tsx](../frontend/src/App.tsx#L68) 只做状态编排与布局，展示拆成解析面板 [UrlAnalyzer](../frontend/src/download-request/UrlAnalyzer.tsx#L29)、解析结果 [AnalysisPanel](../frontend/src/download-request/AnalysisPanel.tsx#L12)、下载选项 [DownloadOptionsPanel](../frontend/src/download-request/DownloadOptionsPanel.tsx#L26)、任务中心 [JobQueue](../frontend/src/task-center/JobQueue.tsx#L24)、设置 [SettingsPanel](../frontend/src/settings/SettingsPanel.tsx#L70)，基础件是 [SearchableLanguageSelect](../frontend/src/download-request/SearchableLanguageSelect.tsx#L16) / [Toggle](../frontend/src/shared/ui/Toggle.tsx#L9) / [StatusPill](../frontend/src/shared/ui/StatusPill.tsx#L4)；cookies 区域与代理区域分别是 [CookieSection](../frontend/src/cookies/CookieSection.tsx#L121) 和 [ProxySection](../frontend/src/settings/ProxySection.tsx#L140)。字幕文案与来源归一是纯模块 [subtitles.ts](../frontend/src/shared/subtitles.ts#L12)，cookies 锁库错误到界面状态的映射是 [cookieLock.ts](../frontend/src/cookies/cookieLock.ts#L20)。
 
-B站 上传的界面由四个组件加一个图标组成：[BiliIcon](../frontend/src/bilibili/BiliIcon.tsx#L12)（手绘 SVG，品牌色只落在图标本身）、[BiliUploadButton](../frontend/src/bilibili/BiliUploadButton.tsx#L42)（图标 + 一句人话，`idle` 档显示动作词，其余档原样显示后端徽标文案；**点下去做什么按档位分流**：已上传打开稿件页、待核对只核对、部分失败只补没成功的、上传中不给点，见 [FR-39](requirements.md#功能需求) / [FR-40](requirements.md#功能需求)）、[BiliUploadDialog](../frontend/src/bilibili/BiliUploadDialog.tsx#L65)（单视频与合集**共用**一个模态表单，合集显示逐条预览；表单里的值是服务端预填的，**投过就复用上一次提交的那一份**并明说，见 [FR-45](requirements.md#功能需求)）、[BiliJobStatus](../frontend/src/bilibili/BiliJobStatus.tsx#L41)（任务卡片里的明细与重试入口，**只在有话说时才渲染**）、[BiliLoginSection](../frontend/src/bilibili/BiliLoginSection.tsx#L35)（设置面板里的体检 / 扫码 / 导入 / 修复工具）。硬限数字与状态文案全部来自服务端，前端只负责显示成 `12/80` 与选颜色 —— 自己写一份常量迟早出现「界面说没超、提交回来 400」。
+B站 上传的界面由四个组件加一个图标组成：[BiliIcon](../frontend/src/bilibili/BiliIcon.tsx#L12)（手绘 SVG，品牌色只落在图标本身）、[BiliUploadButton](../frontend/src/bilibili/BiliUploadButton.tsx#L42)（图标 + 一句人话，`idle` 档显示动作词，其余档原样显示后端徽标文案；**点下去做什么按档位分流**：已上传打开稿件页、待核对只核对、部分失败只补没成功的、上传中不给点，见 [FR-39](requirements.md#功能需求) / [FR-40](requirements.md#功能需求)）、[BiliUploadDialog](../frontend/src/bilibili/BiliUploadDialog.tsx#L65)（单视频与合集**共用**一个模态表单，合集显示逐条预览；表单里的值是服务端预填的，**投过就复用上一次提交的那一份**并明说，见 [FR-45](requirements.md#功能需求)）、[BiliJobStatus](../frontend/src/bilibili/BiliJobStatus.tsx#L42)（任务卡片里的明细与重试入口，**只在有话说时才渲染**；「重试归集」「重传字幕」旁边挂着 [BiliAutoRetryNote](../frontend/src/bilibili/BiliAutoRetryNote.tsx#L18) —— 「下一次自动重试 01:23 · 已尝试 2 次 · <上次结果>」那一行，见 [FR-50](requirements.md#功能需求)）、[BiliLoginSection](../frontend/src/bilibili/BiliLoginSection.tsx#L35)（设置面板里的体检 / 扫码 / 导入 / 修复工具）。硬限数字与状态文案全部来自服务端，前端只负责显示成 `12/80` 与选颜色 —— 自己写一份常量迟早出现「界面说没超、提交回来 400」。
 
 辅助说明统一走 [HelpPopover](../frontend/src/shared/ui/HelpPopover.tsx#L42)：它是**非模态浮层**，默认收起；桌面端悬停即看、点击钉住，窄屏（`≤640px`）渲染为贴底抽屉。三条实现约定值得单独记住：
 

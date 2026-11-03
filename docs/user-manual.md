@@ -54,7 +54,7 @@ YouTube Downloader 是本机单用户工具。前端提供链接解析、下载�
 
 ## 下载选项
 
-下载选项的数据结构由 [DownloadOptions](../backend/app/contracts/schemas.py#L113) 定义，前端对应类型见 [types.ts](../frontend/src/contracts/types.ts#L43)。
+下载选项的数据结构由 [DownloadOptions](../backend/app/contracts/schemas.py#L117) 定义，前端对应类型见 [types.ts](../frontend/src/contracts/types.ts#L43)。
 
 | 选项 | 行为 |
 | --- | --- |
@@ -94,7 +94,7 @@ YouTube Downloader 是本机单用户工具。前端提供链接解析、下载�
 
 ## 任务中心
 
-任务中心展示任务级和子视频级状态。后端 API 返回的字段见 [JobRead](../backend/app/contracts/schemas.py#L199) 和 [JobItemRead](../backend/app/contracts/schemas.py#L160)，前端展示组件见 [JobQueue](../frontend/src/task-center/JobQueue.tsx#L24)。
+任务中心展示任务级和子视频级状态。后端 API 返回的字段见 [JobRead](../backend/app/contracts/schemas.py#L203) 和 [JobItemRead](../backend/app/contracts/schemas.py#L164)，前端展示组件见 [JobQueue](../frontend/src/task-center/JobQueue.tsx#L24)。
 Playlist 展开后会用浅色分组背景承载子视频列表，便于区分合集任务行和单个视频任务。
 
 | 信息 | 说明 |
@@ -255,8 +255,26 @@ B站 有一条**没写在文档里**的限制：视频**文件名**（不含扩�
 - **新投的稿件多半还在审核/转码，这时字幕会先挂不上。** B站 要等稿件可访问才给出分P编号，
   字幕正是挂在分P上的。遇到这种情形，字幕那一行会写「平台还没给出分P编号」并出现
   **「重传字幕」**按钮：等审核过了（几分钟到几小时不等）再点一次即可，**同样不会重投视频**。
+- **你也可以什么都不做**：应用会自己隔一段时间问一次平台，审核一通过就把字幕补上。
+  字幕那一行会显示「下一次自动重试 01:23 · 已尝试 2 次 · 平台还没给出分P编号」——
+  倒计时是**真的会走**的（按秒），到点后它会自己去问一次。
+  **「重传字幕」按钮一直都在**，想现在就试一下随时可以点；你手动成功之后，自动重试就收工了。
 
 只有中文和英文字幕会被下载和上传，其它语种一律忽略。
+
+### 自动重试（设置里可调）
+
+设置面板里有一项 **「B站 自动重试」**：
+
+| 项 | 默认 | 说明 |
+| --- | --- | --- |
+| 开关 | 开 | 关掉后应用不再自己问平台，只在你点按钮时动。 |
+| 间隔（秒） | 60 | 问一次之后等这么久再问。失败会按倍数往后延（2 倍、4 倍…最多 16 倍）。 |
+| 上限（次） | 12 | 试够这么多次就停下来，把手动按钮交回给你（不会一直刷平台）。 |
+
+三个旋钮**改完立刻生效**，不用重启后端。它们的默认值也可以用环境变量定：
+`YTDL_BILI_AUTO_RETRY_ENABLED` / `YTDL_BILI_AUTO_RETRY_INTERVAL_SECONDS` /
+`YTDL_BILI_AUTO_RETRY_MAX_ATTEMPTS`。
 
 ### 整个合集
 
@@ -297,8 +315,11 @@ B站 的稿件列表有几十秒到几分钟的延迟，所以「命令跑完了
 合集那一行是单独记的：稿件都投上去之后，归集这一步失败**不会**把稿件标记成失败。合集行会显示「归集失败」并给一个「重试归集」——重试**只会补加视频，不会重复建合集**。归集成功后显示「已提交归集（B站 需人工审核）」：B站 对合集有人工审核，通过之前可能暂时看不到。
 
 **「等待归集」那一档要等 B站 审核**：稿件刚投上去常常还在审核/转码，平台这时还没给出分P编号，而合集必须
-拿这个编号才能加视频。所以合集行会写「视频还在 B站 排队审核，暂时没法加进合集」。等审核通过后再点一次
-**「重试归集」**：它会**先去平台核对编号**再归集，一次点击就能加进去（不必重新上传，也不会重复建合集）。
+拿这个编号才能加视频。所以合集行会写「视频还在 B站 排队审核，暂时没法加进合集」。
+**应用会自己处理**：它隔一段时间（默认 60 秒）问一次平台，审核一通过就把视频加进合集，
+这一行会显示「下一次自动重试 01:23 · 已尝试 2 次 · 视频还在 B站 排队审核」。
+你也可以自己点一次**「重试归集」**：它会**先去平台核对编号**再归集，一次点击就能加进去
+（不必重新上传，也不会重复建合集）。
 点下去会看到按钮变成「归集中…」，结束后旁边留一个「上次重试 12:34:56」的时间戳 —— 如果视频还没过审，
 合集行本身不会有变化，这两样是「这一下真的跑过」的凭据，页顶还会写一句「这次没有发起归集：……」。
 
@@ -449,7 +470,7 @@ YouTube 把登录态与出口 IP 绑定。导出 cookies 时走代理 A、下载
 
 ## 下载目录与产物
 
-默认下载根目录是 `downloads/`，数据库和 cookies 默认在 `data/`，配置默认值见 [AppSettings](../backend/app/contracts/config.py#L19)。Playlist 会在下载根目录下创建同名子文件夹；目录选择和保存逻辑见 [select_download_dir](../backend/app/api/routers/settings.py#L84)。
+默认下载根目录是 `downloads/`，数据库和 cookies 默认在 `data/`，配置默认值见 [AppSettings](../backend/app/contracts/config.py#L19)。Playlist 会在下载根目录下创建同名子文件夹；目录选择和保存逻辑见 [select_download_dir](../backend/app/api/routers/settings.py#L99)。
 
 产物命名模板固定为 `<标题(最多200字节)> [<YouTube id>].<扩展名>`，见 [build_download_options](../backend/app/download/ytdlp_service.py#L496)。因此即使数据库里的 `output_path` 丢失，后端仍能按文件名中的 id 找回同名视频与 sidecar。
 

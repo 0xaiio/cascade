@@ -1806,6 +1806,33 @@ th {
   font-variant-numeric: tabular-nums;
 }
 
+/* 「下一次自动重试 01:23 · 已尝试 2 次 · 还在审核」——
+   它与手动按钮**并排**（同一件事的两条路），所以字重比正文轻一点，
+   但颜色要能一眼看见（它在回答「机器在等什么」）。等宽数字：秒数跳动时右边缘不抖。 */
+.bili-auto-retry {
+  color: #475569;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 「已自动归集」：成了一件正事，颜色偏绿。 */
+.bili-auto-retry.is-done {
+  color: #15803d;
+  font-weight: 600;
+}
+
+/* 「试够了，先停在这里」：不是失败，但也不是成功 —— 琥珀色，与「失败」的红区分开。 */
+.bili-auto-retry.is-stopped {
+  color: #b45309;
+}
+
+/* 设置面板里每个旋钮下面那一句说明。 */
+.field-hint {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .bili-warn-icon {
   flex: 0 0 auto;
   color: #b45309;

@@ -77,6 +77,8 @@ SCHEMA_PAIRS: dict[str, str | None] = {
     "BiliPrefill": "BiliPrefillRead",
     "BiliUpload": "BiliUploadRead",
     "BiliSeason": "BiliSeasonRead",
+    # 自动重试的状态（等平台放行）。它是 `BiliUploadRead` / `BiliSeasonRead` 里的一个嵌套对象。
+    "BiliAutoRetry": "BiliAutoRetryRead",
     "BiliJobUploads": "BiliJobUploadsRead",
     "BiliJobUploadsSummary": "BiliJobUploadsSummaryRead",
     "BiliRetry": "BiliRetryRead",

@@ -1,4 +1,6 @@
-from datetime import UTC, datetime
+from datetime import datetime
+
+from ..common.time import as_aware_utc
 from pathlib import Path
 
 from sqlmodel import Session, select
@@ -173,7 +175,6 @@ def elapsed_seconds(started_at: datetime | None, finished_at: datetime | None) -
     return max(0, int((finish - start).total_seconds()))
 
 
-def _as_aware_utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value.astimezone(UTC)
+# 时间形态的收敛在 `common/time`（naive ⇄ aware）—— 本模块与
+# `contracts/schemas.py`、`bilibili/bili_auto_retry.py` 共用同一个实现。
+_as_aware_utc = as_aware_utc
