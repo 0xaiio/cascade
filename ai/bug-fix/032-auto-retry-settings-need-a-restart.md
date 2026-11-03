@@ -71,6 +71,8 @@ policy.enabled is False  → 实际 True
 | `test_the_scheduler_reads_the_policy_on_every_tick` | 上限 3 → 5 后，试过 2 次的目标继续等而不是 `exhausted` |
 | `test_a_shortened_interval_takes_effect_mid_sleep` | 300 → 5 秒时这一觉只睡 5 秒，且每段 ≤ 1 秒 |
 | `test_starting_twice_keeps_one_loop_and_stop_is_safe` | 重复 `start()` 只有一个循环；未启动时 `stop()` 不炸 |
+| `test_the_settings_endpoint_reaches_the_scheduler` | **端到端**：`PUT /api/settings` 一场调用之后，调度器读到新值（HTTP → schema → 落库 → manager → 调度器） |
 
-A/B：把两个实现文件还原到修复前，以上 5 条里的 4 条变红
-（`_sleep_one_round` 在旧实现里不存在，属新增 API）。
+A/B：把两个实现文件还原到修复前的 `c891520`，6 条里 **5 条**变红
+（`test_starting_twice...` 是生命周期用例，修复前后都绿；`_sleep_one_round` 在旧实现里不存在，
+属新增 API，所以那条红在 `AttributeError`）。
