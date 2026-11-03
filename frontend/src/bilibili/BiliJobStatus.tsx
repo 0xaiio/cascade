@@ -1,4 +1,4 @@
-import { Fragment, useState } from "react";
+import { useState } from "react";
 import { AlertTriangle, ExternalLink, RotateCcw } from "lucide-react";
 import { jobUploadProgress } from "./biliProgress";
 import { BiliAutoRetryNote } from "./BiliAutoRetryNote";
@@ -9,7 +9,9 @@ import {
   isNotableSubtitle,
   isNotableUpload,
   isRetryableSeason,
-  isRetryableUpload
+  isRetryableUpload,
+  subtitleLineLabel,
+  uploadReviewTitle
 } from "./biliStatus";
 import type { BiliJobUploads } from "../contracts/types";
 import { BiliUploadProgress } from "./BiliUploadProgress";
@@ -19,6 +21,10 @@ import { BiliUploadProgress } from "./BiliUploadProgress";
  *
  * 只在**有话说**的时候渲染一行：稿件的失败原因 + 服务端给的下一步，以及合集归集的结论。
  * 没有记录、也没有任何要点开的东西时，这里什么都不显示 —— 任务卡片已经很密，不堆装饰。
+ *
+ * **行序按因果排：审核 → 合集 → 字幕。** 稿件过没过审决定了下面两行会不会有变化
+ * （归集要分P编号、字幕要挂分P），所以它在最上面；合集之所以等着，正是因为审核没过。
+ * 原先合集在最上面，读起来是「果 → 因」。
  *
  * 两个刻意的做法：
  *
@@ -38,6 +44,11 @@ import { BiliUploadProgress } from "./BiliUploadProgress";
  * `top = -1115px`）。于是这个按钮在用户眼里是死的。这里补两件可观察的东西：
  * 点击过程中的「归集中…」+ 禁用态，和结束后的「上次重试 HH:MM:SS」落款。
  * 见 ai/ui/007。
+ *
+ * 第五条：**每行只留一句结论**。合集那行原来是 `status_text + error + advice` 三句
+ * （「等待归集」＋「视频还在 B站 排队审核，暂时没法加进合集」＋「等 B站 审核通过后点……」），
+ * 三句说的是同一件事，而任务卡片里还有别的行要读。文案的判据收在 `biliStatus.ts` 的
+ * `uploadReviewTitle` / `subtitleLineTitle` 里（纯函数，可单测）。
  */
 export function BiliJobStatus({
   uploads,
@@ -80,11 +91,59 @@ export function BiliJobStatus({
   return (
     <div className="bili-job-status">
       {waiting && <BiliUploadProgress uploads={uploads.uploads} />}
+      {/* ---------------------------------------------------------------- 审核：最上方
+          一行的信息量按「用户此刻要判断的事」排：先说这条稿子过没过审（它决定下面两行
+          会不会有变化），再说合集，最后说字幕。原先合集在最上面，而合集之所以等着，
+          恰恰是因为稿件还在审核 —— 因果关系是反的。 */}
+      {notable.map((upload) => {
+        // 先取出这个值：它在下面的闭包里要用，而对象属性的窄化**不会**穿过闭包 ——
+        // 于是只能写成 `upload.video_url as string` 这种把类型系统关掉的写法。
+        const videoUrl = upload.video_url;
+        return (
+          <div
+            key={upload.id}
+            className={`bili-status-line ${isBadUpload(upload.status) ? "is-bad" : ""}`}
+          >
+            <span className="bili-status-label">{uploadReviewTitle(upload)}</span>
+            {videoUrl && (
+              <button
+                className="bili-link"
+                type="button"
+                onClick={() => onOpenVideoPage(videoUrl)}
+                aria-label={`在 B 站打开 ${upload.title}`}
+              >
+                <ExternalLink size={14} />
+                在 B 站查看
+              </button>
+            )}
+            {upload.error && <span className="bili-status-detail">{upload.error}</span>}
+            {upload.advice && <span className="bili-status-advice">{upload.advice}</span>}
+            {isRetryableUpload(upload.status) && (
+              <button className="ghost-button bili-retry" type="button" onClick={() => onRetryUpload(upload.id)}>
+                <RotateCcw size={15} />
+                {upload.status === "unverified" ? "重新核对" : "重试"}
+              </button>
+            )}
+            {upload.status === "unverified" && <AlertTriangle size={14} className="bili-warn-icon" />}
+          </div>
+        );
+      })}
+      {/* ---------------------------------------------------------------- 合集：中间 */}
       {season && (
         <div className={`bili-status-line ${isBadSeason(season.status) ? "is-bad" : ""}`}>
-          <span className="bili-status-label">合集：{season.status_text}</span>
-          {season.error && <span className="bili-status-detail">{season.error}</span>}
-          {season.advice && <span className="bili-status-advice">{season.advice}</span>}
+          <span className="bili-status-label">
+            {/* `pending` 不再拼 `status_text + error + advice` 三句：它们说的是同一件事
+                （平台还没给分P编号），而这一行只需要回答「为什么还没归集」。 */}
+            {season.status === "pending"
+              ? "合集：等待 B 站视频审核后进行归集"
+              : `合集：${season.status_text}`}
+          </span>
+          {season.status !== "pending" && season.error && (
+            <span className="bili-status-detail">{season.error}</span>
+          )}
+          {season.status !== "pending" && season.advice && (
+            <span className="bili-status-advice">{season.advice}</span>
+          )}
           {isRetryableSeason(season.status) && (
             <>
               <button
@@ -104,67 +163,36 @@ export function BiliJobStatus({
           )}
         </div>
       )}
+      {/* ---------------------------------------------------------------- 字幕：最下方
+          字幕与稿件**分开说**：一条 `published` 的稿件可以同时是字幕 `failed`，
+          挤进上面那行会让「已发布」和「字幕失败」看起来互相矛盾。
+          放在最后是因为它最不重要 —— 视频已经在平台上可看了，缺字幕是收尾工作。 */}
       {notable.map((upload) => {
-        // 先取出这个值：它在下面的闭包里要用，而对象属性的窄化**不会**穿过闭包 ——
-        // 于是只能写成 `upload.video_url as string` 这种把类型系统关掉的写法。
-        const videoUrl = upload.video_url;
-        // 字幕这一行只在**有话要说**时出现（`posted` / `failed`）。`skipped` 是「这个视频
-        // 本来就没字幕」，投稿表单里已经写过「无字幕」，每行再写一遍只会把任务卡片塞满。
         const subtitleNotable = isNotableSubtitle(upload.subtitle_state) && Boolean(upload.subtitle_message);
+        if (!subtitleNotable) return null;
         const subtitleBad = isBadSubtitle(upload.subtitle_state);
         return (
-          // 用 Fragment 而不是包一层 div：`.bili-job-status` 是 `display: grid` + `gap`，
-          // 多包一层就把「一行一个网格项」的节奏打断，行距会变成两层叠加。
-          <Fragment key={upload.id}>
-            <div className={`bili-status-line ${isBadUpload(upload.status) ? "is-bad" : ""}`}>
-              <span className="bili-status-label">
-                {upload.index}. {upload.title} · {upload.status_text}
-              </span>
-              {videoUrl && (
-                <button
-                  className="bili-link"
-                  type="button"
-                  onClick={() => onOpenVideoPage(videoUrl)}
-                  aria-label={`在 B 站打开 ${upload.title}`}
-                >
-                  <ExternalLink size={14} />
-                  在 B 站查看
-                </button>
-              )}
-              {upload.error && <span className="bili-status-detail">{upload.error}</span>}
-              {upload.advice && <span className="bili-status-advice">{upload.advice}</span>}
-              {isRetryableUpload(upload.status) && (
-                <button className="ghost-button bili-retry" type="button" onClick={() => onRetryUpload(upload.id)}>
-                  <RotateCcw size={15} />
-                  {upload.status === "unverified" ? "重新核对" : "重试"}
-                </button>
-              )}
-              {upload.status === "unverified" && <AlertTriangle size={14} className="bili-warn-icon" />}
-            </div>
-            {subtitleNotable && (
-              // 字幕与稿件**分两行说**：一条 `published` 的稿件可以同时是字幕 `failed`，
-              // 挤进上面那行会让「已上传」和「字幕失败」看起来互相矛盾。
-              <div className={`bili-status-line bili-subtitle-line ${subtitleBad ? "is-bad" : ""}`}>
-                {subtitleBad && <AlertTriangle size={14} className="bili-warn-icon" />}
-                <span className="bili-status-label">CC 字幕</span>
-                <span className="bili-status-detail">{upload.subtitle_message}</span>
-                {subtitleBad && (
-                  // 复用同一个重试入口：服务端看到「已发布 + 字幕失败」只会重传字幕，
-                  // **不会再投一遍视频**（见 `bili_manager.retry_upload`）。
-                  <button
-                    className="ghost-button bili-retry"
-                    type="button"
-                    onClick={() => onRetryUpload(upload.id)}
-                    aria-label={`重新上传字幕 ${upload.title}`}
-                  >
-                    <RotateCcw size={15} />
-                    重传字幕
-                  </button>
-                )}
-                <BiliAutoRetryNote retry={upload.auto_retry} />
-              </div>
+          <div
+            key={upload.id}
+            className={`bili-status-line bili-subtitle-line ${subtitleBad ? "is-bad" : ""}`}
+          >
+            {subtitleBad && <AlertTriangle size={14} className="bili-warn-icon" />}
+            <span className="bili-status-label">{subtitleLineLabel(upload)}</span>
+            {subtitleBad && (
+              // 复用同一个重试入口：服务端看到「已发布 + 字幕失败」只会重传字幕，
+              // **不会再投一遍视频**（见 `bili_manager.retry_upload`）。
+              <button
+                className="ghost-button bili-retry"
+                type="button"
+                onClick={() => onRetryUpload(upload.id)}
+                aria-label={`重新上传字幕 ${upload.title}`}
+              >
+                <RotateCcw size={15} />
+                重传字幕
+              </button>
             )}
-          </Fragment>
+            <BiliAutoRetryNote retry={upload.auto_retry} />
+          </div>
         );
       })}
     </div>

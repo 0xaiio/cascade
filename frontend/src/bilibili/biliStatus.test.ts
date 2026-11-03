@@ -18,6 +18,8 @@ import {
   isRetryableSeason,
   isRetryableUpload,
   retryableUploadIds,
+  subtitleLineLabel,
+  uploadReviewTitle,
   uploadedTargetUrl
 } from "./biliStatus";
 import type { BiliSeasonStatus, BiliSubtitleState, BiliUploadStatus } from "../contracts/types";
@@ -209,5 +211,64 @@ describe("CC 字幕的两档判据与稿件状态无关", () => {
 
   test("posted 与 failed 都要说一句，skipped 不必（表单里已经写过「无字幕」）", () => {
     expect(ALL_SUBTITLE_STATES.filter(isNotableSubtitle)).toEqual(["posted", "failed"]);
+  });
+});
+
+
+describe("状态提示区的两句文案（审阅顺序变了之后）", () => {
+  test("审核那一行：审核中不带状态词，其余状态带上", () => {
+    const base = { title: "Ep 180 - Whitespace Is Meaningless", status_text: "审核中" };
+    // 前缀已经是「审核：」，再跟一个「审核中」是同一句话说了两遍。
+    expect(uploadReviewTitle({ ...base, status: "reviewing" })).toBe(
+      "审核：Ep 180 - Whitespace Is Meaningless"
+    );
+    // 已发布之后仍要说「已发布」—— 那时用户要看的是「到底发出去没有」。
+    expect(uploadReviewTitle({ ...base, status: "published", status_text: "已发布" })).toBe(
+      "审核：Ep 180 - Whitespace Is Meaningless · 已发布"
+    );
+    // 失败必须说出来，不能被「审核」这个前缀盖掉。
+    expect(uploadReviewTitle({ ...base, status: "failed", status_text: "上传失败" })).toContain(
+      "上传失败"
+    );
+  });
+
+  test("字幕那一行：审核中写「等待视频编号」，已发布则说真正的原因", () => {
+    const message = "稿件已提交（reviewing），但平台还没给出分P编号，字幕暂时传不了";
+    expect(
+      subtitleLineLabel({ status: "reviewing", subtitle_state: "failed", subtitle_message: message })
+    ).toBe("字幕：等待视频编号");
+
+    // 已发布 ⇒ 平台必然给了编号，这时的失败是真问题，说成「等待」会让人一直等下去。
+    expect(
+      subtitleLineLabel({
+        status: "published",
+        subtitle_state: "failed",
+        subtitle_message: "字幕接口拒绝了：lan=zh-CN 不在白名单（79011）"
+      })
+    ).toBe("字幕接口拒绝了：lan=zh-CN 不在白名单（79011）");  // 自己已经以「字幕」开头，不再加前缀
+    expect(
+      subtitleLineLabel({
+        status: "published",
+        subtitle_state: "failed",
+        subtitle_message: "字幕接口拒绝了：lan=zh-CN 不在白名单（79011）"
+      })
+    ).not.toContain("等待视频编号");
+  });
+
+  test("字幕那一行：前缀只加一次（服务端两种写法都不重复）", () => {
+    expect(
+      subtitleLineLabel({
+        status: "published",
+        subtitle_state: "posted",
+        subtitle_message: "CC 字幕已上传（英文），观众可在播放器里开关"
+      })
+    ).toBe("字幕：已上传（英文），观众可在播放器里开关");
+    expect(
+      subtitleLineLabel({
+        status: "published",
+        subtitle_state: "failed",
+        subtitle_message: "字幕转换失败：SRT 里没有可用条目"
+      })
+    ).toBe("字幕转换失败：SRT 里没有可用条目");
   });
 });

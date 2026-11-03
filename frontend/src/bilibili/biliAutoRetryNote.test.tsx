@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { BiliAutoRetryNote, formatCountdown } from "./BiliAutoRetryNote";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import type { BiliAutoRetry } from "../contracts/types";
 
 // 本仓库的 vitest 没开 `globals`，所以 RTL 不会自动注册 `afterEach(cleanup)` ——
@@ -26,7 +26,9 @@ function retry(overrides: Partial<BiliAutoRetry> = {}): BiliAutoRetry {
 }
 
 describe("自动重试的倒计时", () => {
-  test("等待中：说清下一次什么时候、试过几次、上次的结果", () => {
+  test("等待中：只剩精确倒计时与已尝试次数，不再重复上次那句话", () => {
+    // `last_message` 与上面那一行说的是同一件事（「合集：等待 B 站视频审核后进行归集」），
+    // 拼在一起等于把刚精简掉的长句加回来 —— 这一行只回答「还有多久」。
     render(
       <BiliAutoRetryNote
         retry={retry({
@@ -38,9 +40,32 @@ describe("自动重试的倒计时", () => {
       />
     );
 
-    expect(screen.getByText(/下一次自动重试/)).toBeInTheDocument();
+    expect(screen.getByText(/下一次自动重试 [0-9]{2}:[0-9]{2}/)).toBeInTheDocument();
     expect(screen.getByText(/已尝试 2 次/)).toBeInTheDocument();
-    expect(screen.getByText(/排队审核/)).toBeInTheDocument();
+    expect(screen.queryByText(/排队审核/)).not.toBeInTheDocument();
+  });
+
+  test("倒计时每秒真的在减（不是一句静态文字）", () => {
+    // 判据是**两次采样之间变小了**。一个不动的倒计时和「卡住」在界面上长得一模一样，
+    // 而这一行恰恰是用户判断「机器还在不在跑」的唯一依据。
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-03T12:00:00Z"));
+    try {
+      render(<BiliAutoRetryNote retry={retry({ next_attempt_at: "2026-11-03T12:02:05Z" })} />);
+      expect(screen.getByText(/下一次自动重试 02:05/)).toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(screen.getByText(/下一次自动重试 02:04/)).toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(5000);
+      });
+      expect(screen.getByText(/下一次自动重试 01:59/)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("没有在等（null）时什么都不显示 —— 不显示比显示成「等待中」更安静", () => {
@@ -78,19 +103,28 @@ describe("自动重试的倒计时", () => {
 });
 
 describe("倒计时的格式", () => {
-  test("不到一分钟写「不到 1 分钟」，而不是 00:00", () => {
-    // 一个显示 `00:00` 的倒计时看着像「卡住了」。
-    expect(formatCountdown(0)).toBe("不到 1 分钟");
-    expect(formatCountdown(59)).toBe("不到 1 分钟");
+  test("不到一分钟也写 mm:ss —— 「不到 1 分钟」看不出还剩多久", () => {
+    // 原来这一档写「不到 1 分钟」：59 秒里显示同一句话，分不清机器在走还是停了。
+    expect(formatCountdown(0)).toBe("00:00");
+    expect(formatCountdown(1)).toBe("00:01");
+    expect(formatCountdown(35)).toBe("00:35");
+    expect(formatCountdown(59)).toBe("00:59");
   });
 
-  test("分钟与秒都用两位", () => {
+  test("分钟与秒都补两位（02:00 = 还剩两分钟）", () => {
     expect(formatCountdown(60)).toBe("01:00");
+    expect(formatCountdown(120)).toBe("02:00");
     expect(formatCheck(125)).toBe("02:05");
   });
 
-  test("超过一小时带上时位", () => {
+  test("超过一小时带上时位（`80:00` 看不出是八十分钟还是八十分钟零几秒）", () => {
     expect(formatCheck(3725)).toBe("1:02:05");
+  });
+
+  test("小数秒向上取整：显示值单调递减，且**到点才归零**", () => {
+    // `round` 会在 34.5 秒附近来回跳（35 → 34 → 35），看着像机器在犹豫。
+    expect(Math.ceil(34.2)).toBe(35);
+    expect(Math.ceil(0.4)).toBe(1);
   });
 });
 

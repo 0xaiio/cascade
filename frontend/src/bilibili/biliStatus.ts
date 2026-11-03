@@ -164,3 +164,43 @@ export function isNotableUpload(upload: {
 }): boolean {
   return Boolean(upload.error || upload.video_url || isBadSubtitle(upload.subtitle_state));
 }
+
+/**
+ * 审核那一行的标题：`审核：<标题>`（审核中）/ `审核：<标题> · 已发布`（其余状态）。
+ *
+ * **「审核中」这三个字不再写出来**：这一行的前缀就是「审核：」，后面再跟一个「审核中」
+ * 是同一句话说了两遍。已发布之后仍要带上状态词 —— 那时「审核：」只是一个行标，
+ * 用户真正要看的是「到底发没发出去」。
+ */
+export function uploadReviewTitle(upload: {
+  title: string;
+  status: BiliUploadStatus;
+  status_text: string;
+}): string {
+  const head = `审核：${upload.title}`;
+  return upload.status === "reviewing" ? head : `${head} · ${upload.status_text}`;
+}
+
+/**
+ * 字幕那一行的**整句**：`字幕：等待视频编号` / `字幕：已上传（英文）…` / 服务端给的原因。
+ *
+ * 「等待视频编号」是**结构性判断**，不是文案匹配：字幕挂在分P上，而分P编号（`cid`）
+ * 要等平台审核给了才有 —— 所以「字幕失败 + 稿件还没发布」就是这件事。
+ * 稿件一旦发布，平台必然已经给了编号，那时的字幕失败是真的出了问题，要原样说出来。
+ *
+ * 前缀只加一次：服务端的句子有的以「CC 字幕」开头（`CC 字幕已上传（英文）…`），
+ * 有的以「字幕」开头（`字幕转换失败：…`）。无脑加「字幕：」会得到「字幕：字幕转换失败」。
+ */
+export function subtitleLineLabel(upload: {
+  status: BiliUploadStatus;
+  subtitle_state: BiliSubtitleState;
+  subtitle_message: string;
+}): string {
+  if (isBadSubtitle(upload.subtitle_state) && upload.status !== "published") {
+    return "字幕：等待视频编号";
+  }
+  const detail = upload.subtitle_message.replace(/^CC\s*字幕[，,：:\s]*/, "").trim();
+  if (!detail) return isBadSubtitle(upload.subtitle_state) ? "字幕：没能传上去" : "字幕：已上传";
+  // 句子自己已经以「字幕」开头 ⇒ 不再加前缀（`字幕转换失败：…`）。
+  return detail.startsWith("字幕") ? detail : `字幕：${detail}`;
+}

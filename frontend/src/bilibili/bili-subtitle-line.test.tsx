@@ -41,7 +41,7 @@ function renderStatus(upload: BiliUpload) {
   return { onRetryUpload, container };
 }
 
-describe("B站 上传明细 · CC 字幕那一行", () => {
+describe("B站 上传明细 · 字幕那一行", () => {
   test("字幕传好了：显示一句结论，不给重传按钮", () => {
     renderStatus({
       ...biliUploadPayload,
@@ -50,23 +50,44 @@ describe("B站 上传明细 · CC 字幕那一行", () => {
       subtitle_message: "CC 字幕已上传（英文），观众可在播放器里开关"
     });
 
-    expect(screen.getByText("CC 字幕")).toBeInTheDocument();
-    expect(screen.getByText(/CC 字幕已上传（英文）/)).toBeInTheDocument();
+    // 前缀只加一次：服务端那句本来就以「CC 字幕」开头，去掉后接上「字幕：」。
+    expect(screen.getByText("字幕：已上传（英文），观众可在播放器里开关")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /重新上传字幕/ })).not.toBeInTheDocument();
   });
 
-  test("字幕失败：带警告并给「重传字幕」，点了打到这一条", async () => {
+  test("审核中的字幕失败：只写「等待视频编号」，并给「重传字幕」", async () => {
     const user = userEvent.setup();
     const { onRetryUpload } = renderStatus({
       ...biliUploadPayload,
+      status: "reviewing",
+      status_text: "审核中",
       subtitle_state: "failed",
-      subtitle_message: "稿件已提交（reviewing），但平台还没给出分P编号，字幕暂时传不了"
+      subtitle_message:
+        "稿件已提交（reviewing），但平台还没给出分P编号，字幕暂时传不了；" +
+        "稍后在字幕这一行点「重传字幕」，只会补传字幕、不会重投视频"
     });
 
-    expect(screen.getByText("CC 字幕")).toBeInTheDocument();
+    // 那一长句是三件事拼起来的（现状 + 为什么 + 怎么办），而这一行只需要最后一句。
+    expect(screen.getByText("字幕：等待视频编号")).toBeInTheDocument();
+    expect(screen.queryByText(/不会重投视频/)).not.toBeInTheDocument();
     const retry = screen.getByRole("button", { name: `重新上传字幕 ${biliUploadPayload.title}` });
     await user.click(retry);
     expect(onRetryUpload).toHaveBeenCalledWith(biliUploadPayload.id);
+  });
+
+  test("已发布却字幕失败：**不能**说「等待视频编号」，要把真正的原因说出来", async () => {
+    // 已发布 ⇒ 平台必然已经给了分P编号，这时的字幕失败是真问题（语种被拒 / 字幕被人删了）。
+    // 说成「等待视频编号」会让用户一直等一个永远不会来的东西。
+    renderStatus({
+      ...biliUploadPayload,
+      status: "published",
+      status_text: "已发布",
+      subtitle_state: "failed",
+      subtitle_message: "字幕接口拒绝了：lan=zh-CN 不在白名单里（79011）"
+    });
+
+    expect(screen.queryByText(/等待视频编号/)).not.toBeInTheDocument();
+    expect(screen.getByText(/79011/)).toBeInTheDocument();
   });
 
   test("本来就没有字幕：不画这一行", () => {
@@ -79,7 +100,7 @@ describe("B站 上传明细 · CC 字幕那一行", () => {
       />
     );
 
-    expect(screen.queryByText("CC 字幕")).not.toBeInTheDocument();
+    expect(screen.queryByText(/^字幕：/)).not.toBeInTheDocument();
     expect(container.querySelectorAll(".bili-subtitle-line")).toHaveLength(0);
   });
 
