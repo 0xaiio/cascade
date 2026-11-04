@@ -49,6 +49,20 @@
 
 估值刻意**不用时长折算码率**：那是猜，会把一条提示伪装成预估。安全余量固定 512 MiB，判据是合并、字幕、缩略图与元数据都要占地方，以及文件系统接近写满时的写放大。
 
+### 重启与「断点续传」的三个来源（E-03）
+
+界面上只有一个「重启」按钮，但代码里有三条不同的重新入队路径，**不要把它们写成同一件事**：
+
+| 触发 | 入口 | 落库 | 事件 |
+| --- | --- | --- | --- |
+| 用户点任务/条目/批量重启 | `JobManager.restart` / `restart_item` | 状态与进度字段全部重置（见下表），任务级 `options_json` 保留 | `job_restarted` / `item_restarted` |
+| 改限速 / 重试次数 | `set_runtime_download_defaults` → `_runtime_restart_items` | 只把在跑的 item 置回 `queued`，**不清产物路径** | `item_requeued`（`reason=runtime_download_options_changed`） |
+| 进程启动时的孤儿恢复 | `recover_orphaned_work` | 收敛上次残留的 `queued`/`running`；`paused` 不动 | `jobs_recovered` |
+
+`restart` 重置的字段：job 的 `status/progress/speed/eta/completed_items/failed_items/current_item_title/error/started_at/finished_at`，item 的 `status/progress/downloaded_bytes/total_bytes/speed/eta/output_path/actual_*/options_json/降级三列/error/started_at/finished_at`。**不重置**任务级 `options_json`（清晰度沿用）、`JobEvent` 历史，也**完全不碰磁盘** —— `.part` 由 `build_download_options` 里的 `continuedl: True` 在下一次 yt-dlp 运行时续传，界面进度从 0 起跳再由首个进度回调纠正。
+
+条目重新入队后会重新走 [`prepare_download`](#下载前预检测)，因此计划分辨率、格式、大小与字幕计划都会重算。`item_restart` 只重置那一条并用 `_refresh_job_counts` 重算任务计数，其它条目的状态与 `output_path` 保持原样。行为判据逐条钉在 `backend/tests/test_restart_semantics.py`，界面文案由 [`restartSemantics.ts`](../frontend/src/task-center/restartSemantics.ts) 一处生成。
+
 ## 字幕来源与格式
 
 默认 `DownloadOptions` 使用 `resolution="1440p"`、`subtitle_source="both"`、`subtitle_format="best"`。当用户选择“两者都要”时，yt-dlp 会同时启用人工字幕和自动字幕；若其中一种不存在，只会写出另一种可用字幕。前端在已解析元数据中发现用户指定的人工/自动字幕来源不可用时，会把提交给后端的 `subtitle_source` fallback 到另一种可用来源，并在下载选项面板显示“来源”和“格式”；若两类字幕都没有，则显示“无字幕”。

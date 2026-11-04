@@ -16,6 +16,7 @@ import { BiliJobStatus } from "../bilibili/BiliJobStatus";
 import { BiliUploadButton } from "../bilibili/BiliUploadButton";
 import { EMPTY_JOB_FILTER, filterJobs, JOB_STATUS_FILTERS } from "./jobFilter";
 import type { JobStatusFilter } from "./jobFilter";
+import { batchRestartHint, itemRestartHint, jobRestartHint, resolutionRestartHint } from "./restartSemantics";
 import { SubtitleOpenButton } from "./SubtitleOpenButton";
 
 type MaybePromise = void | Promise<void>;
@@ -235,7 +236,12 @@ export function JobQueue({
             <Pause size={16} />
             批量暂停
           </button>
-          <button type="button" className="ghost-button" onClick={() => onBatchAction("restart")}>
+          <button
+            type="button"
+            className="ghost-button"
+            title={batchRestartHint()}
+            onClick={() => onBatchAction("restart")}
+          >
             <RotateCcw size={16} />
             批量重启
           </button>
@@ -401,7 +407,13 @@ export function JobQueue({
                   </button>
                 )}
                 {job.status !== "running" && (
-                  <button className="icon-button" type="button" title="重启" aria-label={`重启 ${title}`} onClick={() => onRestart(job.id)}>
+                  <button
+                    className="icon-button"
+                    type="button"
+                    title={jobRestartHint()}
+                    aria-label={`重启 ${title}`}
+                    onClick={() => onRestart(job.id)}
+                  >
                     <RotateCcw size={18} />
                   </button>
                 )}
@@ -463,6 +475,7 @@ export function JobQueue({
                 fallback={job.resolution_fallback}
                 restartLabel={jobRestartLabel}
                 restartAriaLabel={jobRestartLabel ? `${jobRestartLabel} ${title}` : undefined}
+                restartHint={jobRestartResolution ? resolutionRestartHint(jobRestartResolution) : undefined}
                 onRestart={
                   jobRestartResolution
                     ? () => onRestart(job.id, jobRestartResolution)
@@ -588,7 +601,7 @@ export function JobQueue({
                           <button
                             className="icon-button item-action-button"
                             type="button"
-                            title="重启"
+                            title={itemRestartHint()}
                             aria-label={`重启 ${item.title}`}
                             onClick={() => onRestartItem(job.id, item.id)}
                           >
@@ -641,6 +654,7 @@ export function JobQueue({
                         fallback={item.resolution_fallback}
                         restartLabel={itemRestartLabel}
                         restartAriaLabel={itemRestartLabel ? `${itemRestartLabel} ${item.title}` : undefined}
+                        restartHint={itemRestartResolution ? resolutionRestartHint(itemRestartResolution) : undefined}
                         onRestart={
                           itemRestartResolution
                             ? () => onRestartItem(job.id, item.id, itemRestartResolution)
@@ -713,18 +727,26 @@ function ResolutionFallbackNotice({
   fallback,
   restartLabel,
   restartAriaLabel,
+  restartHint,
   onRestart
 }: {
   fallback: ResolutionFallback;
   restartLabel?: string;
   restartAriaLabel?: string;
+  restartHint?: string;
   onRestart?: () => void;
 }) {
   return (
     <div className="resolution-fallback-note">
       <span>{fallback.message}</span>
       {onRestart && restartLabel && restartAriaLabel && (
-        <button className="ghost-button" type="button" aria-label={restartAriaLabel} onClick={onRestart}>
+        <button
+          className="ghost-button"
+          type="button"
+          title={restartHint}
+          aria-label={restartAriaLabel}
+          onClick={onRestart}
+        >
           <RotateCcw size={15} />
           {restartLabel}
         </button>

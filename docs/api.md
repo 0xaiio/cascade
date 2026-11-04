@@ -69,11 +69,11 @@
 | `POST` | `/api/jobs/batch` | 批量暂停、重启或删除。删除时**整批先预检在途投稿**，任一条忙则整批 `409`（不删一半）。 | [`JobBatchActionRequest`](../backend/app/contracts/schemas.py#L161) |
 | `POST` | `/api/jobs/{job_id}/cancel` | 取消任务。 | `JobRead` |
 | `POST` | `/api/jobs/{job_id}/pause` | 暂停任务。 | `JobRead` |
-| `POST` | `/api/jobs/{job_id}/restart` | 重启任务，可覆盖清晰度。 | [`RestartJobRequest`](../backend/app/contracts/schemas.py#L157) |
+| `POST` | `/api/jobs/{job_id}/restart` | 重启任务：任务与全部条目回到 `queued`，清空进度/大小/时间/错误/产物路径/条目级选项，重新入队并**重跑一次预检**；`.part`、成品与事件历史不删。请求体带 `resolution` 才改任务级清晰度（同样走 026 的归一化/拒绝）。语义见 [E-03](../ai/feature/E-03-restart-semantics.md)。 | [`RestartJobRequest`](../backend/app/contracts/schemas.py#L157) |
 | `POST` | `/api/jobs/{job_id}/play` | 播放单视频任务已下载的视频文件。 | `204 No Content` |
 | `POST` | `/api/jobs/{job_id}/open-folder` | 打开单视频任务已下载视频所在文件夹，或打开 playlist 任务文件夹。 | `204 No Content` |
 | `POST` | `/api/jobs/{job_id}/open-subtitle` | 用本机程序打开单视频任务下载到的字幕文件；缺省先请系统的「打开方式」（不可用时自动退回应用自带的对话框），`?mode=default` 才走文件关联。 | 查询参数 `mode`（`chooser` 缺省 / `default`） |
-| `POST` | `/api/jobs/{job_id}/items/{item_id}/restart` | 重启 playlist 中单个子视频，可覆盖清晰度。 | `RestartJobRequest` |
+| `POST` | `/api/jobs/{job_id}/items/{item_id}/restart` | 重启 playlist 中单个子视频：只重置这一条（其它条目不动），任务回 `queued` 且计数重算；带 `resolution` 时只改这一条的选项。事件是 `item_restarted` 而非 `job_restarted`。 | `RestartJobRequest` |
 | `POST` | `/api/jobs/{job_id}/items/{item_id}/play` | 播放 playlist 子视频已下载的视频文件。 | `204 No Content` |
 | `POST` | `/api/jobs/{job_id}/items/{item_id}/open-folder` | 打开 playlist 子视频已下载视频所在文件夹。 | `204 No Content` |
 | `POST` | `/api/jobs/{job_id}/items/{item_id}/open-subtitle` | 用本机程序打开 playlist 子视频下载到的字幕文件；缺省先请系统的「打开方式」（不可用时自动退回应用自带的对话框），`?mode=default` 才走文件关联。 | 查询参数 `mode` |
