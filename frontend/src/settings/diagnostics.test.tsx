@@ -2,7 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test } from "vitest";
 import App from "../App";
-import { diagnosticsWithoutJsRuntime } from "../test/appFixtures";
+import { diagnosticsPayload, diagnosticsWithDrift, diagnosticsWithoutJsRuntime } from "../test/appFixtures";
 import { installAppHarness, mockState } from "../test/appHarness";
 
 installAppHarness();
@@ -28,6 +28,24 @@ describe("App · 自检信息", () => {
     await waitFor(() => {
       expect(mockState.runtimeRefreshCount).toBe(1);
     });
+  });
+
+  test("surfaces a config that the running process has not picked up", async () => {
+    // 库里已经改了、进程还在用旧值 —— 这类故障没有异常也没有日志，诊断是唯一的第一现场。
+    mockState.diagnostics = diagnosticsWithDrift;
+    render(<App />);
+
+    const drift = await screen.findByText(/有 1 项设置的「进程实际值」与库里不同/);
+    expect(drift.textContent).toContain("下载目录：库里 D:/elsewhere，进程用 D:/downloads");
+  });
+
+  test("stays quiet when store and runtime agree", async () => {
+    // 一致时不该出现任何「配置正常」之类的话：那是噪音，还会让人以为它在盯着什么。
+    mockState.diagnostics = diagnosticsPayload;
+    render(<App />);
+
+    expect(await screen.findByText(/日志文件：/)).toBeInTheDocument();
+    expect(screen.queryByText(/进程实际值/)).toBeNull();
   });
 
   test("shows the log file path so users can find the evidence", async () => {

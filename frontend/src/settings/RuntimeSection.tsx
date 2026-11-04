@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, Copy, Loader2, RefreshCw } from "lucide-react";
 import { getDiagnostics, getSettings, refreshRuntimeDiagnostics } from "../shared/api";
 import type { Diagnostics, Settings } from "../contracts/types";
+import { settingsDriftText } from "./settingsDrift";
 
 /**
  * 运行环境自检：JS 运行时（解析 YouTube 的 `n` 参数要它）与本机日志位置。
@@ -64,6 +65,7 @@ export function RuntimeSection({ onSettingsChange }: { onSettingsChange: (settin
     }
   }
 
+  const driftText = settingsDriftText(runtime?.settings_effective);
   const jsRuntimeReady = runtime?.dependencies?.js_runtime === true;
   const jsRuntimeError = typeof runtime?.dependencies?.js_runtime_error === "string" ? runtime.dependencies.js_runtime_error : null;
 
@@ -107,6 +109,8 @@ export function RuntimeSection({ onSettingsChange }: { onSettingsChange: (settin
             <CopyableCommand command={runtime.log_file} label="复制路径" />
           </p>
         )}
+        {/* 只在**真的有差异**时出现：一致的配置不需要一句「一切正常」来占位置。 */}
+        {driftText && <p className="diag-error">{driftText}</p>}
       </div>
       {error && <p className="diag-error">{error}</p>}
     </div>

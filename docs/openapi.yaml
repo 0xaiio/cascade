@@ -2893,6 +2893,31 @@ components:
               reason:
                 type: string
           example: []
+        settings_effective:
+          type: array
+          description: |
+            Per-setting comparison between the value stored in the database and
+            the value this process is actually using. `stored` is null when the
+            key was never saved through the UI (so there is nothing to compare).
+            `differs` reports the fact only - the cause may be another process
+            writing the table, or a component holding a construction-time
+            snapshot (see ai/bug-fix/032 / 035).
+          items:
+            type: object
+            required: [key, runtime, differs]
+            properties:
+              key:
+                type: string
+                example: download_dir
+              stored:
+                type: [string, "null"]
+                example: D://downloads
+              runtime:
+                type: [string, "null"]
+                example: D://code-repo//cascade//downloads
+              differs:
+                type: boolean
+                example: true
 
     JobStatus:
       type: string

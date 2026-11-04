@@ -62,6 +62,7 @@
 | [032](032-auto-retry-settings-need-a-restart.md) | 关掉「自动重试」的开关，机器还在问平台 | `—` | 调度器把策略存成**构造时的快照**（`self.policy = policy`），而 `BiliManager` 传的是 `auto_retry_policy()` 的**返回值**，此后全仓没有更新点 ⇒ 设置接口里那句「改完立刻生效，不用重启」是假的：关掉开关照旧扫、间隔 300→10 要等旧的睡完、上限 3→7 仍判 `exhausted`。修法：策略改成**每轮现取**（可传函数）+ 睡眠按 1 秒切片 + 停机后不再 `tick()` |
 | [033](033-the-response-keeps-counting-after-success.md) | 手动补传字幕成功了，界面还在倒计时 | `—` | 两条路的「收工」都发生在**读模型构造之后**：`_reverify_work` / `_group_work` 先 `read_upload(...)` （此时 `auto_retry=waiting`），`retry_upload` / `retry_season` 才 `_close_auto_retry()` ⇒ 响应说 waiting、库里说 done；而收工也不发事件，被 `*_finished` 叫去刷新的客户端读到的还是旧值。修法：收工后重读一次读模型 + `_close_auto_retry` 补发 `bili_auto_retry_changed` |
 | [034](034-vitest-drops-test-files-when-parallel.md) | 并行跑 vitest 会丢掉整个测试文件，汇总行仍写 passed | `—` | 本机 fs shim 对同一临时路径的并发写回 `EPERM`，vitest 的 module runner `fetch` 失败 ⇒ 该文件的模块取不到、**从未被收集**；三次并行丢的不是同一批（24/255、23 文件、24/212）。只 grep `Tests … passed` 或只看退出码都不可靠 —— 唯一判据是「跑了几个文件」与磁盘对齐。修法：`npm test` 默认 `--no-file-parallelism` + 新增 `npm run test:counts` 核数闸门 |
+| [035](035-diagnostics-shows-the-stored-value.md) | 诊断只回显「库里的值」，看不出进程还在用旧值 | `—` | `/api/diagnostics` 从未读过 `Setting` 表，也没区分「库」与「运行态」⇒ 032 那类故障（无异常、无日志）唯一的现场反而在说「配置是对的」。修法：新增 `settings_effective`，每项给出 `stored` 与 `runtime`（从 `YtDlpService` / 调度器策略上读）+ `differs`；自检只读，设置页仅在真有差异时多一条红字 |
 
 ## 本轮（2026-10-01）背景
 

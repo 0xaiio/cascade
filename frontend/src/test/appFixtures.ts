@@ -255,6 +255,7 @@ export const diagnosticsPayload: Diagnostics = {
   cookies_enabled: true,
   log_file: String.raw`D:\code-repo\cascade\data\logs\app.log`,
   sanitized_environment: [],
+  settings_effective: [],
   dependencies: {
     ffmpeg: true,
     ffprobe: true,
@@ -274,6 +275,14 @@ export const diagnosticsWithoutJsRuntime: Diagnostics = {
     js_runtime_path: null,
     js_runtime_error: String.raw`node C:\Program Files\nodejs\node.exe：以 yt-dlp 相同的权限模型启动失败（returncode=1）：ERR_ACCESS_DENIED`
   }
+};
+
+export const diagnosticsWithDrift: Diagnostics = {
+  ...diagnosticsPayload,
+  settings_effective: [
+    { key: "download_dir", stored: "D:/elsewhere", runtime: "D:/downloads", differs: true },
+    { key: "default_concurrency", stored: null, runtime: "5", differs: false }
+  ]
 };
 
 export const proxyTestFailurePayload: ProxyTestResult = {

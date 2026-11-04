@@ -52,6 +52,7 @@ SCHEMA_PAIRS: dict[str, str | None] = {
     "CookieStatus": "CookieStatus",
     "ProxyTestResult": "ProxyTestRead",
     "Diagnostics": "DiagnosticsRead",
+    "SettingEffective": "SettingEffectiveRead",
     "CookieHealth": "CookieHealthRead",
     # 运行时里 `sanitized_environment` 是 `array of object(str→str)`，没有具名 schema。
     "EnvironmentRisk": None,

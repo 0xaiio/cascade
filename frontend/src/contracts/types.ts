@@ -212,11 +212,21 @@ export interface EnvironmentRisk {
   reason: string;
 }
 
+/** 一个配置项的「库里存的值」与「这个进程实际在用的值」。见 ai/bug-fix/035。 */
+export interface SettingEffective {
+  key: string;
+  stored: string | null;
+  runtime: string | null;
+  /** 两者不同。诊断只报事实：差异的成因可能是别的进程改了库，也可能是某处持有了构造时快照。 */
+  differs: boolean;
+}
+
 export interface Diagnostics {
   cookies_enabled: boolean;
   dependencies: Record<string, boolean | number | string | string[] | null>;
   log_file: string | null;
   sanitized_environment: EnvironmentRisk[];
+  settings_effective: SettingEffective[];
 }
 
 export interface CookieHealth {

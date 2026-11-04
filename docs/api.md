@@ -56,8 +56,8 @@
 | 方法 | 路径 | 用途 | 主要模型 |
 | --- | --- | --- | --- |
 | `GET` | `/health` | 健康检查。 | `dict[str, bool]` |
-| `GET` | `/api/diagnostics` | 依赖和运行状态诊断。 | [`DiagnosticsRead`](../backend/app/contracts/schemas.py#L343) |
-| `POST` | `/api/diagnostics/runtime` | 清掉 JS 运行时探测缓存后重新自检，返回同一份诊断。 | [`DiagnosticsRead`](../backend/app/contracts/schemas.py#L343) |
+| `GET` | `/api/diagnostics` | 依赖和运行状态诊断。 | [`DiagnosticsRead`](../backend/app/contracts/schemas.py#L365) |
+| `POST` | `/api/diagnostics/runtime` | 清掉 JS 运行时探测缓存后重新自检，返回同一份诊断。 | [`DiagnosticsRead`](../backend/app/contracts/schemas.py#L365) |
 | `POST` | `/api/proxy/test` | 检测代理连通性，可临时试一个**未保存**的地址。 | [`ProxyTestRequest`](../backend/app/contracts/schemas.py#L299)、[`ProxyTestRead`](../backend/app/contracts/schemas.py#L304) |
 | `POST` | `/api/cookies/verify` | cookies 体检（离线格式/域名/鉴权项，可联网确认登录态）。 | [`CookieVerifyRequest`](../backend/app/contracts/schemas.py#L317)、[`CookieHealthRead`](../backend/app/contracts/schemas.py#L322) |
 | `POST` | `/api/analyze` | 解析单视频或 playlist。 | [`AnalyzeRequest`](../backend/app/contracts/schemas.py#L75)、[`AnalyzeResponse`](../backend/app/contracts/schemas.py#L104) |
@@ -84,20 +84,20 @@
 | `POST` | `/api/cookies` | 上传 cookies 文件。 | [`CookieStatus`](../backend/app/contracts/schemas.py#L286) |
 | `POST` | `/api/cookies/from-browser` | 从浏览器导入 cookies。 | [`BrowserCookieImportRequest`](../backend/app/contracts/schemas.py#L294) |
 | `DELETE` | `/api/cookies` | 清除本地 cookies。 | `CookieStatus` |
-| `GET` | `/api/bilibili/status` | B站 投稿环境体检（工具 / ffmpeg / 登录态 / 缺项清单 / 分区表 / 硬限）。 | [`BiliStatusRead`](../backend/app/contracts/schemas.py#L394) |
+| `GET` | `/api/bilibili/status` | B站 投稿环境体检（工具 / ffmpeg / 登录态 / 缺项清单 / 分区表 / 硬限）。 | [`BiliStatusRead`](../backend/app/contracts/schemas.py#L418) |
 | `POST` | `/api/bilibili/tools/repair` | 修复 WinGet `Links` 目录下 0 字节的 `biliup.exe` 空壳，然后重新体检。 | `BiliStatusRead` |
-| `POST` | `/api/bilibili/login/qrcode` | 生成扫码登录二维码（返回 **SVG 文本**）。 | [`BiliQrcodeRead`](../backend/app/contracts/schemas.py#L408) |
-| `GET` | `/api/bilibili/login/poll` | 轮询扫码状态；**只有 `confirmed` 才落盘登录态**。 | [`BiliLoginPollRead`](../backend/app/contracts/schemas.py#L417) |
+| `POST` | `/api/bilibili/login/qrcode` | 生成扫码登录二维码（返回 **SVG 文本**）。 | [`BiliQrcodeRead`](../backend/app/contracts/schemas.py#L432) |
+| `GET` | `/api/bilibili/login/poll` | 轮询扫码状态；**只有 `confirmed` 才落盘登录态**。 | [`BiliLoginPollRead`](../backend/app/contracts/schemas.py#L441) |
 | `POST` | `/api/bilibili/cookies` | 导入一份已有的 B站 登录文件（`multipart/form-data`，不校验格式）。 | `BiliStatusRead` |
 | `DELETE` | `/api/bilibili/cookies` | 清除 B站 登录态；幂等，本来没有也返回体检结论。 | `BiliStatusRead` |
-| `GET` | `/api/bilibili/prefill` | 预填上传表单：单视频给一组值，合集给「模板 + 逐条预览 + 超限定位」。 | [`BiliPrefillRead`](../backend/app/contracts/schemas.py#L478) |
-| `GET` | `/api/bilibili/seasons` | 账号下**已存在**的合集，供投稿界面下拉选择。**未登录也返回 200**（空列表 + `error` 说明原因）。 | [`BiliSeasonListRead`](../backend/app/contracts/schemas.py#L544) |
-| `GET` | `/api/bilibili/uploads` | 按任务读回上传状态（任务级徽标 + 条目级明细 + 合集记录）。 | [`BiliJobUploadsRead`](../backend/app/contracts/schemas.py#L649) |
-| `POST` | `/api/bilibili/uploads` | 启动单视频投稿（可选归入某个合集）；返回**整个任务**的上传状态。 | [`BiliUploadCreate`](../backend/app/contracts/schemas.py#L512)、`BiliJobUploadsRead` |
-| `GET` | `/api/bilibili/uploads/summary` | **所有有 B站 记录的任务**的徽标汇总（任务中心每行一个图标，逐个问就是 N 个请求）。 | [`BiliJobUploadsSummaryRead`](../backend/app/contracts/schemas.py#L664) |
-| `POST` | `/api/bilibili/uploads/{upload_id}/retry` | 重试一条稿件；动作按终态三选一。 | [`BiliRetryRead`](../backend/app/contracts/schemas.py#L675) |
-| `POST` | `/api/bilibili/collections` | 启动合集投稿：按模板逐条投稿，全部确认发布后自动归集。 | [`BiliCollectionCreate`](../backend/app/contracts/schemas.py#L553)、`BiliJobUploadsRead` |
-| `POST` | `/api/bilibili/collections/{season_record_id}/group` | 重试合集归集；已有 `season_id` 时只补加视频，不重复建合集。 | [`BiliSeasonRetryRead`](../backend/app/contracts/schemas.py#L682) |
+| `GET` | `/api/bilibili/prefill` | 预填上传表单：单视频给一组值，合集给「模板 + 逐条预览 + 超限定位」。 | [`BiliPrefillRead`](../backend/app/contracts/schemas.py#L502) |
+| `GET` | `/api/bilibili/seasons` | 账号下**已存在**的合集，供投稿界面下拉选择。**未登录也返回 200**（空列表 + `error` 说明原因）。 | [`BiliSeasonListRead`](../backend/app/contracts/schemas.py#L568) |
+| `GET` | `/api/bilibili/uploads` | 按任务读回上传状态（任务级徽标 + 条目级明细 + 合集记录）。 | [`BiliJobUploadsRead`](../backend/app/contracts/schemas.py#L673) |
+| `POST` | `/api/bilibili/uploads` | 启动单视频投稿（可选归入某个合集）；返回**整个任务**的上传状态。 | [`BiliUploadCreate`](../backend/app/contracts/schemas.py#L536)、`BiliJobUploadsRead` |
+| `GET` | `/api/bilibili/uploads/summary` | **所有有 B站 记录的任务**的徽标汇总（任务中心每行一个图标，逐个问就是 N 个请求）。 | [`BiliJobUploadsSummaryRead`](../backend/app/contracts/schemas.py#L688) |
+| `POST` | `/api/bilibili/uploads/{upload_id}/retry` | 重试一条稿件；动作按终态三选一。 | [`BiliRetryRead`](../backend/app/contracts/schemas.py#L699) |
+| `POST` | `/api/bilibili/collections` | 启动合集投稿：按模板逐条投稿，全部确认发布后自动归集。 | [`BiliCollectionCreate`](../backend/app/contracts/schemas.py#L577)、`BiliJobUploadsRead` |
+| `POST` | `/api/bilibili/collections/{season_record_id}/group` | 重试合集归集；已有 `season_id` 时只补加视频，不重复建合集。 | [`BiliSeasonRetryRead`](../backend/app/contracts/schemas.py#L706) |
 
 路由实现集中在 [routers/](../backend/app/api/routers/__init__.py)。`POST /api/jobs` 成功时返回 `201`，其余返回模型或 `204`。B站 那一组统一返回 JSON 读模型（没有 `204`）。
 
@@ -314,7 +314,7 @@ cookies 体检结果。字段分三层：
 
 ### BiliUploadRead 与 BiliJobUploadsRead
 
-前端真正消费的是 [BiliJobUploadsRead](../backend/app/contracts/schemas.py#L649)（任务级读模型）与 [BiliJobUploadsSummaryRead](../backend/app/contracts/schemas.py#L664)（全部任务的徽标汇总）。`uploads` 按条目在任务中的位置排序，对不上任何条目的记录排在最后。
+前端真正消费的是 [BiliJobUploadsRead](../backend/app/contracts/schemas.py#L673)（任务级读模型）与 [BiliJobUploadsSummaryRead](../backend/app/contracts/schemas.py#L688)（全部任务的徽标汇总）。`uploads` 按条目在任务中的位置排序，对不上任何条目的记录排在最后。
 
 条目级 `status` 是后端自己的生命周期，`badge` 是界面用的粗档位：
 
@@ -382,7 +382,7 @@ cookies 体检结果。字段分三层：
 
 ## 诊断字段
 
-`GET /api/diagnostics` 返回 `{"cookies_enabled": bool, "dependencies": {...}, "log_file": str|null, "sanitized_environment": [...]}`，其中 `dependencies` 是 `YtDlpService.get_dependency_status()` 与配置值的合并结果，见 [main.py](../backend/app/api/routers/diagnostics.py#L30)。常见字段：
+`GET /api/diagnostics` 返回 `{"cookies_enabled": bool, "dependencies": {...}, "log_file": str|null, "sanitized_environment": [...]}`，其中 `dependencies` 是 `YtDlpService.get_dependency_status()` 与配置值的合并结果，见 [diagnostics.py](../backend/app/api/routers/diagnostics.py#L30)。`settings_effective` 是**配置的两栏对照**：每一项给出 `stored`（库里的值，`null` = 从未在界面里改过）与 `runtime`（**这个进程实际在用的值**，从 `YtDlpService` / 自动重试调度器的策略上读），`differs` 为真表示两者不同。它只报事实、不承诺「重启就好」：差异可能是别的进程改了库，也可能是某处持有了构造时快照（见 [032](../ai/bug-fix/032-auto-retry-settings-need-a-restart.md) 与 [035](../ai/bug-fix/035-diagnostics-shows-the-stored-value.md)）。常见字段：
 
 - `ffmpeg`、`ffprobe`
 - `yt_dlp_version`

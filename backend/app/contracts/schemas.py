@@ -340,6 +340,28 @@ class CookieHealthRead(BaseModel):
     checked_at: float = 0.0
 
 
+class SettingEffectiveRead(BaseModel):
+    """一个配置项的**两个值**：库里存的，和这个进程实际在用的。
+
+    为什么需要它：`032` 的故障形态是「库里已经是新值、进程仍按旧值跑」—— 没有异常、没有日志，
+    唯一的现场就是诊断接口。而诊断此前只回显「库里的值」，等于把人引向「配置是对的」。
+    见 [ai/bug-fix/035](../../ai/bug-fix/035-diagnostics-shows-the-stored-value.md)。
+
+    **`differs` 只报事实，不承诺「重启就好」**：差异的成因有两种 ——
+    ① 别的进程/手工改了库，本进程还没重新读；② 某处持有了构造时的快照（032 就是这一类）。
+    前者重新加载设置即可，后者必须改代码或重启。诊断能证明的只有「两者不同」。
+    """
+
+    #: 配置键（与 `Setting` 表、`AppSettings` 字段同名）。
+    key: str
+    #: 库里的值。`None` = 从未在界面里改过（当前值来自默认值或环境变量）。
+    stored: str | None = None
+    #: **这个进程实际在用的值**（从 service / 调度器策略等真实持有者读出来）。
+    runtime: str | None = None
+    #: 两者是否不同。`stored is None` 时恒为 `False`（没有可比的库值，不算差异）。
+    differs: bool = False
+
+
 class DiagnosticsRead(BaseModel):
     cookies_enabled: bool
     dependencies: dict[str, bool | int | str | None | list[str]]
@@ -347,6 +369,8 @@ class DiagnosticsRead(BaseModel):
     log_file: str | None = None
     # 启动时被摘掉的、会打坏 JS 运行时的宿主环境变量。
     sanitized_environment: list[dict[str, str]] = Field(default_factory=list)
+    # 配置项的「库里 vs 进程实际」对照。只读，不触发重新加载。
+    settings_effective: list[SettingEffectiveRead] = Field(default_factory=list)
 
 
 # ================================================================ B站 上传
