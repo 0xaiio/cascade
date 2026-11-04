@@ -385,6 +385,9 @@ Thumbs.db
 
 # 2026-05-17 16:46:26 +08:00 - 浏览器 YouTube Cookies 自动导入计划
 
+> **2026-11-04 更新：该能力已整体移除**（应用不再从浏览器读取 cookies），
+> 见 [ai/bug-fix/038](../bug-fix/038-browser-cookie-import-is-gone.md)。以下为当时的计划原文，保留作历史。
+
 ## Summary
 针对 YouTube 返回 `Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies` 的场景，补齐自动通过 yt-dlp 从本机浏览器导入 cookies 的能力。功能入口放在“解析链接”面板，因为 cookies 直接影响单视频和 playlist 的解析与后续下载；playlist 解析失败时也走同一套自动导入与重试逻辑。实现后同步更新 `README.md`，验证通过后提交并 `git push origin main`。
 
@@ -456,6 +459,9 @@ Thumbs.db
 - 如果 metadata 查询也失败，或没有任何低于请求高度的格式，则任务中心显示原始失败原因，不提供 fallback 重启按钮。
 
 # 2026-05-18 +08:00 - Edge Cookies 锁库导入修复计划
+
+> **2026-11-04 更新：该能力已整体移除**（应用不再从浏览器读取 cookies），
+> 见 [ai/bug-fix/038](../bug-fix/038-browser-cookie-import-is-gone.md)。以下为当时的计划原文，保留作历史。
 
 ## Summary
 根因已定位：当前后端直接调用 `yt_dlp.cookies.extract_cookies_from_browser("edge")`，但 Windows 上 Edge 正在运行时会锁定 `Default\Network\Cookies` 数据库，yt-dlp 会抛出 `Could not copy Chrome cookie database`，对应官方问题 yt-dlp/yt-dlp#7271：https://github.com/yt-dlp/yt-dlp/issues/7271。

@@ -382,19 +382,12 @@ paths:
                   ffmpeg: true
                   ffprobe: true
         "400":
-          description: Extraction failed, or the browser cookie import failed.
+          description: Extraction failed. Cookie-required failures carry the
+            export instruction in the message (the app never reads a browser).
           content:
             application/json:
               schema:
-                oneOf:
-                  - $ref: "#/components/schemas/Error"
-                  - $ref: "#/components/schemas/CookieImportError"
-        "409":
-          description: The browser holding the cookies was locked during the automatic import.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/CookieImportError"
+                $ref: "#/components/schemas/Error"
         "422":
           $ref: "#/components/responses/ValidationError"
 
@@ -496,24 +489,15 @@ paths:
                     finished_at: null
                     elapsed_seconds: 0
         "400":
-          description: Metadata extraction failed, the cookie import failed, or no
-            playlist entry was selected.
+          description: Metadata extraction failed, or no playlist entry was selected.
           content:
             application/json:
               schema:
-                oneOf:
-                  - $ref: "#/components/schemas/Error"
-                  - $ref: "#/components/schemas/CookieImportError"
+                $ref: "#/components/schemas/Error"
               examples:
                 noEntries:
                   value:
                     detail: No downloadable playlist entries were selected.
-        "409":
-          description: The browser holding the cookies was locked during the automatic import.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/CookieImportError"
         "422":
           $ref: "#/components/responses/ValidationError"
 
@@ -1174,8 +1158,6 @@ paths:
                 enabled: true
                 filename: cookies.txt
                 source: file
-                browser: null
-                imported_count: null
         "422":
           $ref: "#/components/responses/ValidationError"
     delete:
@@ -1193,71 +1175,6 @@ paths:
                 enabled: false
                 filename: null
                 source: none
-                browser: null
-                imported_count: null
-
-  /api/cookies/from-browser:
-    post:
-      tags: [cookies]
-      operationId: importCookiesFromBrowser
-      summary: Import YouTube cookies from a local browser
-      description: |
-        Tries the requested browser, or the candidate list in order when
-        `browser=auto`. Only youtube.com and google.com cookies are kept. If the
-        browser database is locked, the response is `409` with a structured
-        detail; passing `close_browser_if_locked=true` lets the backend close the
-        browser first (Edge only). A DPAPI decryption failure on Edge triggers a
-        short headless CDP fallback.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/BrowserCookieImportRequest"
-            examples:
-              auto:
-                value:
-                  browser: auto
-                  close_browser_if_locked: false
-              edgeForceClose:
-                value:
-                  browser: edge
-                  close_browser_if_locked: true
-      responses:
-        "200":
-          description: Cookies imported.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/CookieStatus"
-              example:
-                enabled: true
-                filename: cookies.txt
-                source: browser
-                browser: edge
-                imported_count: 37
-        "400":
-          description: Import failed, or no YouTube/Google cookies were found.
-          content:
-            application/json:
-              schema:
-                oneOf:
-                  - $ref: "#/components/schemas/Error"
-                  - $ref: "#/components/schemas/CookieImportError"
-        "409":
-          description: The browser cookie database is locked.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/CookieImportError"
-              example:
-                detail:
-                  code: browser_locked
-                  browser: edge
-                  message: Edge 正在运行，cookies 数据库被锁定。请关闭 Edge 后重试，或确认由应用关闭 Edge 并重新导入。
-                  raw_detail: "failed to open database: Permission denied"
-        "422":
-          $ref: "#/components/responses/ValidationError"
 
   /api/bilibili/status:
     get:
@@ -2662,6 +2579,10 @@ components:
 
     CookieStatus:
       type: object
+      description: |
+        State of the local cookies file. The source is always a file the user
+        produced (browser extension or scripts/export_cookies_via_cdp.py);
+        the app never reads a browser profile.
       required: [enabled]
       properties:
         enabled:
@@ -2671,29 +2592,8 @@ components:
           example: cookies.txt
         source:
           type: string
-          enum: [none, file, browser]
+          enum: [none, file]
           default: none
-        browser:
-          type: [string, "null"]
-          example: edge
-        imported_count:
-          type: [integer, "null"]
-          example: 37
-
-    BrowserCookieImportRequest:
-      type: object
-      properties:
-        browser:
-          type: string
-          default: auto
-          description: One of auto, edge, chrome, firefox, brave, chromium,
-            vivaldi, opera.
-          example: auto
-        close_browser_if_locked:
-          type: boolean
-          default: false
-          description: Let the backend close the browser to release a locked
-            cookie database (Edge only).
 
     ProxyTestRequest:
       type: object
@@ -2939,27 +2839,6 @@ components:
           type: string
       example:
         detail: Job not found.
-
-    CookieImportError:
-      type: object
-      required: [detail]
-      description: Structured detail returned when cookie handling fails.
-      properties:
-        detail:
-          type: object
-          required: [code, browser, message, raw_detail]
-          properties:
-            code:
-              type: string
-              example: browser_locked
-            browser:
-              type: [string, "null"]
-              example: edge
-            message:
-              type: string
-              example: Edge 正在运行，cookies 数据库被锁定。请关闭 Edge 后重试，或确认由应用关闭 Edge 并重新导入。
-            raw_detail:
-              type: [string, "null"]
 
     HttpValidationError:
       type: object

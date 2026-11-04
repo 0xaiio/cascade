@@ -243,13 +243,16 @@ export const settingsPayload: Settings = {
   bili_auto_retry_max_attempts: 3
 };
 
-export const lockedEdgeCookieDetail = {
-  code: "browser_locked",
-  browser: "edge",
-  message: "Edge 正在运行，cookies 数据库被锁定。请关闭 Edge 后重试，或确认由应用关闭 Edge 并重新导入。",
-  raw_detail: "Could not copy Chrome cookie database."
-};
-
+/**
+ * 后端在「需要登录 / bot 校验」时给的文案。
+ *
+ * 本应用**不再从浏览器导入 cookies**，所以这条消息里不会出现「关闭 Edge」之类的动作，
+ * 只有一条可执行的下一步：导出 cookies.txt 再上传（见 ai/bug-fix/038）。
+ */
+export const cookieRequiredMessage =
+  "YouTube 要求登录或通过 bot 校验。本应用只读取你给的 cookies.txt，不会去读浏览器里的 cookies。\n" +
+  "下一步：用浏览器扩展（如 Get cookies.txt LOCALLY）在 youtube.com 页面导出 Netscape 格式的 cookies.txt，" +
+  "再到「解析链接」面板点「选择 cookies」上传。";
 
 export const diagnosticsPayload: Diagnostics = {
   cookies_enabled: true,

@@ -60,7 +60,7 @@ UML 源码位于 [diagrams](diagrams/)，渲染后的 SVG 位于 [assets/diagram
 | [下载生命周期](diagrams/download-lifecycle.puml) | 任务和子视频的状态流转。 |
 | [单视频时序](diagrams/single-video-sequence.puml) | 单视频解析、入队、下载和进度返回流程。 |
 | [Playlist 时序](diagrams/playlist-sequence.puml) | Playlist 选择条目、按并发并行下载子视频和聚合状态。 |
-| [Cookies 流程](diagrams/cookies-flow.puml) | 手动上传、浏览器导入、Edge 锁库和 CDP fallback。 |
+| [Cookies 流程](diagrams/cookies-flow.puml) | 用户导出 cookies.txt → 上传 → 交给 yt-dlp；需要登录时只报一次带下一步的错误（应用不读浏览器）。 |
 | [数据模型](diagrams/data-model.puml) | SQLite 表和 API 读模型之间的关系。 |
 
 ## 更新原则

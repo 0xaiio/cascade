@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 from app.host.proxy import resolve_proxy
 from app.contracts.schemas import AnalyzeResponse, DownloadOptions, FormatOption, SubtitleOption, VideoEntry
-from app.download.ytdlp_service import BrowserCookieImportError, DownloadCancelled
+from app.download.ytdlp_service import DownloadCancelled
 from yt_dlp.utils import DownloadError
 class FakeYtDlpService:
     def __init__(self):
@@ -622,53 +622,25 @@ class UnselectableHighWithoutSafeFallbackService(UnselectableHighWithSafeFallbac
             ffmpeg={"ffmpeg": True, "ffprobe": True},
         )
 
-class BrowserImportYtDlpService(FakeYtDlpService):
-    def __init__(self):
-        super().__init__()
-        self.imports: list[str] = []
+class BotChallengeYtDlpService(FakeYtDlpService):
+    """解析时一律报「需要登录 / bot 校验」，并记录被调了几次、带没带 cookies。
 
-    def import_browser_cookies(self, browser, target_path, close_browser_if_locked=False):
-        self.imports.append(browser)
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        target_path.write_text("SECRET_COOKIE_VALUE", encoding="utf-8")
-        return {
-            "enabled": True,
-            "filename": target_path.name,
-            "source": "browser",
-            "browser": "edge",
-            "imported_count": 4,
-        }
+    这里没有 `import_browser_cookies` 这类接缝了：应用里已经不存在「去读浏览器」的路径，
+    用例要证明的是「只尝试一次」，而不是「换了哪种浏览器」。
+    """
 
-
-class BotChallengeYtDlpService(BrowserImportYtDlpService):
     def __init__(self):
         super().__init__()
         self.extract_calls: list[Path | None] = []
 
     def extract_metadata(self, url, cookies_path=None):
         self.extract_calls.append(cookies_path)
-        if cookies_path is None or not Path(cookies_path).exists():
-            raise RuntimeError("Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies")
-        return super().extract_metadata(url, cookies_path=cookies_path)
+        raise RuntimeError("Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies")
 
 
-class LockedEdgeBrowserImportService(BotChallengeYtDlpService):
-    def import_browser_cookies(self, browser, target_path, close_browser_if_locked=False):
-        self.imports.append((browser, close_browser_if_locked))
-        if not close_browser_if_locked:
-            raise BrowserCookieImportError.browser_locked("edge", "Could not copy Chrome cookie database.")
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        target_path.write_text("SECRET_COOKIE_VALUE", encoding="utf-8")
-        return {
-            "enabled": True,
-            "filename": target_path.name,
-            "source": "browser",
-            "browser": "edge",
-            "imported_count": 4,
-        }
+class DownloadBotChallengeYtDlpService(FakeYtDlpService):
+    """下载时一上来就报 bot 校验，并记录每次尝试带的 cookies 快照。"""
 
-
-class DownloadBotChallengeYtDlpService(BrowserImportYtDlpService):
     def __init__(self):
         super().__init__()
         self.cookie_snapshots: list[str | None] = []
@@ -683,14 +655,11 @@ class DownloadBotChallengeYtDlpService(BrowserImportYtDlpService):
         return None
 
     def download(self, url, options, progress_hook, should_cancel, cookies_path=None, download_dir=None):
-        cookie_snapshot = Path(cookies_path).read_text(encoding="utf-8") if cookies_path else None
-        self.cookie_snapshots.append(cookie_snapshot)
-        if len(self.cookie_snapshots) == 1:
-            raise RuntimeError(
-                "ERROR: [youtube] G9MxNwUoSt0: Sign in to confirm you’re not a bot. "
-                "Use --cookies-from-browser or --cookies for the authentication."
-            )
-        progress_hook({"status": "finished", "filename": f"{url}.mp4"})
+        self.cookie_snapshots.append(Path(cookies_path).read_text(encoding="utf-8") if cookies_path else None)
+        raise RuntimeError(
+            "ERROR: [youtube] G9MxNwUoSt0: Sign in to confirm you’re not a bot. "
+            "Use --cookies-from-browser or --cookies for the authentication."
+        )
 
 
 class DownloadHttp403ThenAnti403SuccessService(FakeYtDlpService):

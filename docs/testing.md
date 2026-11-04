@@ -12,7 +12,7 @@
 python -m compileall backend\app
 ```
 
-后端测试（当前基线：**1302 passed**，47 个 `test_*.py`）：
+后端测试（当前基线：**1325 passed**，51 个 `test_*.py`）：
 
 ```powershell
 python -m pytest backend\tests -q
@@ -22,13 +22,13 @@ python -m pytest backend\tests -q
 > 沙箱的批量删除守卫是**累积计数**的（一轮命令内累计到阈值就整条拒掉），于是 1069 个用例放在一个进程里跑会在中途被拦下。
 > 现象很好认：**大量 `at setup of ...` 的 error，而 `FAILED` 一个都没有** —— 那是环境问题，不是代码问题。
 >
-> 按下面的分块跑，六块相加应恰好等于 1331（各块 133～278 项；若某块仍被拦下，继续拆小即可）：
+> 按下面的分块跑，六块相加应恰好等于 1325（各块 133～278 项；若某块仍被拦下，继续拆小即可）：
 >
 > ```powershell
 > python -m pytest backend\tests\test_bili_policy.py backend\tests\test_bili_meta.py backend\tests\test_bili_auth.py backend\tests\test_bili_bin.py -q -p no:cacheprovider --basetemp=tmp_pytest\a   # 221
 > python -m pytest backend\tests\test_bili_read_model.py backend\tests\test_bili_subtitle.py backend\tests\test_bili_api.py -q -p no:cacheprovider --basetemp=tmp_pytest\b                                            # 201
 > python -m pytest backend\tests\test_bili_upload.py backend\tests\test_bili_manager.py backend\tests\test_bili_auto_retry.py backend\tests\test_bili_auto_retry_integration.py backend\tests\test_api_bilibili.py -q -p no:cacheprovider --basetemp=tmp_pytest\c                                                # 278
-> python -m pytest backend\tests\test_ytdlp_service.py backend\tests\test_subtitle_plan.py backend\tests\test_subtitle_recording.py backend\tests\test_api.py backend\tests\test_diagnostics_settings_audit.py backend\tests\test_job_delete_cleans_uploads.py -q -p no:cacheprovider --basetemp=tmp_pytest\d                # 236
+> python -m pytest backend\tests\test_ytdlp_service.py backend\tests\test_subtitle_plan.py backend\tests\test_subtitle_recording.py backend\tests\test_api.py backend\tests\test_cookie_import_removed.py backend\tests\test_diagnostics_settings_audit.py backend\tests\test_job_delete_cleans_uploads.py -q -p no:cacheprovider --basetemp=tmp_pytest\d                # 230
 > python -m pytest backend\tests\test_resolution_decisions.py backend\tests\test_output_paths.py backend\tests\test_safe_delete.py backend\tests\test_system_open.py backend\tests\test_open_with_registry.py backend\tests\test_dev_server.py backend\tests\test_instance_lock.py backend\tests\test_config_paths.py backend\tests\test_proxy.py backend\tests\test_cookie_health.py backend\tests\test_stall_guard.py backend\tests\test_ytdlp_formats.py backend\tests\test_resolution_input.py backend\tests\test_job_routes.py -q -p no:cacheprovider --basetemp=tmp_pytest\e   # 262
 > python -m pytest backend\tests\test_error_advice.py backend\tests\test_connectivity.py backend\tests\test_download_progress.py backend\tests\test_runtime_env.py backend\tests\test_job_manager_finally.py backend\tests\test_finally_guards.py backend\tests\test_check_layers.py backend\tests\test_orphan_recovery.py backend\tests\test_completion_notification.py backend\tests\test_db.py backend\tests\test_logging_setup.py backend\tests\test_paths.py backend\tests\test_transfer_stats.py backend\tests\test_progress_persist.py backend\tests\test_log_safety.py backend\tests\test_events.py backend\tests\test_job_artifacts.py backend\tests\test_bili_http.py -q -p no:cacheprovider --basetemp=tmp_pytest\f   # 133
 > ```
@@ -39,7 +39,7 @@ python -m pytest backend\tests -q
 >
 > `--basetemp` 指向的目录**必须不存在**，否则 pytest 会先 `rmtree` 它、同样会触发守卫（`tmp_pytest\` 已在 `.gitignore` 里）。
 
-前端测试和构建（当前基线：**343 passed**，27 个文件；`tsc --noEmit` 与 `vite build` 通过）。
+前端测试和构建（当前基线：**342 passed**，27 个文件；`tsc --noEmit` 与 `vite build` 通过）。
 `npm test` **默认串行**（`--no-file-parallelism`），原因见下面的「核数」一段：
 
 ```powershell
@@ -133,7 +133,7 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 
 > **数字必须自己数一遍**，不要只信 `-q` 的汇总行。逐文件规模用
 > `pytest backend/tests/<文件> -q -p no:cacheprovider --co` 取，各文件之和应**恰等于**全集
-> （2026-11-03 实测：50 个文件逐项相加 = 1331 = 全集）。历史上有过把「收集不全的那一次」当成
+> （2026-11-04 实测：51 个文件逐项相加 = 1325 = 全集）。历史上有过把「收集不全的那一次」当成
 > 基线的教训（见过 267 / 286 / 289 三个数，真实基线一直是当时的 913）。
 
 > **夹具里被 worker 认领的状态会让「同步断言写库结果」变成竞态**（2026-10-21 修掉一条）：
@@ -147,6 +147,7 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 | 文件 | 重点 |
 | --- | --- |
 | [test_api.py](../backend/tests/test_api.py) | API 行为、任务创建、重启、删除、cookies、设置、诊断、代理自检、cookies 体检、运行环境自检刷新，合集子视频按并发并行下载，happy-path 不再二次 extract_metadata，以及**探针抛异常时降级仍要真的执行并开始下载**。打开字幕另加 8 条：单视频与条目级各自打开的是**自己**那份字幕、**缺省（不传 `mode`）走选择器**而 `?mode=default` 走文件关联（两条不同的入口）、没有字幕是 `409`（且什么都没打开）、`mode` 取别的值 `422`、读模型给出 `subtitle_path`、**旧记录（该列为空）能靠视频旁边的同名字幕找到**、文件没了要回 `null` 而不是回显旧路径。 |
+| [test_cookie_import_removed.py](../backend/tests/test_cookie_import_removed.py) | 浏览器 cookies 导入入口已移除（[038](../ai/bug-fix/038-browser-cookie-import-is-gone.md)，8 条）：`POST /api/cookies/from-browser` 必须 404、`CookieStatus` 不再有 `browser` / `imported_count`、解析与下载失败**只尝试一次**且消息只指向「导出 → 上传」、过期 cookies 文件边界、两个并发解析都干净失败、以及**源码级**回归（独立字面量的 `taskkill`、`browser_cookies` 的 import、模块文件本身，一个都不许回来）。 |
 | [test_diagnostics_settings_audit.py](../backend/tests/test_diagnostics_settings_audit.py) | 诊断的「配置两栏对照」（[035](../ai/bug-fix/035-diagnostics-shows-the-stored-value.md)，5 条）：每一项都有 `stored` 与 `runtime`、**库改了但进程没跟上要标出差异且只标这一项**、自检**只读**（连调两次不许把库值灌回运行态）、自动重试旋钮的运行值取自**调度器策略**、布尔按库里的 `"1"/"0"` 形态比较。 |
 | [test_job_delete_cleans_uploads.py](../backend/tests/test_job_delete_cleans_uploads.py) | 删任务要连带清投稿记录（[037](../ai/bug-fix/037-deleting-a-job-leaves-its-uploads.md)，5 条）：三张表清空且 `uploads/summary` 不再出现该任务、**在途投稿时 409 且记录保留**、删光最后一个子视频同样会清（走的是另一条路）、批量删除**整批预检**、别的任务记录不受影响。 |
 | [test_db.py](../backend/tests/test_db.py) | SQLite WAL、`busy_timeout`、`synchronous=NORMAL` 与 WAL checkpoint。 |
@@ -234,7 +235,7 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 
 - 链接解析和 playlist 条目选择。
 - 下载选项默认值、全局运行时设置保存和提交请求体，包括默认 `1440p`、默认“两者都要”字幕来源、字幕来源 fallback、限速和重试次数。
-- cookies 上传、浏览器导入、Edge 锁库提示。
+- cookies 上传、清除与体检；**没有任何「从浏览器导入」入口**（按钮 / 下拉框 / 锁库提示都不该出现）。
 - 任务中心状态、进度、速度、视频大小、实际分辨率、实际格式和显式删除入口展示。
 - 任务中心播放已下载单视频和 playlist 子视频，打开视频所在文件夹和 playlist 文件夹，复制任务/子视频源链接，跳转 YouTube 页面；`output_path` 缺失但下载目录存在时，打开文件夹仍应可用；本地文件操作失败或找不到合适播放器时在对应任务行附近显示错误。
 - 任务中心「打开字幕」：**一颗按钮**（没有下拉箭头）、悬停提示「打开字幕文件；可选择打开方式」、单视频与 playlist 子视频各自打到**自己的**那条接口且**不带 `mode`**（缺省即「弹对话框」，那个缺省只写在服务端）、`subtitle_path` 为 `null` 时按钮**禁用**、失败文案落在对应的那一行。**它只证明「点了会去哪」，不证明「对话框真的弹到眼前」** —— 后者用 `tmp_acceptance/ui_open_subtitle_real.py` 在真实浏览器里点，量 `TkTopLevel`（标题「打开方式」）是否出现、是否前台、重复点击是否在行内报错；「挑完程序文件真的打开」仍要人工点，见手工验收。
@@ -294,7 +295,7 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 21. 用 DevTools 把视口切到 390px 宽（或设备模拟）：同一个说明入口应变成贴底的**底部抽屉**，可滚动，且抽屉内部**没有横向滚动条**（说明正文必须换行，不能继承触发位置的 `white-space: nowrap`）。
 22. 检查 `data/logs/app.log`：启动时应有 `proxy resolved` / `js runtime ready`（或 `js runtime unavailable`）/ `dependencies ready` 三行；故意制造一次失败后，应有 `category=` 结构与紧随其后的 `诊断 / 原因 / 建议N` 块。
 23. 设置面板点「重新自检」，确认 JS 运行时状态会被重新探测（装上 Node/Deno 后无需重启应用）。
-24. 在桌面宽度（≥1280px）下看解析面板的 cookies 操作行：「选择 cookies」与「清除 cookies」必须**同顶同底**，右侧「自动检测浏览器 / 从浏览器导入」也在同一基线。这一行曾因文件上传控件的基类声明了 `margin-top` 而整体下沉 8px（等宽同高、就是没对齐），见 [ai/ui/001](../ai/ui/001-cookie-buttons-not-on-the-same-baseline.md)。
+24. 在桌面宽度（≥1280px）下看解析面板的 cookies 操作行：「选择 cookies」与「清除 cookies」必须**同顶同底**（浏览器导入入口已移除，这一行不再有其他控件）。这一行曾因文件上传控件的基类声明了 `margin-top` 而整体下沉 8px（等宽同高、就是没对齐），见 [ai/ui/001](../ai/ui/001-cookie-buttons-not-on-the-same-baseline.md)。
 25. 把窗口宽度依次改成 1280 / 1366 / 1440 / 1520 / 1600，**页面底部不应出现横向滚动条**，右栏（下载选项 / 设置）应完整落在视口内。右栏是固定 390px 的网格轨道，里面任何一个「不能断行的长 token」（自检回显的 Windows 路径最典型）都会把整页撑宽 —— 这一条曾漏到 ≤1600px 时溢出 44px，见 [ai/ui/002](../ai/ui/002-side-column-overflow-breaks-the-page.md)。
 26. 解析一个有较多字幕轨道的视频，在「字幕语言」里多勾几种（12 种即可稳定复现）：标签应**就地折成多行**，选择器随之变高，页面**不得**出现横向滚动条，且标签里的语言代码**一个都不能少**（不允许被裁成省略号）。标签是 `已选 N 项：en, zh-Hans, …`、N 无上界，它曾经被 `white-space: nowrap` 锁成一行 → 不是被裁而是把整页顶宽，见 [ai/ui/003](../ai/ui/003-language-trigger-label-overflows-the-page.md)。
 27. **滚到任务中心中段（页面已滚过一屏），再让一次动作失败**（例：先停掉后端再点「暂停」，或用一个已删任务点「重启」）：页面**顶端之外**那条红字不行 —— 失败必须出现在**贴着屏幕顶边的红条**里，原地不动就能看见，且不会把当前这一行挤走。红条要点得掉（右侧「×」或焦点在条上按 `Esc`），**不会自己消失**；再发起下一个动作时它应当自动收回。把视口缩到 390px 再重复一次：红条铺满内容宽度、文字换行、页面不出现横向滚动条。它原来就是页头下面一段普通内容，滚到 `scrollY=1073` 时在视口上方 **1019px**，用户什么都看不到，见 [ai/ui/009](../ai/ui/009-page-level-errors-scroll-out-of-view.md)（探针 `tmp_acceptance/ui_error_banner.py`，17 项断言）。
@@ -319,7 +320,7 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 - 720p 自动降级底线失效。
 - 单视频失败原因被任务级聚合错误覆盖。
 - `throttledratelimit` 被重新默认打开，导致「每约 5 秒中断并重新 extract」的性能回退，见 [PLAN.md](../ai/perf/PLAN.md) §3.1。
-- 停滞看门狗的文案被改动后误命中 [is_media_stream_blocked_error](../backend/app/download/ytdlp_service.py#L732)，把停滞误分类成媒体流阻塞。
+- 停滞看门狗的文案被改动后误命中 [is_media_stream_blocked_error](../backend/app/download/ytdlp_service.py#L710)，把停滞误分类成媒体流阻塞。
 - aria2c 多连接在默认配置下被启用，推高 403 率。
 - Cookies 导入暴露敏感信息或擅自关闭浏览器。
 - JS 运行时探测退化成「只看文件是否存在」：那样「检测到 node 却解不出 n challenge」会重新变成不可诊断的状态。

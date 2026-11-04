@@ -2,12 +2,12 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 import App from "../App";
-import { cookieHealthGoogleOnlyPayload, lockedEdgeCookieDetail } from "../test/appFixtures";
+import { cookieHealthGoogleOnlyPayload, cookieRequiredMessage } from "../test/appFixtures";
 import { installAppHarness, mockState } from "../test/appHarness";
 
 installAppHarness();
 
-describe("App · cookies 导入与校验", () => {
+describe("App · cookies 上传与校验", () => {
   test("integrates cookies controls into the analyzer panel", async () => {
     const user = userEvent.setup();
     render(<App />);
@@ -43,70 +43,40 @@ describe("App · cookies 导入与校验", () => {
     });
   });
 
-  test("imports browser cookies from the analyzer panel", async () => {
-    const user = userEvent.setup();
+  test("does not offer any browser-import entry", async () => {
+    // 本机 Edge 的 cookie 是 v20 app-bound 加密，那条路必然失败，失败分支还会
+    // taskkill 掉用户所有 Edge 窗口。入口移除后，界面上不该再出现它的任何形态：
+    // 按钮、下拉框、以及「关闭 Edge 并导入」的锁库提示（见 ai/bug-fix/038）。
     render(<App />);
 
     const analyzer = (await screen.findByRole("heading", { name: "解析链接" })).closest("form") as HTMLElement;
-    expect(within(analyzer).queryByText("浏览器 cookies 来源")).not.toBeInTheDocument();
-    expect(within(analyzer).getByRole("option", { name: "自动检测浏览器" })).toBeInTheDocument();
-    await user.selectOptions(within(analyzer).getByLabelText("浏览器 cookies 来源"), "edge");
-    await user.click(within(analyzer).getByRole("button", { name: "从浏览器导入" }));
-
-    await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith(
-        "/api/cookies/from-browser",
-        expect.objectContaining({
-          method: "POST",
-          body: JSON.stringify({ browser: "edge", close_browser_if_locked: false })
-        })
-      );
-    });
-    expect(await within(analyzer).findByText("已启用 cookies")).toBeInTheDocument();
+    expect(within(analyzer).queryByRole("button", { name: /从浏览器导入|导入中/ })).toBeNull();
+    expect(within(analyzer).queryByLabelText("浏览器 cookies 来源")).toBeNull();
+    expect(within(analyzer).queryByText(/关闭 Edge/)).toBeNull();
+    // 上传这条路必须还在 —— 移除的是「替用户去读浏览器」，不是「用户自己给文件」。
+    expect(within(analyzer).getByText("选择 cookies")).toBeInTheDocument();
   });
 
-  test("shows locked Edge cookies prompt and imports after confirmation", async () => {
-    mockState.browserCookieImportLocked = true;
-    const user = userEvent.setup();
-    render(<App />);
-
-    const analyzer = (await screen.findByRole("heading", { name: "解析链接" })).closest("form") as HTMLElement;
-    await user.selectOptions(within(analyzer).getByLabelText("浏览器 cookies 来源"), "edge");
-    await user.click(within(analyzer).getByRole("button", { name: "从浏览器导入" }));
-
-    expect(await within(analyzer).findByText(lockedEdgeCookieDetail.message)).toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveTextContent(lockedEdgeCookieDetail.message);
-    await user.click(within(analyzer).getByRole("button", { name: "关闭 Edge 并导入" }));
-
-    await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith(
-        "/api/cookies/from-browser",
-        expect.objectContaining({
-          method: "POST",
-          body: JSON.stringify({ browser: "edge", close_browser_if_locked: true })
-        })
-      );
-    });
-    expect(await within(analyzer).findByText("已启用 cookies")).toBeInTheDocument();
-  });
-
-  test("retries playlist analyze after confirmed locked Edge cookies import", async () => {
-    mockState.analyzeLockedByEdgeCookies = true;
+  test("shows the export path when YouTube requires a login", async () => {
+    mockState.analyzeCookieRequired = true;
     const user = userEvent.setup();
     render(<App />);
 
     await user.type(screen.getByLabelText("视频或 playlist 链接"), "https://youtube.com/playlist?list=abc");
     await user.click(screen.getByRole("button", { name: "解析链接" }));
 
-    expect((await screen.findAllByText(lockedEdgeCookieDetail.message)).length).toBeGreaterThan(0);
-    expect(screen.queryByText("Batch")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "关闭 Edge 并导入" }));
-
-    expect(await screen.findByText("Batch")).toBeInTheDocument();
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("YouTube 要求登录或通过 bot 校验");
+    expect(banner).toHaveTextContent(cookieRequiredMessage.split("\n")[1]);
+    // 旧入口的两个动作都不该再被提起：它们指向的按钮已经不存在了。
+    expect(banner).not.toHaveTextContent("关闭 Edge");
+    expect(banner).not.toHaveTextContent("从浏览器导入");
+    // 只尝试一次：失败后不再「自动刷新 cookies 再试一遍」。
     const analyzeCalls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(([input]) =>
       String(input).endsWith("/api/analyze")
     );
-    expect(analyzeCalls).toHaveLength(2);
+    expect(analyzeCalls).toHaveLength(1);
+    expect(screen.queryByText("Batch")).not.toBeInTheDocument();
   });
 
   test("verifies cookies and reports the login verdict with domain evidence", async () => {

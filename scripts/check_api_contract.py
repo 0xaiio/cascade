@@ -94,12 +94,13 @@ SCHEMA_PAIRS: dict[str, str | None] = {
 HTTP_METHODS = ("get", "post", "put", "patch", "delete", "options", "head")
 
 # `docs/openapi.yaml` 是**手写**的对外文档，它在两处刻意不跟随 FastAPI 的自动命名：
-#   1) 错误响应用领域化的 `Error` / `CookieImportError`，而不是 FastAPI 生成的 `HTTPValidationError`；
+#   1) 错误响应用领域化的 `Error`，而不是 FastAPI 生成的 `HTTPValidationError`
+#      （`CookieImportError` 已随浏览器 cookies 导入入口一起删除，见 ai/bug-fix/038）；
 #   2) 文件上传的请求体写成显式 requestBody，不暴露 `Body_upload_*` 这种由函数签名拼出来的 schema
 #      （`/api/cookies` 与 `/api/bilibili/cookies` 两处）。
 # 这是**有意**的差异，登记在这里；一旦集合再变化（多一个或少一个），校验就会失败，
 # 要求人过一遍 —— 而不是让它成为「反正一直红着，没人看」的噪音。
-DOCUMENT_SCHEMA_SURPLUS = {"CookieImportError", "Error"}
+DOCUMENT_SCHEMA_SURPLUS = {"Error"}
 RUNTIME_SCHEMA_SURPLUS = {
     "Body_upload_cookies_api_cookies_post",
     "Body_bili_import_cookies_api_bilibili_cookies_post",

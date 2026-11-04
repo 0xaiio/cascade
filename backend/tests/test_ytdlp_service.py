@@ -2,19 +2,16 @@ import importlib.metadata
 from pathlib import Path
 import sys
 from types import SimpleNamespace
-from http.cookiejar import Cookie
 
 import pytest
 import yt_dlp
-from yt_dlp.cookies import YoutubeDLCookieJar
 from yt_dlp.networking.impersonate import ImpersonateTarget
 from yt_dlp.utils import DownloadError
 
-from app.host.browser_cookies import BrowserCookieImporter
 from app.contracts.config import AppSettings
 from app.contracts.schemas import DownloadOptions, FormatOption
 from app.download import ytdlp_service
-from app.download.ytdlp_service import BrowserCookieImportError, YtDlpService
+from app.download.ytdlp_service import YtDlpService
 
 
 def reset_js_runtime_probe(monkeypatch, service: YtDlpService, failure: str | None = None) -> None:
@@ -1237,176 +1234,6 @@ def test_explicit_speed_limit_sets_yt_dlp_ratelimit(tmp_path: Path) -> None:
     assert opts["ratelimit"] == 2048 * 1024
 
 
-def test_import_browser_cookies_saves_only_youtube_related_cookies(monkeypatch, tmp_path: Path) -> None:
-    jar = YoutubeDLCookieJar()
-    jar.set_cookie(_cookie(".youtube.com", "VISITOR_INFO1_LIVE", "YOUTUBE_SECRET"))
-    jar.set_cookie(_cookie(".google.com", "SID", "GOOGLE_SECRET"))
-    jar.set_cookie(_cookie(".example.com", "SESSION", "UNRELATED_SECRET"))
-    attempted: list[str] = []
-
-    def fake_extract(browser_name, profile=None, logger=None, *, keyring=None, container=None):
-        attempted.append(browser_name)
-        if browser_name == "edge":
-            raise RuntimeError("edge is not available")
-        return jar
-
-    monkeypatch.setattr("app.host.browser_cookies.extract_cookies_from_browser", fake_extract)
-
-    result = YtDlpService(download_dir=tmp_path).import_browser_cookies("auto", tmp_path / "cookies.txt")
-
-    content = (tmp_path / "cookies.txt").read_text(encoding="utf-8")
-    assert result.browser == "chrome"
-    assert result.imported_count == 2
-    assert attempted[:2] == ["edge", "chrome"]
-    assert "YOUTUBE_SECRET" in content
-    assert "GOOGLE_SECRET" in content
-    assert "UNRELATED_SECRET" not in content
-
-
-def test_import_browser_cookies_reports_locked_edge_database(monkeypatch, tmp_path: Path) -> None:
-    def fake_extract(browser_name, profile=None, logger=None, *, keyring=None, container=None):
-        raise RuntimeError("Could not copy Chrome cookie database. See https://github.com/yt-dlp/yt-dlp/issues/7271")
-
-    monkeypatch.setattr("app.host.browser_cookies.extract_cookies_from_browser", fake_extract)
-
-    with pytest.raises(BrowserCookieImportError) as exc_info:
-        YtDlpService(download_dir=tmp_path).import_browser_cookies("edge", tmp_path / "cookies.txt")
-
-    error = exc_info.value
-    assert error.code == "browser_locked"
-    assert error.browser == "edge"
-    assert "Edge" in error.message
-    assert not (tmp_path / "cookies.txt").exists()
-
-
-def test_import_browser_cookies_closes_edge_and_retries_when_allowed(monkeypatch, tmp_path: Path) -> None:
-    jar = YoutubeDLCookieJar()
-    jar.set_cookie(_cookie(".youtube.com", "VISITOR_INFO1_LIVE", "YOUTUBE_SECRET"))
-    attempts: list[str] = []
-    closed: list[str] = []
-
-    def fake_extract(browser_name, profile=None, logger=None, *, keyring=None, container=None):
-        attempts.append(browser_name)
-        if len(attempts) == 1:
-            raise RuntimeError("Could not copy Chrome cookie database. See https://github.com/yt-dlp/yt-dlp/issues/7271")
-        return jar
-
-    service = YtDlpService(download_dir=tmp_path)
-    monkeypatch.setattr("app.host.browser_cookies.extract_cookies_from_browser", fake_extract)
-    # 打桩要打在**类**上：importer 实例是 service.import_browser_cookies 调用时才 new 的，
-    # 而它的 __init__ 会把「关浏览器」这个方法绑定到实例上
-    # （`close_browser_for_cookie_import or self._close_browser_for_cookie_import`）。
-    monkeypatch.setattr(
-        "app.host.browser_cookies.BrowserCookieImporter._close_browser_for_cookie_import",
-        lambda self, browser: closed.append(browser),
-    )
-
-    result = service.import_browser_cookies("edge", tmp_path / "cookies.txt", close_browser_if_locked=True)
-
-    assert result.browser == "edge"
-    assert result.imported_count == 1
-    assert attempts == ["edge", "edge"]
-    assert closed == ["edge"]
-    assert "YOUTUBE_SECRET" in (tmp_path / "cookies.txt").read_text(encoding="utf-8")
-
-
-def test_import_browser_cookies_uses_edge_cdp_fallback_after_dpapi_failure(monkeypatch, tmp_path: Path) -> None:
-    jar = YoutubeDLCookieJar()
-    jar.set_cookie(_cookie(".youtube.com", "VISITOR_INFO1_LIVE", "YOUTUBE_SECRET"))
-    cdp_calls: list[bool] = []
-
-    def fake_extract(browser_name, profile=None, logger=None, *, keyring=None, container=None):
-        raise RuntimeError("Failed to decrypt with DPAPI. See https://github.com/yt-dlp/yt-dlp/issues/10927")
-
-    service = YtDlpService(download_dir=tmp_path)
-    monkeypatch.setattr("app.host.browser_cookies.extract_cookies_from_browser", fake_extract)
-    monkeypatch.setattr(
-        "app.host.browser_cookies.BrowserCookieImporter._extract_edge_cookies_via_cdp",
-        lambda self: cdp_calls.append(True) or jar,
-    )
-
-    result = service.import_browser_cookies("edge", tmp_path / "cookies.txt")
-
-    assert result.browser == "edge"
-    assert result.imported_count == 1
-    assert cdp_calls == [True]
-    assert "YOUTUBE_SECRET" in (tmp_path / "cookies.txt").read_text(encoding="utf-8")
-
-
-def test_edge_cdp_fallback_never_launches_a_browser(monkeypatch, tmp_path: Path) -> None:
-    """CDP 回退不得再启动任何进程：旧实现会挂载**真实** Edge 配置，并破坏它的 cookie 库。"""
-
-    launched: list[tuple] = []
-
-    def forbidden_popen(*args, **kwargs):
-        launched.append(args)
-        raise AssertionError("CDP fallback must not launch a browser process.")
-
-    # 先把服务构造完再打桩：构造时会合法地跑一次 `node --version` 做运行时自检，
-    # 那是产品行为，不该被算成「CDP 启动了进程」。自检走 `app.download.ytdlp_service`，与这里
-    # 打桩的 `app.host.browser_cookies.subprocess` 不是同一个模块；保留顺序只是为了不改变前提。
-    YtDlpService(download_dir=tmp_path)
-
-    monkeypatch.setattr("app.host.browser_cookies.subprocess.Popen", forbidden_popen)
-
-    with pytest.raises(BrowserCookieImportError) as exc_info:
-        BrowserCookieImporter()._extract_edge_cookies_via_cdp()
-
-    assert exc_info.value.code == "edge_app_bound"
-    assert launched == []
-    assert "scripts/export_cookies_via_cdp.py" in exc_info.value.message
-
-
-def test_import_browser_cookies_reports_edge_app_bound_after_dpapi_failure(monkeypatch, tmp_path: Path) -> None:
-    def fake_extract(browser_name, profile=None, logger=None, *, keyring=None, container=None):
-        raise RuntimeError("Failed to decrypt with DPAPI. See https://github.com/yt-dlp/yt-dlp/issues/10927")
-
-    service = YtDlpService(download_dir=tmp_path)
-    monkeypatch.setattr("app.host.browser_cookies.extract_cookies_from_browser", fake_extract)
-
-    with pytest.raises(BrowserCookieImportError) as exc_info:
-        service.import_browser_cookies("edge", tmp_path / "cookies.txt")
-
-    assert exc_info.value.code == "edge_app_bound"
-    assert not (tmp_path / "cookies.txt").exists()
-
-
-def test_auto_browser_cookie_import_prioritizes_edge_app_bound(monkeypatch, tmp_path: Path) -> None:
-    def fake_extract(browser_name, profile=None, logger=None, *, keyring=None, container=None):
-        if browser_name == "edge":
-            raise RuntimeError("Failed to decrypt with DPAPI. See https://github.com/yt-dlp/yt-dlp/issues/10927")
-        raise RuntimeError(f"could not find {browser_name} profile")
-
-    service = YtDlpService(download_dir=tmp_path)
-    monkeypatch.setattr("app.host.browser_cookies.extract_cookies_from_browser", fake_extract)
-
-    with pytest.raises(BrowserCookieImportError) as exc_info:
-        service.import_browser_cookies("auto", tmp_path / "cookies.txt")
-
-    assert exc_info.value.code == "edge_app_bound"
-
-
-def test_auto_browser_cookie_import_prioritizes_locked_edge_error(monkeypatch, tmp_path: Path) -> None:
-    empty_jar = YoutubeDLCookieJar()
-    attempts: list[str] = []
-
-    def fake_extract(browser_name, profile=None, logger=None, *, keyring=None, container=None):
-        attempts.append(browser_name)
-        if browser_name == "edge":
-            raise RuntimeError("Could not copy Chrome cookie database. See https://github.com/yt-dlp/yt-dlp/issues/7271")
-        return empty_jar
-
-    monkeypatch.setattr("app.download.ytdlp_service.AUTO_BROWSER_COOKIE_CANDIDATES", ["edge", "chrome"])
-    monkeypatch.setattr("app.host.browser_cookies.extract_cookies_from_browser", fake_extract)
-
-    with pytest.raises(BrowserCookieImportError) as exc_info:
-        YtDlpService(download_dir=tmp_path).import_browser_cookies("auto", tmp_path / "cookies.txt")
-
-    assert exc_info.value.code == "browser_locked"
-    assert exc_info.value.browser == "edge"
-    assert attempts == ["edge", "chrome"]
-
-
 def test_extract_metadata_maps_playlist_entries_formats_and_subtitles(monkeypatch, tmp_path: Path) -> None:
     captured_opts = {}
 
@@ -1500,25 +1327,3 @@ def test_cookie_required_error_detection_handles_youtube_bot_challenge(tmp_path:
         )
     )
     assert not service.is_cookie_required_error(RuntimeError("Requested format is not available."))
-
-
-def _cookie(domain: str, name: str, value: str) -> Cookie:
-    return Cookie(
-        version=0,
-        name=name,
-        value=value,
-        port=None,
-        port_specified=False,
-        domain=domain,
-        domain_specified=True,
-        domain_initial_dot=domain.startswith("."),
-        path="/",
-        path_specified=True,
-        secure=True,
-        expires=None,
-        discard=True,
-        comment=None,
-        comment_url=None,
-        rest={},
-        rfc2109=False,
-    )

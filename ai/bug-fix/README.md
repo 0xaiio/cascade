@@ -65,6 +65,7 @@
 | [035](035-diagnostics-shows-the-stored-value.md) | 诊断只回显「库里的值」，看不出进程还在用旧值 | `—` | `/api/diagnostics` 从未读过 `Setting` 表，也没区分「库」与「运行态」⇒ 032 那类故障（无异常、无日志）唯一的现场反而在说「配置是对的」。修法：新增 `settings_effective`，每项给出 `stored` 与 `runtime`（从 `YtDlpService` / 调度器策略上读）+ `differs`；自检只读，设置页仅在真有差异时多一条红字 |
 | [036](036-two-instances-write-the-same-part.md) | 两个进程同时跑在同一份 `data/` 上，同时写同一个 `.part` | `—` | 启动路径只有端口预检，而 `--auto-port` 会换端口继续起 —— 端口是网络资源，库与 `.part` 是磁盘资源，换端口对后者毫无保护；两个进程同时恢复同一批孤儿条目，坏的是产物且没有任何报错。修法：`data/app.instance.lock` 上的操作系统文件锁（Windows `msvcrt` / POSIX `flock`），在解析端口**之前**取锁；实测两个坑：Windows 字节锁连读都禁止（备注要挪到第 1 字节）、空文件锁 1 字节等于没锁（先写第 0 字节） |
 | [037](037-deleting-a-job-leaves-its-uploads.md) | 删任务不删投稿记录：摘要里一直有「已不存在的任务」 | `—` | `JobManager.delete()` / `delete_items()` 只删 `JobEvent`/`JobItem`/`Job`，而 `read_all_job_uploads()` 的 job 集合取自 `bili_upload`/`bili_season` 的并集 ⇒ `uploads/summary` 一直回已删任务的记录，`bili_auto_retry` 还会继续问平台。修法：`BiliManager.active_upload_message()` / `forget_job()` + 三条删除路径「预检 → 删任务 → 清记录」；**有在途投稿时拒绝（409）**而不是取消再删，批量删除整批预检 |
+| [038](038-browser-cookie-import-is-gone.md) | 浏览器 cookies 导入：一个必然失败的入口，外加一条会杀掉所有 Edge 窗口的失败分支 | `—` | 本机 Edge 的 cookies 是 v20 app-bound 加密，离线**必然解不开**；失败分支 `taskkill /IM msedge.exe /F /T` 会关掉用户所有 Edge 窗口，更早的 CDP 回退还清空过真实 cookie 库（53 → 0）。入口之外还有两处**用户看不见**的自动导入（解析失败一次、下载失败一次）。修法：整条链路删除（UI / 路由 / 模块 / 两处自动重试），只留「扩展导出 + 上传」；失败消息给出导出步骤，不再提已删按钮 |
 
 ## 本轮（2026-10-01）背景
 
@@ -230,12 +231,32 @@ TOTAL 89%），再逐个看**未覆盖的行本身**是不是也可能错 ——
 带 `cid` 的字幕失败、重复 `start()`），该文件覆盖率 96% → **97%**。
 
 
+## 本轮（2026-11-04）背景：D-04 —— 把一条必然失败的入口整体删掉
+
+输入是「执行 D-04：移除入口、只留扩展导出」。它来自候选池里唯一一条**需要产品拍板**的项，
+方向二选一：① 移除入口；② 保留但标注「本机不支持」。
+
+选 ① 的判据：②**没有消除任何风险，只是把风险解释了一遍** —— 按钮还在、失败分支还在，
+而那条分支里最「有效」的一步是 `taskkill /IM msedge.exe /F /T`。
+
+删的是整条链路，不是只删按钮：UI（下拉框 / 按钮 / 锁库提示）、路由、`browser_cookies.py`、
+`CookieStatus` 的两个永远为空的字段，以及**两处用户看不见的自动导入**
+（解析失败后重试一次、下载失败后重试当前子视频）。三处入口共用同一个必然失败的实现 ——
+这正是「删按钮」不够的原因。
+
+失败文案集中到 `error_advice.cookie_required_message` 一处，因为解析、下载、诊断建议
+三处说的是同一件事；分开写必然漂移，而只要有一处还写着「点从浏览器导入」，
+用户就会去找一个不存在的按钮。
+
 ## 已知但**未处理**的问题（下一轮候选）
 
 1. ~~**应用没有代理配置项。**~~ → 已由 [006](006-proxy-is-not-configurable.md) 处理。
    遗留：PAC/自动配置脚本不支持；「来源=环境变量」时 aria2c 仍拿不到代理。
-2. **`_close_browser_for_cookie_import()` 用 `taskkill /IM msedge.exe /F /T`**，
-   会杀掉用户全部 Edge 进程（含未保存标签页）。虽属用户显式同意，破坏面仍过大。见 005 遗留风险。
+2. ~~**`_close_browser_for_cookie_import()` 用 `taskkill /IM msedge.exe /F /T`**~~
+   → 已由 [038](038-browser-cookie-import-is-gone.md) 处理（2026-11-04）：整个浏览器导入入口
+   （含该函数与 CDP 回退）已删除，后端不再有任何「结束进程 / 启动浏览器」的调用点。
+   **遗留**：用户必须自己用扩展导出 cookies.txt（或跑 `scripts/export_cookies_via_cdp.py`），
+   对不熟悉扩展的人多了一步。
 3. **视频级端到端仍未验收通过。** 001~003 把 PO token provider 从「不可用」推进到「可用」，
    006 让请求能真正出网，007 让 JS 求解真的跑得起来；但本轮只验到 **元数据提取成功**
    （带/不带 cookies 都能解析、`LOGGED_IN` 正确），「媒体流下得下来 + 合得起来」仍需在干净的

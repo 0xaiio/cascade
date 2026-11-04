@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 import App from "../../App";
@@ -108,18 +108,17 @@ describe("App · 页面级错误回执条", () => {
     await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
   });
 
-  test("uses the same bar for a cookies failure raised from the analyzer", async () => {
+  test("uses the same bar for a cookie-required failure raised from the analyzer", async () => {
     const user = userEvent.setup();
-    mockState.browserCookieImportLocked = true;
+    mockState.analyzeCookieRequired = true;
     render(<App />);
 
-    const analyzer = (await screen.findByRole("heading", { name: "解析链接" })).closest("form") as HTMLElement;
-    await user.selectOptions(within(analyzer).getByLabelText("浏览器 cookies 来源"), "edge");
-    await user.click(within(analyzer).getByRole("button", { name: "从浏览器导入" }));
+    await user.type(screen.getByLabelText("视频或 playlist 链接"), "https://youtube.com/playlist?list=abc");
+    await user.click(screen.getByRole("button", { name: "解析链接" }));
 
-    // 解析面板里那条就地提示是 `role="status"`，所以这里能找到的 `alert` 只有回执条本身。
+    // 解析面板里那句「未配置 cookies 时…」是 `role="status"`，所以这里能找到的 `alert` 只有回执条本身。
     const banner = await screen.findByRole("alert");
     expect(banner).toHaveClass("error-banner");
-    expect(banner).toHaveTextContent("Edge 正在运行");
+    expect(banner).toHaveTextContent("YouTube 要求登录或通过 bot 校验");
   });
 });

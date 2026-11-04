@@ -18,7 +18,6 @@ node "User workstation" as Workstation {
   folder "Downloads\n downloads/" as Downloads
   folder "Cookies\n data/cookies.txt" as CookiesFile
   folder "Bilibili cookies\n data/bili_cookies.json" as BiliCookiesFile
-  component "Installed browsers\nEdge/Chrome/Firefox" as Browsers
   component "ffmpeg / imageio-ffmpeg" as FFMPEG
   component "Optional aria2c" as Aria2
   component "Optional biliup\n(writes to Bilibili)" as Biliup
@@ -47,7 +46,6 @@ YTDLP --> YouTube : HTTPS metadata/media
 YTDLP --> Downloads : video/subtitles/sidecar
 YTDLP --> FFMPEG : merge streams
 YTDLP ..> Aria2 : optional fallback
-API --> Browsers : import cookies
 API --> CookiesFile : read/write cookies
 API --> Downloads : delete known outputs
 API --> Opener : play/open folder

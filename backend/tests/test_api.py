@@ -20,16 +20,12 @@ from fakes import (
     AverageSpeedYtDlpService,
     AutoFallbackYtDlpService,
     BlockingYtDlpService,
-    BotChallengeYtDlpService,
-    BrowserImportYtDlpService,
-    DownloadBotChallengeYtDlpService,
     DownloadHttp403FallbackResolutionService,
     DownloadHttp403ThenAnti403SuccessService,
     DurationAwareYtDlpService,
     EmptyAssertionFromHttp403Service,
     FakeYtDlpService,
     HappyPathExtractCountingYtDlpService,
-    LockedEdgeBrowserImportService,
     LowOnlyFallbackYtDlpService,
     MediaStreamBlockedUntilLowerResolutionService,
     PreparedBlockingYtDlpService,
@@ -614,105 +610,6 @@ def test_settings_and_cookies_endpoints_do_not_expose_cookie_body(tmp_path: Path
     assert "SECRET_COOKIE_VALUE" not in str(payload)
 
 
-def test_import_browser_cookies_endpoint_does_not_expose_cookie_body(tmp_path: Path) -> None:
-    service = BrowserImportYtDlpService()
-    client = make_client(tmp_path, service=service)
-
-    response = client.post("/api/cookies/from-browser", json={"browser": "auto"})
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["enabled"] is True
-    assert payload["source"] == "browser"
-    assert payload["browser"] == "edge"
-    assert payload["imported_count"] == 4
-    assert "SECRET_COOKIE_VALUE" not in str(payload)
-    assert service.imports == ["auto"]
-    assert (tmp_path / "data" / "cookies.txt").exists()
-
-
-def test_import_browser_cookies_endpoint_reports_locked_edge_database(tmp_path: Path) -> None:
-    service = LockedEdgeBrowserImportService()
-    client = make_client(tmp_path, service=service)
-
-    response = client.post("/api/cookies/from-browser", json={"browser": "edge"})
-
-    assert response.status_code == 409
-    detail = response.json()["detail"]
-    assert detail["code"] == "browser_locked"
-    assert detail["browser"] == "edge"
-    assert "Edge" in detail["message"]
-    assert "SECRET_COOKIE_VALUE" not in str(detail)
-    assert service.imports == [("edge", False)]
-
-
-def test_import_browser_cookies_endpoint_closes_edge_when_confirmed(tmp_path: Path) -> None:
-    service = LockedEdgeBrowserImportService()
-    client = make_client(tmp_path, service=service)
-
-    response = client.post(
-        "/api/cookies/from-browser",
-        json={"browser": "edge", "close_browser_if_locked": True},
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["enabled"] is True
-    assert payload["source"] == "browser"
-    assert payload["browser"] == "edge"
-    assert payload["imported_count"] == 4
-    assert "SECRET_COOKIE_VALUE" not in str(payload)
-    assert service.imports == [("edge", True)]
-    assert (tmp_path / "data" / "cookies.txt").exists()
-
-
-def test_analyze_auto_imports_browser_cookies_for_playlist_bot_challenge(tmp_path: Path) -> None:
-    service = BotChallengeYtDlpService()
-    client = make_client(tmp_path, service=service)
-
-    response = client.post("/api/analyze", json={"url": "https://youtube.com/playlist?list=abc"})
-
-    assert response.status_code == 200
-    assert response.json()["title"] == "Batch"
-    assert service.imports == ["auto"]
-    assert service.extract_calls[0] is None
-    assert service.extract_calls[1] == tmp_path / "data" / "cookies.txt"
-
-
-def test_analyze_returns_structured_locked_edge_cookie_error(tmp_path: Path) -> None:
-    service = LockedEdgeBrowserImportService()
-    client = make_client(tmp_path, service=service)
-
-    response = client.post("/api/analyze", json={"url": "https://youtube.com/playlist?list=abc"})
-
-    assert response.status_code == 409
-    detail = response.json()["detail"]
-    assert detail["code"] == "browser_locked"
-    assert detail["browser"] == "edge"
-    assert "Edge" in detail["message"]
-    assert service.imports == [("auto", False)]
-
-
-def test_job_download_refreshes_browser_cookies_and_retries_bot_challenge(tmp_path: Path) -> None:
-    settings = make_settings(tmp_path)
-    settings.ensure_directories()
-    settings.cookies_path.write_text("STALE_COOKIE_VALUE", encoding="utf-8")
-    service = DownloadBotChallengeYtDlpService()
-
-    with TestClient(create_app(settings=settings, ytdlp_service=service)) as client:
-        response = client.post(
-            "/api/jobs",
-            json={
-                "url": "https://youtu.be/G9MxNwUoSt0",
-                "options": {"mode": "video_subtitles", "resolution": "720p"},
-            },
-        )
-        assert response.status_code == 201
-        payload = wait_for_job_status(client, response.json()["id"], "succeeded")
-
-    assert payload["items"][0]["status"] == "succeeded"
-    assert service.imports == ["auto"]
-    assert service.cookie_snapshots == ["STALE_COOKIE_VALUE", "SECRET_COOKIE_VALUE"]
 
 
 def test_job_download_recovers_when_anti403_profile_succeeds(tmp_path: Path) -> None:

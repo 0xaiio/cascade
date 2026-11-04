@@ -20,8 +20,6 @@ from ...contracts.schemas import (
     JobRead,
     RestartJobRequest,
 )
-from ...download.ytdlp_service import BrowserCookieImportError
-
 router = APIRouter()
 
 
@@ -44,8 +42,6 @@ async def create_job(request: CreateJobRequest, session: SessionDep, ctx: Contex
     """
     try:
         analysis = api_support.extract_metadata_with_cookies(ctx.service, ctx.settings, request.url, True)
-    except BrowserCookieImportError as exc:
-        raise HTTPException(status_code=api_support.cookie_import_status_code(exc), detail=exc.to_detail()) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

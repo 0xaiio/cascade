@@ -45,8 +45,9 @@ export class ApiError extends Error {
  * 用户看到的不是错误，而是一句「正在读取…」永远不消失。这类失败没有任何提示，
  * 只能靠调用方自己计时（见 ai/bug-fix/025）。
  *
- * 60 s 的依据：服务端最长的一次「合法阻塞」是「打开方式」窗口的出现判定（6 s）与
- * 浏览器 cookie 库的等待（约 10 s），B站 请求自带 20 s 超时，都远在 60 s 之内。
+ * 60 s 的依据：服务端最长的一次「合法阻塞」是「打开方式」窗口的出现判定（6 s），
+ * B站 请求自带 20 s 超时，都远在 60 s 之内。（以前还要给浏览器 cookie 库的等待留余量，
+ * 那条路已随浏览器导入入口一起移除，见 ai/bug-fix/038。）
  */
 export const REQUEST_TIMEOUT_MS = 60_000;
 
@@ -218,13 +219,6 @@ export function uploadCookies(file: File): Promise<CookieStatus> {
   return request<CookieStatus>("/api/cookies", {
     method: "POST",
     body: data
-  });
-}
-
-export function importBrowserCookies(browser: string, closeBrowserIfLocked = false): Promise<CookieStatus> {
-  return request<CookieStatus>("/api/cookies/from-browser", {
-    method: "POST",
-    body: JSON.stringify({ browser, close_browser_if_locked: closeBrowserIfLocked })
   });
 }
 

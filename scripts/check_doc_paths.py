@@ -53,6 +53,10 @@ ALLOWED = {
     "backend/app/config.py": "011 移动前的路径，同一节随即给出 `contracts/config.py`",
     "backend/app/download/_probe.py": "011 的注入取证用临时模块，从未提交",
     "frontend/src/types.ts": "013 的 before → after 对照（→ `contracts/types.ts`）",
+    "backend/app/host/browser_cookies.py": (
+        "038 删除了整个模块；005 / 038 / brainstorming 里的提及都是「它已经不在了」的记录"
+    ),
+    "frontend/src/cookies/cookieLock.ts": "038 删除（浏览器导入入口移除）；038 的删除清单引用它",
 }
 
 

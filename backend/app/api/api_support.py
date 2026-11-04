@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from fastapi import HTTPException
 from sqlmodel import Session, select
@@ -23,12 +22,12 @@ from ..contracts.schemas import (
     COMPLETION_NOTIFICATION_MODES,
     DEFAULT_COMPLETION_NOTIFICATION,
     AnalyzeResponse,
-    CookieStatus,
     JobRead,
     SettingsRead,
     VideoEntry,
 )
-from ..download.ytdlp_service import BrowserCookieImportError, YtDlpService
+from ..download.error_advice import cookie_required_message
+from ..download.ytdlp_service import YtDlpService
 
 
 def read_job_or_404(session: Session, job_id: str) -> JobRead:
@@ -98,45 +97,27 @@ def extract_metadata_with_cookies(
     url: str,
     cookies_enabled: bool,
 ) -> AnalyzeResponse:
-    """解析元数据；若失败且错误命中「需要登录 / bot 校验」，自动导入浏览器 cookies 后**重试一次**。
+    """解析元数据；cookies **只来自用户自己给的文件**。
 
-    只重试一次，且只在 `cookies_enabled` 时重试 —— 关掉 cookies 的用户不该被应用偷偷去读浏览器。
+    这里以前有一条「失败就自动去读本机浏览器、再重试一次」的捷径，已经移除：
+
+    - 本机 Edge 的 cookie 是 v20 app-bound 加密，离线程序**必然解不开**；
+    - 那条路的失败分支会 `taskkill /IM msedge.exe /F /T`，关掉用户所有 Edge 窗口。
+
+    所以现在只做一件事：失败时把「下一步怎么做」写进消息，而不是替用户去碰浏览器
+    （见 [ai/bug-fix/038](../ai/bug-fix/038-browser-cookie-import-is-gone.md)）。
     """
     cookies_path = settings.cookies_path if cookies_enabled and settings.cookies_path.exists() else None
     try:
         return service.extract_metadata(url, cookies_path=cookies_path)
     except Exception as exc:
-        if not cookies_enabled or not is_cookie_required_error(exc):
+        if not is_cookie_required_error(exc):
             raise
-        try:
-            service.import_browser_cookies("auto", settings.cookies_path)
-        except BrowserCookieImportError:
-            raise
-        except Exception as import_exc:
-            raise RuntimeError(f"{exc} Browser cookies import failed: {import_exc}") from import_exc
-        return service.extract_metadata(url, cookies_path=settings.cookies_path)
-
-
-def cookie_status_from_import(result: Any) -> CookieStatus:
-    """浏览器 cookies 导入的返回值有两种形状（dict / 带属性的对象），测试里的 fake 两种都有。"""
-    if isinstance(result, dict):
-        return CookieStatus(**result)
-    return CookieStatus(
-        enabled=True,
-        filename=getattr(result, "filename", None),
-        source="browser",
-        browser=getattr(result, "browser", None),
-        imported_count=getattr(result, "imported_count", None),
-    )
+        raise RuntimeError(cookie_required_message(exc)) from exc
 
 
 def is_cookie_required_error(exc: Exception) -> bool:
     return YtDlpService.is_cookie_required_error(exc)
-
-
-def cookie_import_status_code(exc: BrowserCookieImportError) -> int:
-    """浏览器被占用是可重试的「状态冲突」（409），其余导入失败是「请求本身不行」（400）。"""
-    return 409 if exc.code == "browser_locked" else 400
 
 
 def _clamp_int(raw: str, low: int, high: int, fallback: int) -> int:

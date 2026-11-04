@@ -26,6 +26,7 @@ package "L2 orchestration" {
   [download/orphan_recovery.py\nstartup reconciliation] as Recovery
   [infra/events.py\nEventBroker] as Broker
   [bilibili/bili_manager.py\nbilibili queue, single worker] as BiliManager
+  [bilibili/bili_auto_retry.py\nwait-for-review scheduler] as AutoRetry
   [bilibili/bili_read_model.py\nbilibili badges and read models] as BiliReadModel
 }
 
@@ -36,7 +37,6 @@ package "L3 domain and policy" {
   [download/stall_guard.py\nstall watchdog] as Stall
   [download/fallback_policy.py\nreason and message] as Fallback
   [download/resolution_decisions.py\ndowngrade decisions] as Decisions
-  [host/browser_cookies.py\ncookie import] as Cookies
   [host/cookie_health.py\ncookie verification] as CookieHealth
   [host/proxy.py\nproxy resolution] as Proxy
   [host/connectivity.py\nproxy probe] as Connectivity
@@ -65,6 +65,8 @@ package "L4 infrastructure" {
 package "L5 pure helpers" {
   [common/paths.py\nsafe path names] as Paths
   [common/log_safety.py\nlog scrubbing] as LogSafe
+  [common/time.py\nUTC helpers] as Time
+  [host/instance_lock.py\nsingle-instance lock] as InstanceLock
   [host/runtime_env.py\nhostile env scrubbing] as RuntimeEnv
 }
 
@@ -81,8 +83,10 @@ Main --> BiliManager
 Main --> Broker
 Main --> Opener
 Entry --> DevServer
+Entry --> InstanceLock
 Entry --> Config
 Routers --> ApiCtx
+Routers --> Config
 Routers --> ApiSupport
 Routers --> Artifacts
 Routers --> Schemas
@@ -112,6 +116,7 @@ ApiSupport --> Service
 ApiSupport --> Proxy
 ApiSupport --> Paths
 ApiSupport --> Config
+ApiSupport --> Advice
 Artifacts --> Models
 Artifacts --> Outputs
 Artifacts --> Opener
@@ -127,18 +132,24 @@ Manager --> LogSafe
 Manager --> Config
 Manager --> Schemas
 Manager --> Recovery
+Manager --> Advice
 Manager --> SubtitlePlan
 Manager --> Deletion
 ReadModel --> Models
 ReadModel --> Fallback
 ReadModel --> Outputs
 ReadModel --> Schemas
+ReadModel --> Time
 Recovery --> Models
 BiliManager --> Models
 BiliManager --> Schemas
 BiliManager --> Config
 BiliManager --> Broker
 BiliManager --> Service
+BiliManager --> AutoRetry
+AutoRetry --> BiliPolicy
+AutoRetry --> Models
+AutoRetry --> Time
 BiliManager --> Outputs
 BiliManager --> BiliUpload
 BiliManager --> BiliApi
@@ -153,11 +164,11 @@ BiliManager --> BiliSubtitle
 BiliManager --> LogSafe
 BiliReadModel --> Models
 BiliReadModel --> Schemas
+ReadModel --> Time
 BiliReadModel --> BiliMeta
 BiliReadModel --> BiliPolicy
 BiliReadModel --> ReadModel : elapsed_seconds
 Service --> Formats
-Service --> Cookies
 Service --> Proxy
 Service --> Advice
 Service --> Stall
@@ -165,6 +176,7 @@ Service --> LogSafe
 Service --> Schemas
 Service --> SubtitlePlan
 Formats --> Schemas
+Schemas --> Time
 Fallback --> Schemas
 Decisions --> Fallback
 Decisions --> Formats
@@ -210,8 +222,9 @@ api/routers/* are leaves, and the support modules
 (api_support, job_artifacts, api_context) never import a router.
 Two deliberate separations: parsing the proxy (proxy.py)
 is apart from proving it works (connectivity.py), and
-producing a cookie report (cookie_health.py) is apart from
-importing cookies (browser_cookies.py).
+the cookies file is only ever produced by the user (extension
+or scripts/export_cookies_via_cdp.py) - the app never reads a
+browser profile, see ai/bug-fix/038.
 The bilibili side repeats that split: bili_http.py knows no
 endpoint, bili_meta.py and bili_policy.py never send a
 request, and the "it really published" verdict lives in

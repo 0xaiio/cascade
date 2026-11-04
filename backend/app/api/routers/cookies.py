@@ -1,20 +1,23 @@
-"""cookies 资源：上传、从浏览器导入、清除、体检。
+"""cookies 资源：上传、清除、体检。
 
 `/api/cookies/verify` 放在这里而不是自检模块：它验的是 cookies 这一件事，
 而自检模块验的是「运行环境」（依赖、JS 运行时、代理）。两者失败时的处置方式完全不同。
+
+**没有「从浏览器导入」这条路**：本机 Edge 的 cookie 是 v20 app-bound 加密，离线程序
+必然解不开；旧入口还会在失败分支里 `taskkill` 掉用户所有 Edge 窗口。现在只接受
+用户自己导出的 `cookies.txt`（浏览器扩展 / `scripts/export_cookies_via_cdp.py`），
+见 ai/bug-fix/038。
 """
 
 import asyncio
 import logging
 
-from fastapi import APIRouter, Body, File, HTTPException, UploadFile
+from fastapi import APIRouter, Body, File, UploadFile
 
-from .. import api_support
 from ..api_context import ContextDep
 from ...host.cookie_health import verify_cookies
 from ...host.proxy import resolve_proxy
-from ...contracts.schemas import BrowserCookieImportRequest, CookieHealthRead, CookieStatus, CookieVerifyRequest
-from ...download.ytdlp_service import BrowserCookieImportError
+from ...contracts.schemas import CookieHealthRead, CookieStatus, CookieVerifyRequest
 
 logger = logging.getLogger(__name__)
 
@@ -68,23 +71,6 @@ async def upload_cookies(ctx: ContextDep, file: UploadFile = File(...)) -> Cooki
     ctx.settings.data_dir.mkdir(parents=True, exist_ok=True)
     ctx.settings.cookies_path.write_bytes(content)
     return CookieStatus(enabled=True, filename=file.filename or ctx.settings.cookies_filename, source="file")
-
-
-@router.post("/api/cookies/from-browser", response_model=CookieStatus)
-async def import_cookies_from_browser(request: BrowserCookieImportRequest, ctx: ContextDep) -> CookieStatus:
-    """从本机浏览器导入。浏览器被占用时返回 409，前端据此显示「关闭 Edge 并导入」。"""
-    try:
-        result = await asyncio.to_thread(
-            ctx.service.import_browser_cookies,
-            request.browser,
-            ctx.settings.cookies_path,
-            request.close_browser_if_locked,
-        )
-    except BrowserCookieImportError as exc:
-        raise HTTPException(status_code=api_support.cookie_import_status_code(exc), detail=exc.to_detail()) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return api_support.cookie_status_from_import(result)
 
 
 @router.delete("/api/cookies", response_model=CookieStatus)

@@ -9,7 +9,7 @@ node "User machine" {
   component "FastAPI backend\nbackend/app" as API
   database "SQLite\n data/app.sqlite3" as DB
   folder "Downloads\n downloads/" as Files
-  component "Browser cookies\nEdge/Chrome/Firefox" as BrowserCookies
+  component "cookies.txt\n(exported by the user)" as CookieFile
   component "ffmpeg / imageio-ffmpeg" as FFMPEG
 }
 
@@ -17,10 +17,10 @@ cloud "YouTube\nmetadata and media" as YouTube
 component "yt-dlp\nPython API" as YTDLP
 
 User --> UI : operate
+User --> CookieFile : export via browser extension
 UI --> API : HTTP + SSE
 API --> DB : jobs/settings/events
 API --> YTDLP : analyze/download
-API --> BrowserCookies : import cookies
 YTDLP --> YouTube : extract/download
 YTDLP --> FFMPEG : merge streams
 YTDLP --> Files : write media/subtitles

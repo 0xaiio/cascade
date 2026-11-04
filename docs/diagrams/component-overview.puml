@@ -50,7 +50,6 @@ package "Backend / download" {
   [download/ytdlp_service.py\nyt-dlp boundary] as Service
   [download/ytdlp_formats.py\nselectors] as Formats
   [download/stall_guard.py\nstall watchdog] as StallGuard
-  [host/browser_cookies.py\ncookie import] as Cookies
   [host/system_open.py\nplayer / folder opener] as SystemOpen
   [download/output_paths.py\noutput discovery] as OutputPaths
 }
@@ -174,7 +173,6 @@ ReadModel --> Fallback
 ReadModel --> OutputPaths
 ReadModel --> Models
 Service --> Formats
-Service --> Cookies
 Service --> StallGuard
 BiliManager --> BiliUpload
 BiliManager --> BiliApi

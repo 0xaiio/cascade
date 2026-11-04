@@ -64,6 +64,30 @@ PROXY_HINTS = (
 
 BLOCK_HINTS = ("http error 403", "403 forbidden", "connection reset", "connection was reset", "remote end closed")
 
+#: 拿到一份**能用**的 cookies.txt 的唯一途径：应用内不再读浏览器。
+#:
+#: 集中在一处，是因为它要出现在三个地方（解析失败、下载失败、诊断建议），
+#: 分开写必然漂移 —— 而这三处说的必须是同一件事。
+COOKIE_EXPORT_ADVICE = (
+    "用浏览器扩展（如 Get cookies.txt LOCALLY）在 youtube.com 页面导出 Netscape 格式的 cookies.txt，"
+    "再到「解析链接」面板点「选择 cookies」上传；也可以在仓库根运行 "
+    "python scripts/export_cookies_via_cdp.py 导出到 data/cookies.txt"
+)
+
+
+def cookie_required_message(exc: BaseException) -> str:
+    """「需要登录态」时给用户的结论：为什么帮不上忙，以及下一步怎么做。
+
+    以前这里会自动去读本机浏览器再重试一次；那条路已移除（本机 Edge 是 v20 app-bound
+    加密，离线必然解不开，失败分支还会 taskkill 掉用户所有 Edge 窗口），见 ai/bug-fix/038。
+    """
+    return (
+        "YouTube 要求登录或通过 bot 校验。本应用只读取你给的 cookies.txt，"
+        "不会去读浏览器里的 cookies。\n"
+        f"下一步：{COOKIE_EXPORT_ADVICE}。\n"
+        f"原始 yt-dlp 错误：{exc}"
+    )
+
 
 @dataclass(frozen=True)
 class Advice:
@@ -159,8 +183,8 @@ def advise(
             summary="YouTube 要求登录或人机校验，匿名请求被拒",
             detail=detail,
             next_steps=[
-                "在「解析链接」面板点「从浏览器导入」，或运行 python scripts/export_cookies_via_cdp.py 导出 data/cookies.txt",
-                "导入后点「校验 cookies」，确认结论是「包含 youtube.com 域下的鉴权 cookie」",
+                COOKIE_EXPORT_ADVICE,
+                "导出后在解析面板点「校验 cookies」，确认结论是「登录态有效」",
                 "若校验通过但仍失败，检查代理是否与导出 cookies 时用的是同一条出口（换 IP 会让登录态失效）",
             ],
         )

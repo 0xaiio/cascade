@@ -10,7 +10,7 @@ import {
   cookieHealthPayload,
   diagnosticsPayload,
   jobPayload,
-  lockedEdgeCookieDetail,
+  cookieRequiredMessage,
   pausedJobPayload,
   playlistJobPayload,
   proxyTestSuccessPayload,
@@ -46,10 +46,8 @@ export const mockState = {
   jobs: [jobPayload, pausedJobPayload, playlistJobPayload] as Job[],
   /** `/api/settings` 的当前值（GET 读它，PUT 写它）。 */
   settings: settingsPayload,
-  /** `POST /api/cookies/from-browser` 是否模拟「浏览器正在运行、cookie 库被锁」。 */
-  browserCookieImportLocked: false,
-  /** 下一次 `/api/analyze` 是否先返回一次「Edge 锁库」错误（用来验证解析失败后的重试）。 */
-  analyzeLockedByEdgeCookies: false,
+  /** 下一次 `/api/analyze` 是否返回「需要登录 / bot 校验」（用来验证错误回执条与下一步文案）。 */
+  analyzeCookieRequired: false,
   /** 本地文件操作（播放 / 打开文件夹）的失败文案；`null` 表示成功。 */
   localFileActionFailure: null as string | null,
   /**
@@ -158,8 +156,7 @@ function resetMockState(): void {
   mockState.analyze = analyzePayload;
   mockState.jobs = [jobPayload, pausedJobPayload, playlistJobPayload];
   mockState.settings = settingsPayload;
-  mockState.browserCookieImportLocked = false;
-  mockState.analyzeLockedByEdgeCookies = false;
+  mockState.analyzeCookieRequired = false;
   mockState.localFileActionFailure = null;
   mockState.jobActionFailure = null;
   mockState.localFileDelayMs = 0;
@@ -266,20 +263,6 @@ export function installAppHarness(): void {
           mockState.settings = { ...mockState.settings, cookies_enabled: true };
           return Response.json({ enabled: true, filename: "cookies.txt" });
         }
-        if (url.endsWith("/api/cookies/from-browser") && init?.method === "POST") {
-          const body = JSON.parse(String(init.body));
-          if (mockState.browserCookieImportLocked && !body.close_browser_if_locked) {
-            return Response.json({ detail: lockedEdgeCookieDetail }, { status: 409 });
-          }
-          mockState.settings = { ...mockState.settings, cookies_enabled: true };
-          return Response.json({
-            enabled: true,
-            filename: "cookies.txt",
-            source: "browser",
-            browser: "edge",
-            imported_count: 4
-          });
-        }
         if (url.endsWith("/api/cookies") && init?.method === "DELETE") {
           mockState.settings = { ...mockState.settings, cookies_enabled: false };
           return Response.json({ enabled: false, filename: null });
@@ -364,10 +347,10 @@ export function installAppHarness(): void {
           return new Response(null, { status: 204 });
         }
         if (url.endsWith("/api/analyze")) {
-          if (mockState.analyzeLockedByEdgeCookies && !mockState.settings.cookies_enabled) {
-            return Response.json({ detail: lockedEdgeCookieDetail }, { status: 409 });
+          if (mockState.analyzeCookieRequired) {
+            mockState.analyzeCookieRequired = false;
+            return Response.json({ detail: cookieRequiredMessage }, { status: 400 });
           }
-          mockState.analyzeLockedByEdgeCookies = false;
           return Response.json(mockState.analyze);
         }
         // ---- B站 上传。**具体路径必须排在通配之前**，否则 `/uploads/summary` 会被

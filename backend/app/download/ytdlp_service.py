@@ -13,12 +13,6 @@ import yt_dlp
 from yt_dlp.networking.impersonate import ImpersonateTarget
 from yt_dlp.version import __version__ as yt_dlp_version
 
-from ..host.browser_cookies import (
-    AUTO_BROWSER_COOKIE_CANDIDATES,
-    BrowserCookieImporter,
-    BrowserCookieImportError,
-    BrowserCookieImportResult,
-)
 from .error_advice import JS_CHALLENGE_HINTS, advise, exception_chain
 from ..common.log_safety import sanitize_log_message
 from ..host.proxy import ProxyResolution, has_no_proxy_bypass, redact_proxy_credentials, resolve_proxy
@@ -337,22 +331,6 @@ class YtDlpService:
             "no_proxy_bypass_set": has_no_proxy_bypass(),
             "yt_dlp_version": yt_dlp_version,
         }
-
-    def import_browser_cookies(
-        self,
-        browser: str,
-        target_path: Path,
-        close_browser_if_locked: bool = False,
-    ) -> BrowserCookieImportResult:
-        # 三个可注入接缝（取 cookie jar / 关掉占用库的浏览器 / DPAPI 失败后走 CDP）都住在
-        # ``BrowserCookieImporter`` 里，由它自己的默认实现提供。本类**不再**把转发方法传进去：
-        # 那三个方法原本只是「new 一个 importer 再调它的私有方法」，传进去等于让 importer
-        # 绕一圈回来调自己。测试要打桩时改 ``app.browser_cookies.*``（实现所在模块）。
-        return BrowserCookieImporter(candidates=AUTO_BROWSER_COOKIE_CANDIDATES).import_browser_cookies(
-            browser,
-            target_path,
-            close_browser_if_locked,
-        )
 
     def extract_metadata(self, url: str, cookies_path: Path | None = None) -> AnalyzeResponse:
         opts: dict[str, Any] = {

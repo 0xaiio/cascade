@@ -11,7 +11,7 @@ DownloadMode = Literal["video_subtitles", "video_only", "subtitles_only"]
 SubtitleSource = Literal["human", "auto", "both"]
 SubtitleFormat = Literal["best", "srt", "vtt"]
 JobBatchAction = Literal["pause", "restart", "delete"]
-CookieSource = Literal["none", "file", "browser"]
+CookieSource = Literal["none", "file"]
 
 
 def _as_aware_utc(value: object) -> object:
@@ -284,16 +284,16 @@ class SettingsUpdate(BaseModel):
 
 
 class CookieStatus(BaseModel):
+    """cookies 文件的状态。**来源只有「用户给的文件」一种**。
+
+    浏览器导入入口已移除（见 [ai/bug-fix/038](../ai/bug-fix/038-browser-cookie-import-is-gone.md)），
+    所以这里不再有 `browser` / `imported_count` 两个字段：它们永远为空，
+    留着只会让调用方以为「还有一条从浏览器来的路」。
+    """
+
     enabled: bool
     filename: str | None = None
     source: CookieSource = "none"
-    browser: str | None = None
-    imported_count: int | None = None
-
-
-class BrowserCookieImportRequest(BaseModel):
-    browser: str = "auto"
-    close_browser_if_locked: bool = False
 
 
 class ProxyTestRequest(BaseModel):

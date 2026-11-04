@@ -71,7 +71,6 @@
 | [download_progress.py](../backend/app/download/download_progress.py#L21) | L3 领域 | 多子流进度聚合与分母策略。 | 不知道数据库和 SSE 的存在。 |
 | [progress_persist.py](../backend/app/download/progress_persist.py#L5) | L3 领域 | 决定某个进度快照是否值得落库。 | 不执行写库。 |
 | [transfer_stats.py](../backend/app/download/transfer_stats.py#L5) | L3 领域 | 由字节增量累加平均速度。 | 不处理瞬时速度（瞬时速度直接取 payload）。 |
-| [browser_cookies.py](../backend/app/host/browser_cookies.py#L55) | L3 领域 | 浏览器 cookies 提取、域名过滤、锁库与 CDP fallback。 | 不决定何时刷新（决策在 `job_manager`/`main`）。 |
 | [cookie_health.py](../backend/app/host/cookie_health.py#L234) | L3 领域 | cookies **体检**：格式/域名/鉴权项/过期 + 一次 `LOGGED_IN` 探针合成结论。 | 不修改 cookies 文件，不决定解析用哪份（决策在 `main`）。 |
 | [proxy.py](../backend/app/host/proxy.py#L169) | L3 领域 | 代理**解析**：显式 > 系统 > 环境，归一化与凭据脱敏。 | 不验证通不通（那是 `connectivity`），不发请求。 |
 | [connectivity.py](../backend/app/host/connectivity.py#L73) | L3 领域 | 代理**验证**：一次朴素 HTTPS 探针，返回状态码/耗时/原始异常。 | 不解析代理来源，不复用 yt-dlp（避免混淆病因）。 |
@@ -107,7 +106,7 @@
 | [contracts/](../frontend/src/contracts/types.ts) | 线上契约 `types.ts`，与后端 `contracts/schemas.py` 一一对应，由 `check_api_contract.py` 逐接口对照 | 被任何目录 import 都正常 |
 | [shared/](../frontend/src/shared/) | 跨功能复用：`api`（HTTP 边界 + 超时看门狗）、`errors` / `formatting` / `quality` / `subtitles`；[ui/](../frontend/src/shared/ui/) 放**无业务判断**的基础件（`HelpPopover` / `Toggle` / `StatusPill`） | 不依赖任何功能目录 |
 | [download-request/](../frontend/src/download-request/) | 发起下载：解析链接（`UrlAnalyzer`）、解析结果（`AnalysisPanel`）、下载选项（`DownloadOptionsPanel` / `SearchableLanguageSelect`） | 依赖 `shared` / `cookies` |
-| [cookies/](../frontend/src/cookies/) | 浏览器 cookies 的导入、校验与锁库映射（`CookieSection` / `cookieLock`） | 依赖 `shared` |
+| [cookies/](../frontend/src/cookies/) | cookies 的**体检**与上传入口（`CookieSection` / `CookieHowToPopover`）。不提供浏览器导入 —— 应用只读用户导出的文件（[038](../ai/bug-fix/038-browser-cookie-import-is-gone.md)）。 | 依赖 `shared` |
 | [task-center/](../frontend/src/task-center/) | 任务中心：控制 / 删除 / 展开、进度与明细、本地文件操作、清晰度降级的重启（`JobQueue` / `SubtitleOpenButton`） | 依赖 `shared` / `bilibili` |
 | [settings/](../frontend/src/settings/) | 设置、代理检测与运行环境自检（`SettingsPanel` / `SettingsGroup` / `ProxySection` / `RuntimeSection`） | 依赖 `shared` / `bilibili`（登录区） |
 | [bilibili/](../frontend/src/bilibili/) | B站 上传：入口、表单、进度、状态明细、登录区，以及 `biliForm` / `biliStatus` / `biliProgress` / `biliHealth` 四块判定与文案 | 依赖 `shared` / `contracts` |
@@ -128,7 +127,7 @@
 
 | 组件 / 模块 | 职责 | 不负责 |
 | --- | --- | --- |
-| [UrlAnalyzer.tsx](../frontend/src/download-request/UrlAnalyzer.tsx#L29) | 解析面板：链接输入、cookies 行（状态 + 上传/清除 + 浏览器导入）、锁库提示、解析按钮。只持有「选了哪个浏览器」这类纯界面状态。 | 不发请求（回调交 `App`），不决定用哪份 cookies。 |
+| [UrlAnalyzer.tsx](../frontend/src/download-request/UrlAnalyzer.tsx#L24) | 解析面板：链接输入、cookies 行（状态 + 上传/清除）、解析按钮。cookies **只能来自文件**，所以面板不持有任何 cookies 状态。 | 不发请求（回调交 `App`），不决定用哪份 cookies，也不提供「从浏览器导入」入口（已移除，见 [ai/bug-fix/038](../ai/bug-fix/038-browser-cookie-import-is-gone.md)）。 |
 | [AnalysisPanel.tsx](../frontend/src/download-request/AnalysisPanel.tsx#L12) | 解析结果：缩略图/标题/时长、playlist 条目勾选表、单视频汇总行。 | 不持有选中集合（状态归 `App`，提交要用同一份）。 |
 | [DownloadOptionsPanel.tsx](../frontend/src/download-request/DownloadOptionsPanel.tsx#L19) | 下载选项：模式、清晰度、字幕语言/来源/格式、开关项、限速与重试、提交按钮。 | 不持有状态：所有值来自 `options`，改动经 `onOptionChange` 回到 `App`。 |
 | [SearchableLanguageSelect.tsx](../frontend/src/download-request/SearchableLanguageSelect.tsx#L16) | 可搜索的字幕语言多选。标签里 join 的是**语言代码**，项数无上界 —— 不许 `nowrap`，见 [ai/ui/003](../ai/ui/003-language-trigger-label-overflows-the-page.md)。 | 不拉取可用语言（由 `App` 从解析结果里汇总）。 |
@@ -149,7 +148,6 @@
 | [BiliJobStatus.tsx](../frontend/src/bilibili/BiliJobStatus.tsx#L19) | 任务卡片里的上传明细与「下一步」：**按因果排三行 —— 审核 → 合集 → 字幕**（审核没过 ⇒ 平台不给分P编号 ⇒ 后两行才等着），每行只留一句结论 + 重试入口与自动重试倒计时。文案的判据在 [biliStatus.ts](../frontend/src/bilibili/biliStatus.ts#L168) 的两个纯函数里。**只在有话说时渲染**。 | 不决定重试动作（后端按终态三选一），不给已成功的条目放重试按钮；不判断「审核过没过」（由服务端回读的 `status` / `cid` 决定）。 |
 | [BiliLoginSection.tsx](../frontend/src/bilibili/BiliLoginSection.tsx#L32) | 设置面板里的 B站 区：环境体检（**点「重新体检」会变「体检中…」并禁用，结束后写「上次体检 HH:MM:SS」**）、扫码登录（含轮询，1.5s）、导入登录文件、修复投稿工具。**凭据一个字符都不显示**（只给「已保存 N 项 / 缺 SESSDATA」的摘要与账号名）。 | 不显示 cookies 值或掩码前缀；「登录文件被 git 跟踪」单独红字，不由本组件自动修复；**超时/降级策略不在这里**（在 `biliHealth`），也不发请求（走 `api.ts`）。 |
 | [subtitles.ts](../frontend/src/shared/subtitles.ts#L12) | 字幕文案与来源归一：`formatSubtitleInfo`（那行「字幕：来源 X · 格式 Y」）、`effectiveSubtitleSourceForAnalysis`（提交前把「两者都要」收敛成该视频真有的那一类）。 | 不做请求、不读存储。 |
-| [cookieLock.ts](../frontend/src/cookies/cookieLock.ts#L20) | 把后端 `browser_locked` 错误映射成界面状态（含 `pendingAnalyzeUrl`，用于「关闭 Edge 并导入」后自动补一次解析）。判据是 `detail.code`，不是文案。 | 不渲染界面（渲染在 `UrlAnalyzer`）。 |
 | [biliForm.ts](../frontend/src/bilibili/biliForm.ts#L129) | 投稿表单的**词汇表与预检**：版权/归集方式的取值、标签计数与最长标签、三种说明与回执文案、提交前的本地预检、**字符预算**（`charBudget`：`length/limit/over/label/warning` 一起算出来，单看数字看不出超没超）与**合集渲染后的标题长度**（`collectionTitleBudget`：量的是渲染后的每一条，不是模板本身）。硬限数字一律取自 `prefill.limits`，**不写死**（含「报超长标签时回显多少个字」，那是 `limits.tag_preview`）。 | 不改 `input`（报错而不是修好再提交，与服务端 `bili_meta.validate` 同一条约定）；不渲染、不发请求；**不是权威校验**（服务端 `bili_meta.validate` / `bili_upload.validate_collection` 才是，这里报的它一定报、它报的这里尽量也报）。 |
 | [biliStatus.ts](../frontend/src/bilibili/biliStatus.ts#L24) | 稿件/合集状态的**判定**：能不能重试、算不算出问题、哪一档徽标是「还没上传」，以及两件「点这一下该去哪儿」的事：`uploaded` 打开哪个页面（`uploadedTargetUrl`）、`unverified`/`partial` 该补哪几条记录（`retryableUploadIds`）。判据一律是「用户此刻该做什么」，取值本身在 [types.ts](../frontend/src/contracts/types.ts#L266)。 | 不造文案（徽标文案来自服务端 `badge_text`）；不决定重试动作（后端按终态三选一）；不拼 URL（`video_url` 由后端给）。 |
 | [biliProgress.ts](../frontend/src/bilibili/biliProgress.ts#L23) | 上传进度的**判定**：一条记录处在哪一段、在等什么（`uploadStageView`）、一个任务该显示哪一条与多少条已确认（`jobUploadProgress`）、「已用 01:23」（`uploadElapsedLabel`）。四段是四个**步骤**，不代表四段时间。 | 不造文案之外的状态、不请求、不决定是否显示（由 `waiting` 决定）。 |
@@ -196,8 +194,8 @@ PlantUML 源文件：[runtime-concurrency.puml](diagrams/runtime-concurrency.pum
 由此推出三条必须遵守的约定：
 
 1. **进度 hook 在工作线程上执行**，所以它使用自己的 `Session` 写库，不能复用请求级 session。
-2. **从线程发布事件要跨回事件循环**：[_publish_threadsafe](../backend/app/download/job_manager.py#L1228) 先写 `JobEvent` 行，再 `loop.call_soon_threadsafe` 调度 `broker.publish`。异步路径直接用 [_publish](../backend/app/download/job_manager.py#L1215)。
-3. **锁只保护状态转换，不保护下载**：`_item_claim_lock` 只覆盖"刷新 → 校验 queued → 置 running → commit"；`_cookie_import_lock` 只在 403 后的 cookies 刷新导入期间持有。下载本身靠 `should_cancel` 回调协作取消，而不是靠锁。
+2. **从线程发布事件要跨回事件循环**：[_publish_threadsafe](../backend/app/download/job_manager.py#L1200) 先写 `JobEvent` 行，再 `loop.call_soon_threadsafe` 调度 `broker.publish`。异步路径直接用 [_publish](../backend/app/download/job_manager.py#L1187)。
+3. **锁只保护状态转换，不保护下载**：`_item_claim_lock` 只覆盖"刷新 → 校验 queued → 置 running → commit"。下载本身靠 `should_cancel` 回调协作取消，而不是靠锁。（并发导入浏览器 cookies 用的那把锁已随入口移除，见 [ai/bug-fix/038](../ai/bug-fix/038-browser-cookie-import-is-gone.md)。）
 4. **单个条目的收尾出错不能带走 worker**：worker 循环对每条 item 的整段工作加了兜底 —— 崩溃的条目被标记为 `failed`（而不是永远停在 `running`），worker 继续消费队列。没有这层兜底，一个条目的记账错误就会静默地少掉一个并发口。见 [008](../ai/bug-fix/008-return-in-finally-swallows-the-real-error.md)。
 5. **队列不跨进程存活，所以启动时必须先对账**：`asyncio.Queue` 随进程消失，而库里还留着 `queued`/`running`。启动序列是「先改库、再 `start()`」——反过来 worker 会与被扫描的行并发读写。见 [015](../ai/bug-fix/015-orphan-items-never-resume.md)。
 
@@ -211,11 +209,11 @@ PlantUML 源文件：[download-data-flow.puml](diagrams/download-data-flow.puml)
 
 ### 解析链接
 
-`POST /api/analyze` → `YtDlpService.extract_metadata()`（`extract_flat="in_playlist"`，带 cookies）→ `AnalyzeResponse`。若 yt-dlp 抛出的错误同时命中 cookies 提示词，则自动导入浏览器 cookies 后**重试一次**，见 [extract_metadata_with_cookies](../backend/app/api/api_support.py#L95)。
+`POST /api/analyze` → `YtDlpService.extract_metadata()`（`extract_flat="in_playlist"`，带 cookies）→ `AnalyzeResponse`。若 yt-dlp 抛出的错误同时命中 cookies 提示词，则自动导入浏览器 cookies 后**重试一次**，见 [extract_metadata_with_cookies](../backend/app/api/api_support.py#L94)。
 
 ### 建任务与入队
 
-`POST /api/jobs` → 解析 → 选条目（单视频合成 1 条 `VideoEntry`）→ 写 `Job` + N 个 `JobItem` → `enqueue()` 把 queued item id 放进队列。playlist 任务会额外在下载根目录下按安全化标题创建子目录，见 [job_download_dir](../backend/app/api/api_support.py#L87)。
+`POST /api/jobs` → 解析 → 选条目（单视频合成 1 条 `VideoEntry`）→ 写 `Job` + N 个 `JobItem` → `enqueue()` 把 queued item id 放进队列。playlist 任务会额外在下载根目录下按安全化标题创建子目录，见 [job_download_dir](../backend/app/api/api_support.py#L86)。
 
 ### 下载与进度
 
@@ -314,8 +312,8 @@ yt-dlp 自己按「人工先占、自动只补缺」的顺序挑 → 下载成�
 `Job` 与 `JobItem` 共用 `JobStatus` 六态，但驱动者不同：
 
 - `JobItem` 由 worker 驱动：认领时置 `running`，结束按结果置 `succeeded` / `failed` / `cancelled` / `paused`。
-- `Job` 由 [_maybe_finish_job](../backend/app/download/job_manager.py#L541) 收敛：只要还有 running 或 queued 子项就保持 `running`；全部结束才由 [_finish_job](../backend/app/download/job_manager.py#L822) 判定终态（有失败项 → `failed`；被暂停 → `paused`；被取消 → `cancelled`；否则 `succeeded`）。
-- 任务级进度是子项进度的算术平均，见 [_refresh_job_counts](../backend/app/download/job_manager.py#L870)。
+- `Job` 由 [_maybe_finish_job](../backend/app/download/job_manager.py#L541) 收敛：只要还有 running 或 queued 子项就保持 `running`；全部结束才由 [_finish_job](../backend/app/download/job_manager.py#L794) 判定终态（有失败项 → `failed`；被暂停 → `paused`；被取消 → `cancelled`；否则 `succeeded`）。
+- 任务级进度是子项进度的算术平均，见 [_refresh_job_counts](../backend/app/download/job_manager.py#L842)。
 
 并发一致性依赖三点：单条 `JobItem` 只会被一个 worker 认领（`_item_claim_lock` + 状态校验）；worker 线程各自持有 session 并独立 commit；读模型只读不写，避免与写入路径争抢状态。
 
@@ -347,12 +345,12 @@ B站 上传有**自己的两套状态**，与 `JobStatus` 无关：
 
 | 分类 | 判定依据 | 处理 |
 | --- | --- | --- |
-| cookies 缺失/需登录 | 错误链中出现 cookies 提示词 + 登录/bot 关键词，见 [is_cookie_required_error](../backend/app/download/ytdlp_service.py#L830)。 | 刷新浏览器 cookies 后重试一次；仍失败则给出两条可操作建议。 |
-| 媒体流阻断 | 403/`forbidden` 或连接重置族关键词，见 [is_media_stream_blocked_error](../backend/app/download/ytdlp_service.py#L732)。 | 在同清晰度下换 profile 重试；终态文案前置 cookies 状态，并给出降清晰度重启建议。 |
-| 目标格式不可用（**预检阶段**） | 错误文本含 `requested format is not available`，由 [prepare_download](../backend/app/download/ytdlp_service.py#L395) 抛出。 | 归一成 `is_selectable=False`，按原因分类后**真的**用降级清晰度重新预检并下载。 |
+| cookies 缺失/需登录 | 错误链中出现 cookies 提示词 + 登录/bot 关键词，见 [is_cookie_required_error](../backend/app/download/ytdlp_service.py#L808)。 | 刷新浏览器 cookies 后重试一次；仍失败则给出两条可操作建议。 |
+| 媒体流阻断 | 403/`forbidden` 或连接重置族关键词，见 [is_media_stream_blocked_error](../backend/app/download/ytdlp_service.py#L710)。 | 在同清晰度下换 profile 重试；终态文案前置 cookies 状态，并给出降清晰度重启建议。 |
+| 目标格式不可用（**预检阶段**） | 错误文本含 `requested format is not available`，由 [prepare_download](../backend/app/download/ytdlp_service.py#L373) 抛出。 | 归一成 `is_selectable=False`，按原因分类后**真的**用降级清晰度重新预检并下载。 |
 | 目标格式不可用（**下载阶段**） | 同上，但出现在预检通过之后（两次请求之间格式列表变了）。 | 标注 `requested_resolution_unselectable` 并把错误替换成降级说明；按 [架构文档](architecture.md) 的约定，**不**自动重下。 |
 | 停滞 | 看门狗判定字节峰值超时未刷新。 | 直接失败，不换 profile、不重试。 |
-| 其他 | 兜底。 | 透传清洗后的错误文本，见 [readable_error_message](../backend/app/download/ytdlp_service.py#L806)。 |
+| 其他 | 兜底。 | 透传清洗后的错误文本，见 [readable_error_message](../backend/app/download/ytdlp_service.py#L784)。 |
 
 可观测性由三处构成：任务中心读模型（进度/速度/大小/实际分辨率/格式/错误）、`/api/diagnostics`（依赖与稳定性参数，且不回显 token 原文）、以及 `JobEvent` 表（事件审计，可与 SSE 推送交叉核对）。
 

@@ -87,9 +87,9 @@
 | 4 | F-01 删任务清投稿记录 | [037](../bug-fix/037-deleting-a-job-leaves-its-uploads.md) | 5 条用例；A/B 还原后 5 条全红 |
 | 5 | H-03 窄屏标题被挤成单字 | [ui/011](../ui/011-narrow-job-title-squeezed.md) | 真实浏览器 9 条；修复前 0px/36 行 → 修复后 265px/2 行 |
 
-**需要你拍板的两条**（方向上互斥，不宜由我替你定）：
+**需要你拍板的一条**：
 
-- **D-04**：浏览器导入 cookies 在本机结构上必然失败，还带 `taskkill` 的全进程破坏面。选「移除入口、只留扩展导出」还是「保留但明确标注不可用」，是产品决定。
+- ~~**D-04**：浏览器导入 cookies 在本机结构上必然失败，还带 `taskkill` 的全进程破坏面。~~ → 已拍板并落地（2026-11-04）：**移除入口、只留扩展导出**，见 [`ai/bug-fix/038`](../bug-fix/038-browser-cookie-import-is-gone.md)。
 - **C-01**：测速要不要做，取决于媒体流能否真实验收（遗留 3 仍未通过）。**没有基线时做测速，等于给一个未验证的链路加仪表盘** —— 本轮把它从 P2 降为「候选」，这是对上一轮判断的修正。
 
 ---
@@ -205,7 +205,12 @@
 - 判据：项目硬要求「新增失败路径必须给出可执行的下一步」（`docs/requirements.md` 验收口径）。
 
 #### D-04　浏览器导入 cookies 的路径收缩
-- [ ] **未完成** · 状态：候选　优先级：P1（**需要你拍板**）
+- [x] **已完成**（2026-11-04 · [`ai/bug-fix/038`](../bug-fix/038-browser-cookie-import-is-gone.md)）　优先级：~~P1~~
+- 拍板结果：**方案 ①（移除入口、只留扩展导出）**。方案 ② 只是把风险解释一遍 —— 按钮还在、失败分支还在，而那条分支里最有效的一步是结束用户所有 Edge 进程。
+- 删的是整条链路：UI（下拉框 / 按钮 / 锁库提示）、`POST /api/cookies/from-browser`、`host/browser_cookies.py`（含 `taskkill` 与 CDP 回退）、`YtDlpService` 的转发方法、`CookieStatus` 的两个永远为空的字段，以及**两处用户看不见的自动导入**（解析失败后重试一次、下载失败后重试当前子视频）。
+- 失败文案收口到 `error_advice.cookie_required_message`：解析、下载、诊断建议三处共用一句，只指向「导出 cookies.txt → 上传」，不再提已删按钮。
+- 验证：后端 `test_cookie_import_removed.py` 8 条（路由 404 / 字段消失 / 只尝试一次 / 并发两次都干净 / 源码里不再有 `taskkill` 与 `browser_cookies`）；前端新增「没有任何导入入口」与「需要登录时给导出路径」；全量 1325 + 342 全绿，契约与 openapi 同步。
+- 遗留：用户得自己装扩展导出（多一步）；导出脚本需要在有头浏览器里跑，本轮未在干净机器复验；`CookieStatus` 删字段属对外契约变化（本仓库只有自带前端消费）。
 - 现状：`ai/perf/PLAN.md` §9.2-B 实测：本机 Edge 的 YouTube cookies 全是 v20 app-bound 加密，离线解密必失败；CDP 回退路线曾清空真实 cookie 库（53 → 0，见 [`ai/bug-fix/005`](../bug-fix/005-edge-cdp-fallback-touches-the-live-profile.md)）；`_close_browser_for_cookie_import()` 仍在用 `taskkill /IM msedge.exe /F /T`（`backend/app/host/browser_cookies.py:167`，本轮核对仍在）。
 - 痛点：界面上有一个「从浏览器导入」的入口，在本机结构上**必然失败**，且失败路径带数据破坏风险。
 - 建议：二选一 —— ① 移除入口，主路径只留「浏览器扩展导出 cookies.txt」+ 分步指引；② 保留入口但在点击前就说明「本机 Edge 加密方式不支持，请用导出方式」。

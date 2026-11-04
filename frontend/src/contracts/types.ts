@@ -185,12 +185,11 @@ export interface Settings {
   bili_auto_retry_max_attempts: number;
 }
 
+/** cookies 文件的状态。**来源只有用户给的文件一种**（浏览器导入入口已移除，见 ai/bug-fix/038）。 */
 export interface CookieStatus {
   enabled: boolean;
   filename: string | null;
-  source?: "none" | "file" | "browser";
-  browser?: string | null;
-  imported_count?: number | null;
+  source?: "none" | "file";
 }
 
 export interface ProxyTestResult {

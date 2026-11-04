@@ -26,8 +26,9 @@
 
 - `subprocess.run([ffmpeg, ...])` 使用固定参数列表（[system_open.py](../backend/app/host/system_open.py#L100)、[ytdlp_service.py](../backend/app/download/ytdlp_service.py#L628)）
 - `subprocess.Popen([biliup, ...])` 用 list 形式启动投稿进程、不经 shell；`biliup` 的路径来自候选探测或配置，标题/简介/标签等内容作为**独立 argv 元素**传入（[bili_bin.py](../backend/app/bilibili/bili_bin.py#L226)）
-- `subprocess.run([taskkill, ...])` 使用已知固定命令（[browser_cookies.py](../backend/app/host/browser_cookies.py#L141)）
-- `subprocess.Popen([edge, --remote-debugging-port=..., ...])` 参数由常量或系统路径构成，非用户可控（[browser_cookies.py](../backend/app/host/browser_cookies.py#L157)）
+- ~~`subprocess.run([taskkill, ...])` / `subprocess.Popen([edge, --remote-debugging-port=..., ...])`~~：
+  这两条随浏览器 cookies 导入入口一起**删除**（2026-11-04，见 [038](../ai/bug-fix/038-browser-cookie-import-is-gone.md)）。
+  后端现在没有任何「结束进程」或「启动浏览器」的调用点。
 - 「打开方式」三级链：① 本进程内调 [SHOpenWithDialog](../backend/app/host/system_open.py#L71)（`shell32` 的文档化导出）；② 退回 `Popen(["rundll32.exe", "shell32.dll,OpenAs_RunDLL", path])`（命令名与导出项都是常量、list 形式、不经 shell，路径由后端从数据库推导、不是前端传的）；③ 自带对话框里用户选中的 exe 用 `Popen([exe, file])` 启动。三条都不接受前端传入的路径或程序名
 - `subprocess.run(["netstat", ...])` / `(["tasklist", "/FI", f"PID eq {pid}", ...])` 用于识别端口占用者：命令名与参数都是常量，`pid` 由 [parse_listening_pids](../backend/app/host/dev_server.py#L71) 用 `int()` 从 `netstat` 输出解析、解析失败即跳过，因此无法注入（[dev_server.py](../backend/app/host/dev_server.py#L119)）
 - yt-dlp 通过 Python SDK（`yt_dlp.YoutubeDL`）调用，非 shell 或 subprocess
@@ -96,11 +97,11 @@
 
 详情：
 
-- [GET /api/diagnostics](../backend/app/api/routers/diagnostics.py#L29) 仅返回 PO token / visitor data 的"是否已配置"布尔值，不返回原文（[get_dependency_status](../backend/app/download/ytdlp_service.py#L296)）
+- [GET /api/diagnostics](../backend/app/api/routers/diagnostics.py#L29) 仅返回 PO token / visitor data 的"是否已配置"布尔值，不返回原文（[get_dependency_status](../backend/app/download/ytdlp_service.py#L290)）
 - [sanitize_log_message](../backend/app/common/log_safety.py#L20) 在写入日志前通过正则替换移除 URL query string（包含 cookie、token、authorization 等参数）
 - 代理 URL 在日志与 API 响应里都先经 [redact_proxy_credentials](../backend/app/host/proxy.py#L62) 脱敏（`user:pass@` → `***`）
 - cookies 文件（`data/cookies.txt`、B站 的 `data/bili_cookies.json`）和 `.env` 文件均在 `.gitignore` 中排除，不会进入 Git
-- 浏览器 cookie 导入只提取 YouTube/Google 域名（`YOUTUBE_COOKIE_DOMAIN_SUFFIXES`，[browser_cookies.py](../backend/app/host/browser_cookies.py#L20)）
+- cookies 只来自用户上传的文件；应用不再读任何浏览器配置（见 [038](../ai/bug-fix/038-browser-cookie-import-is-gone.md)）
 
 新增的两处暴露面（均为本机、且是排障必需，见第 18 节的复核项）：
 
@@ -111,17 +112,15 @@
 
 | 评估 | 说明 |
 | --- | --- |
-| **可接受** | Cookie 导入流程安全，有过滤和访问控制。 |
+| **可接受** | 只读用户自己提供的 `cookies.txt`，不接触浏览器配置，也没有结束进程的调用点。 |
 
 详情：
 
-- 浏览器 cookie 导入使用 [BrowserCookieImporter](../backend/app/host/browser_cookies.py#L67)，支持 Edge/Chrome/Firefox/Brave/Chromium 等
-- 导入的 cookies 过滤为仅 youtube.com 和 google.com 域名
-- Edge cookies 数据库被锁时，提供提示并支持关闭浏览器重试
-- CDP fallback（[_extract_edge_cookies_via_cdp](../backend/app/host/browser_cookies.py#L176)）使用临时 headless Edge 实例，完成后立即终止进程
-- Cookie 导入由 `threading.Lock`（[job_manager.py](../backend/app/download/job_manager.py#L57)）保护，防止并发导入导致的资源竞争
+- 唯一的入口是 `POST /api/cookies`（上传文件）；没有「从浏览器导入」的 API、UI 或自动重试
+- 文件落到 `data/cookies.txt`，该目录不进 Git；接口只回 `enabled/filename/source`，不回显内容
+- 旧的 `browser_cookies.py`（含 `taskkill` 与 CDP fallback）已整文件删除，见 [038](../ai/bug-fix/038-browser-cookie-import-is-gone.md)
+- 因此不再存在「同机进程可连调试端口」的那段攻击面（原 CDP fallback 的 `--remote-allow-origins=*`）
 
-**注意**：CDP fallback 启动 Edge 时使用了 `--remote-allow-origins=*`。虽然使用了随机空闲端口且进程在获取 cookies 后立即终止（超时 15 秒 + 10 秒），且仅绑定 `127.0.0.1`，但在 Headless Edge 短暂运行期间，同机的其他本地进程理论上可以连接到调试端口。攻击面极小（需要本机已存在恶意进程），且 YouTube cookies 在 Edge 中通常已在登录态下。
 
 ## 9. 文件系统操作安全
 

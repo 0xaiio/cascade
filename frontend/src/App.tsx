@@ -13,7 +13,6 @@ import {
   getBiliPrefill,
   getBiliUploadsSummary,
   getSettings,
-  importBrowserCookies,
   listBiliSeasons,
   listJobs,
   openJobFolder,
@@ -41,7 +40,6 @@ import { StatusPill } from "./shared/ui/StatusPill";
 import { UrlAnalyzer } from "./download-request/UrlAnalyzer";
 import { groupNotice, noticeTarget } from "./bilibili/biliForm";
 import { BILI_CALL_TIMEOUT_MS } from "./bilibili/biliHealth";
-import { browserCookieLockFromError, type BrowserCookieLock } from "./cookies/cookieLock";
 import { errorMessage } from "./shared/errors";
 import { chooseAvailableResolution } from "./shared/quality";
 import { effectiveSubtitleSourceForAnalysis } from "./shared/subtitles";
@@ -157,7 +155,6 @@ export default function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [browserCookieLock, setBrowserCookieLock] = useState<BrowserCookieLock | null>(null);
   const [history, setHistory] = useState<string[]>(() => JSON.parse(localStorage.getItem("download-history") ?? "[]"));
   const [runtimeSaveMessage, setRuntimeSaveMessage] = useState("");
   const runtimeSaveRequestSeq = useRef(0);
@@ -282,7 +279,6 @@ export default function App() {
       format_id: null,
       subtitle_languages: settings?.default_subtitle_languages ?? current.subtitle_languages
     }));
-    setBrowserCookieLock(null);
   }
 
   async function runAnalyze(targetUrl: string) {
@@ -298,13 +294,14 @@ export default function App() {
     setError(null);
   }
 
-  function handleAppError(err: unknown, fallback: string, pendingAnalyzeUrl: string | null = null) {
-    const lock = browserCookieLockFromError(err, pendingAnalyzeUrl);
-    if (lock) {
-      setBrowserCookieLock(lock);
-      setError(lock.message);
-      return;
-    }
+  /**
+   * 把一次失败写进页面级回执条。
+   *
+   * 以前这里还会先判「是不是浏览器 cookies 被锁」，并把那次解析地址暂存起来等用户点
+   * 「关闭 Edge 并导入」。那条路已随浏览器导入入口一起移除（见 ai/bug-fix/038）：
+   * 现在失败只有一种处置 —— 原样显示后端给出的、带下一步的消息。
+   */
+  function handleAppError(err: unknown, fallback: string) {
     setError(err instanceof Error ? err.message : fallback);
   }
 
@@ -316,7 +313,7 @@ export default function App() {
     try {
       await runAnalyze(targetUrl);
     } catch (err) {
-      handleAppError(err, "解析失败", targetUrl);
+      handleAppError(err, "解析失败");
     } finally {
       setIsAnalyzing(false);
     }
@@ -407,39 +404,12 @@ export default function App() {
     clearError();
     await uploadCookies(file);
     applySettings(await getSettings());
-    setBrowserCookieLock(null);
   }
 
   async function handleCookieDelete() {
     clearError();
     await deleteCookies();
     applySettings(await getSettings());
-    setBrowserCookieLock(null);
-  }
-
-  async function handleBrowserCookieImport(browser: string, closeBrowserIfLocked = false) {
-    clearError();
-    await importBrowserCookies(browser, closeBrowserIfLocked);
-    applySettings(await getSettings());
-    setBrowserCookieLock(null);
-  }
-
-  async function handleLockedBrowserCookieImport() {
-    if (!browserCookieLock) return;
-    const confirmed = window.confirm("将关闭所有 Edge 窗口以释放 cookies 数据库，然后重新导入。是否继续？");
-    if (!confirmed) return;
-    const pendingAnalyzeUrl = browserCookieLock.pendingAnalyzeUrl;
-    clearError();
-    await handleBrowserCookieImport("edge", true);
-    if (!pendingAnalyzeUrl) return;
-    setIsAnalyzing(true);
-    try {
-      await runAnalyze(pendingAnalyzeUrl);
-    } catch (err) {
-      handleAppError(err, "解析失败", pendingAnalyzeUrl);
-    } finally {
-      setIsAnalyzing(false);
-    }
   }
 
   // ---------------------------------------------------------------- B站 上传
@@ -758,17 +728,10 @@ export default function App() {
               settings={settings}
               url={url}
               duplicateWarning={duplicateWarning}
-              browserCookieLock={browserCookieLock}
               isAnalyzing={isAnalyzing}
               onAnalyze={handleAnalyze}
-              onBrowserCookieImport={(browser) => handleBrowserCookieImport(browser).catch((err) => handleAppError(err, "导入 cookies 失败"))}
               onCookieDelete={() => void handleCookieDelete().catch((err) => handleAppError(err, "清除 cookies 失败"))}
               onCookieUpload={(file) => void handleCookieUpload(file).catch((err) => handleAppError(err, "上传 cookies 失败"))}
-              onLockedBrowserCookieImport={() =>
-                void handleLockedBrowserCookieImport().catch((err) =>
-                  handleAppError(err, "导入 cookies 失败", browserCookieLock?.pendingAnalyzeUrl ?? null)
-                )
-              }
               onUrlChange={setUrl}
             />
             {analysis && (

@@ -13,6 +13,7 @@ from sqlmodel import Session, select
 
 from ..contracts.config import AppSettings
 from .download_progress import DownloadProgressAggregator
+from .error_advice import cookie_required_message
 from ..infra.events import EventBroker
 from .progress_persist import ProgressPersistGate
 from ..common.log_safety import sanitize_log_message
@@ -62,7 +63,6 @@ class JobManager:
         self._deleted_items: set[str] = set()
         self._runtime_restart_items: set[str] = set()
         self._loop: asyncio.AbstractEventLoop | None = None
-        self._cookie_import_lock = threading.Lock()
         self._item_claim_lock = threading.Lock()
 
     async def start(self) -> None:
@@ -662,7 +662,7 @@ class JobManager:
                 or item.id in self._deleted_items
                 or item.id in self._runtime_restart_items
             )
-            self._download_with_cookie_refresh(
+            self._download_with_cookie_guidance(
                 item.source_url,
                 options,
                 progress_hook,
@@ -762,7 +762,7 @@ class JobManager:
                     }
                 )
 
-    def _download_with_cookie_refresh(
+    def _download_with_cookie_guidance(
         self,
         url: str,
         options: DownloadOptions,
@@ -770,6 +770,13 @@ class JobManager:
         should_cancel,
         download_dir: Path,
     ) -> None:
+        """下载一个条目；cookies 只从文件来，失败也不再替用户去碰浏览器。
+
+        以前这里会在「需要登录 / bot 校验」时自动导入浏览器 cookies 再重试一次。
+        那条路已移除（必然失败 + 失败分支会 taskkill 掉用户所有 Edge 窗口，见 ai/bug-fix/038），
+        现在只做一次尝试，并把「怎么导出 cookies.txt」写进失败消息 —— 重试同一个必然失败的
+        动作只会让用户多等一轮，还把真正的病因埋在一次「自动刷新」后面。
+        """
         try:
             self.service.download(
                 url,
@@ -782,42 +789,7 @@ class JobManager:
         except Exception as exc:
             if not YtDlpService.is_cookie_required_error(exc):
                 raise
-            try:
-                self._import_browser_cookies_after_cookie_error()
-            except Exception as import_exc:
-                raise RuntimeError(self._cookie_refresh_failed_message(exc, import_exc)) from import_exc
-            try:
-                self.service.download(
-                    url,
-                    options,
-                    progress_hook,
-                    should_cancel=should_cancel,
-                    cookies_path=self._cookies_path(),
-                    download_dir=download_dir,
-                )
-            except Exception as retry_exc:
-                if YtDlpService.is_cookie_required_error(retry_exc):
-                    raise RuntimeError(self._cookie_refresh_did_not_satisfy_youtube_message(retry_exc)) from retry_exc
-                raise
-
-    def _import_browser_cookies_after_cookie_error(self) -> None:
-        with self._cookie_import_lock:
-            self.service.import_browser_cookies("auto", self.settings.cookies_path)
-
-    def _cookie_refresh_failed_message(self, original_error: Exception, import_error: Exception) -> str:
-        return (
-            "YouTube 要求重新登录或通过 bot 校验，后台已尝试刷新浏览器 cookies，但自动导入失败："
-            f"{import_error}。请确认浏览器已登录 YouTube 后，在解析面板点击“从浏览器导入”；"
-            "如果提示 Edge cookies 被锁定，请使用“关闭 Edge 并导入”。"
-            f" 原始 yt-dlp 错误：{original_error}"
-        )
-
-    def _cookie_refresh_did_not_satisfy_youtube_message(self, retry_error: Exception) -> str:
-        return (
-            "后台已重新导入浏览器 cookies 并重试，但 YouTube 仍要求登录或 bot 校验。"
-            "请在浏览器确认账号可正常播放该视频，重新导入 cookies，或手动上传有效的 cookies.txt。"
-            f" yt-dlp 错误：{retry_error}"
-        )
+            raise RuntimeError(cookie_required_message(exc)) from exc
 
     def _finish_job(self, session: Session, job: Job) -> None:
         if job.id in self._deleted:

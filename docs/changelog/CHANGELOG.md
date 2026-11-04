@@ -37,6 +37,9 @@
 >
 > 详见下方「二·续二」与附录 C。
 >
+> **2026-11-04 追加**：D-04「移除浏览器 cookies 导入入口」已落地（`ai/bug-fix/038`），
+> 见下方「二·续三」。这一节只追加该条，不改写前面的锚点统计与历史段落。
+>
 > 本文件是**视频素材清单**：阶段一按 `5ed7266` 冻结；做下一支视频时以 `main` HEAD（`cb8c8ef`）为基准重新统计，
 >
 > 期间每一处的完整记录看 [`ai/bug-fix/`](../../ai/bug-fix/README.md) 与 [`ai/ui/`](../../ai/ui/README.md) 的索引。
@@ -246,6 +249,44 @@
 
 - `e6f83af`：第二支宣传视频成片与文稿入库（`ai/promotion/v2-2026-10-22/`），v1 物料归档到 `ai/promotion/v1-2026-10-17/`。
 - `44a8c5b`：`ai/` 的规划文档归入 `ai/plan/`（`plan.md` / `tasks.md` / `brainstorming.md`）。
+
+---
+
+## 二·续三：D-04 —— 移除浏览器 cookies 导入入口（2026-11-04）
+
+> 一句话：**界面上不再有一个必然失败的按钮**，而它的失败分支曾会关掉你所有 Edge 窗口。
+
+### 1. 删掉了什么
+
+| 位置 | 内容 |
+| --- | --- |
+| 解析面板 | 「自动检测浏览器」下拉框、「从浏览器导入」按钮、「关闭 Edge 并导入」锁库提示 |
+| 接口 | `POST /api/cookies/from-browser`（现在 404） |
+| 后端 | `host/browser_cookies.py` 整个文件（含 `taskkill /IM msedge.exe /F /T` 与 CDP 回退） |
+| 契约 | `BrowserCookieImportRequest`；`CookieStatus` 的 `browser` / `imported_count`；`CookieSource` 的 `browser` |
+| 自动路径 | 解析失败后「自动导入再重试一次」；下载失败后「自动导入并重试当前子视频」 |
+
+### 2. 为什么是「删」而不是「标注不可用」
+
+本机 Edge 的 YouTube cookies 是 **v20 app-bound 加密**，密钥绑定正在运行的 Edge 进程本身，
+离线程序解不开；更早的 CDP 回退还清空过真实 cookie 库（53 → 0）。
+保留按钮只能降低误点率，**去不掉那条会杀进程的路**。
+
+### 3. 现在怎么用
+
+1. 浏览器扩展（*Get cookies.txt LOCALLY* 之类）在 `youtube.com` 页面导出 Netscape 格式；
+   或运行 `python scripts/export_cookies_via_cdp.py`（独立 profile，有头窗口）。
+2. 在解析面板点「选择 cookies」上传。
+3. 点「校验 cookies」确认结论是「登录态有效」。
+
+解析遇到需要登录 / bot 校验时，应用**只尝试一次**，错误里直接给出上面这三步 —— 不再替你碰浏览器。
+
+### 4. 验证口径
+
+- 后端 `test_cookie_import_removed.py` 8 条（路由 404、字段消失、只尝试一次、过期文件边界、
+  两个并发解析都干净失败、源码里不再有 `taskkill` 与 `browser_cookies`）；
+- 前端「没有任何导入入口」与「需要登录时给出导出路径」；
+- 契约闸门 + `docs/openapi.yaml` 同步。
 
 ---
 

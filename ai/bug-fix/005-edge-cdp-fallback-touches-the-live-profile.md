@@ -1,5 +1,9 @@
 # 005 · Edge 的 CDP 回退既必然失败、又会破坏真实 cookie 库
 
+> **后续（2026-11-04）**：整个「从浏览器导入 cookies」入口已移除（含本记录里的 CDP 回退与
+> `taskkill` 分支），见 [038](038-browser-cookie-import-is-gone.md)。下面提到的代码**已不存在**，
+> 保留作历史与判据。
+
 - 状态：已修复（该路径已停用）
 - 提交：`fix(cookies): stop pointing CDP at the live Edge profile`
 - 影响面：UI 上的「从浏览器导入 cookies」→ Edge 分支

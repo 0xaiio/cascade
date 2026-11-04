@@ -47,7 +47,10 @@ def test_cookie_required_error_reports_current_cookie_state() -> None:
     assert advice is not None
     assert advice.code == "cookie_required"
     assert "未配置" in advice.detail
-    assert any("from-browser" in step or "export_cookies_via_cdp" in step for step in advice.next_steps)
+    # 下一步只能指向「自己导出再上传」：应用里已经没有「从浏览器导入」这个入口了
+    # （见 ai/bug-fix/038），再让用户去点一个不存在的按钮就是新的名实不符。
+    assert any("export_cookies_via_cdp" in step and "选择 cookies" in step for step in advice.next_steps)
+    assert not any("从浏览器导入" in step or "关闭 Edge" in step for step in advice.next_steps)
 
 
 def test_proxy_failure_is_reported_with_the_effective_proxy() -> None:

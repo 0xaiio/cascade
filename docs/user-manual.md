@@ -151,10 +151,10 @@ Playlist 展开后会用浅色分组背景承载子视频列表，便于区分�
   （实测参照卡片位移 0px）。
 - **窄屏（手机宽度）也一样**：红条铺满内容宽度、文字自己换行，不会把页面撑出横向滚动条。
 
-哪些失败走这条红条：解析链接、创建任务、cookies 上传/清除/从浏览器导入、任务中心的暂停/重启/删除/
+哪些失败走这条红条：解析链接、创建任务、cookies 上传/清除、任务中心的暂停/重启/删除/
 批量操作、复制链接、下载选项里的限速与重试保存、B站 的打不开上传窗口与各类重试、以及首次加载设置失败。
 
-哪些**不**走红条（它们就近显示，离你正在操作的地方更近）：解析面板里的 cookies 锁库提示、
+哪些**不**走红条（它们就近显示，离你正在操作的地方更近）：
 任务行上播放/打开文件夹/打开字幕的失败、上传表单里的错误、设置项的「保存中 / 已保存 / 保存失败」。
 判据是「这条错误在说谁的事」—— 说整页的失败用红条，说某个输入框或某一行的就贴在那一处。
 
@@ -446,15 +446,17 @@ HTTP 状态码、耗时、收到多少字节、原始异常，以及下一步建
 为什么必须校验：实测过一份 9 条 cookie 的文件，`SID`、`HSID` 都在，yt-dlp 也不报错，
 但每个请求都是匿名的——因为那 9 条全部落在 `.google.com`。只看「文件存在」永远发现不了这件事。
 
-### 其它导入入口与边界
+### 为什么没有「从浏览器导入」
 
-- 从浏览器导入可选择「自动检测浏览器」或指定 Edge、Chrome、Firefox、Brave、Chromium 等，见 [browser_cookies.py](../backend/app/host/browser_cookies.py#L19)。
-- Edge 正在运行导致数据库锁定时会返回结构化错误，见 [BrowserCookieImportError](../backend/app/host/browser_cookies.py#L23)。
-  界面上的「关闭 Edge 并导入」会 `taskkill /IM msedge.exe /F /T`，**会关掉你所有 Edge 窗口（含未保存的标签页）**，
-  需要你显式点击；能自己先关掉浏览器的话，优先手动关。
-- **不要**让应用去读取你正在使用的 Edge/Chrome 配置目录：Edge 的 cookie 是 v20 app-bound 加密，
-  密钥绑定正在运行的浏览器进程，离线程序解不开；挂载真实配置目录的变通做法会**破坏浏览器的 cookie 库**
-  （实测过 53 条变 0 条），这条路径已从应用中彻底移除。
+这个入口曾经存在，现在**已彻底移除**（2026-11-04，见 [038](../ai/bug-fix/038-browser-cookie-import-is-gone.md)）：
+
+- Edge 的 cookie 是 v20 app-bound 加密，密钥绑定正在运行的浏览器进程，**任何离线程序都解不开** ——
+  那个按钮在大多数机器上点了只会失败。
+- 它的失败分支会调用 `taskkill` 结束**你所有** Edge 进程（含未保存的标签页），这比「导入失败」代价大得多。
+- 挂载真实配置目录的变通做法还会**破坏浏览器的 cookie 库**（实测 53 条变 0 条）。
+
+所以现在只有一条路：**你自己导出文件，再交给应用**（上面三种方式）。解析遇到需要登录时，
+应用只会尝试一次，并在错误里直接告诉你「去导出 cookies.txt 再上传」—— 不会再替你碰浏览器。
 
 Cookies 会保存到本地 `data/cookies.txt`，该目录不进入 Git。
 
@@ -503,7 +505,7 @@ YouTube 把登录态与出口 IP 绑定。导出 cookies 时走代理 A、下载
 
 默认下载根目录是 `downloads/`，数据库和 cookies 默认在 `data/`，配置默认值见 [AppSettings](../backend/app/contracts/config.py#L19)。Playlist 会在下载根目录下创建同名子文件夹；目录选择和保存逻辑见 [select_download_dir](../backend/app/api/routers/settings.py#L99)。
 
-产物命名模板固定为 `<标题(最多200字节)> [<YouTube id>].<扩展名>`，见 [build_download_options](../backend/app/download/ytdlp_service.py#L496)。因此即使数据库里的 `output_path` 丢失，后端仍能按文件名中的 id 找回同名视频与 sidecar。
+产物命名模板固定为 `<标题(最多200字节)> [<YouTube id>].<扩展名>`，见 [build_download_options](../backend/app/download/ytdlp_service.py#L474)。因此即使数据库里的 `output_path` 丢失，后端仍能按文件名中的 id 找回同名视频与 sidecar。
 
 ## 常见问题入口
 

@@ -1,9 +1,10 @@
 @startuml
-title Cookies Import and Use Flow
+title Cookies: Export, Upload and Use
 skinparam shadowing false
 
 start
-:User analyzes URL or starts download;
+:User exports cookies.txt outside the app\n(browser extension, or scripts/export_cookies_via_cdp.py);
+:Upload it in the analyzer panel\n(or place it at data/cookies.txt);
 if (cookies file exists?) then (yes)
   :Pass data/cookies.txt to yt-dlp;
 else (no)
@@ -11,24 +12,15 @@ else (no)
 endif
 
 if (YouTube requires login/bot check?) then (yes)
-  :Try browser cookie import;
-  if (browser cookie DB locked?) then (yes)
-    if (Edge and user confirmed close?) then (yes)
-      :Close Edge and retry import;
-    else (no)
-      :Return browser_locked error;
-      stop
-    endif
-  endif
-
-  if (Edge DPAPI decrypt fails?) then (yes)
-    :Start temporary headless Edge CDP session;
-    :Read YouTube/Google cookies via DevTools;
-  endif
-
-  :Filter YouTube/Google cookies;
-  :Save data/cookies.txt;
-  :Retry analyze/download once;
+  :Return ONE actionable error:/nexport cookies.txt and upload it;
+  note right
+    The app never reads a browser profile.
+    Edge cookies are v20 app-bound encrypted
+    (undecryptable offline), and the old
+    fallback closed every Edge window.
+    See ai/bug-fix/038.
+  end note
+  stop
 else (no)
   :Continue normally;
 endif
