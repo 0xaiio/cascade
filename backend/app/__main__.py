@@ -22,10 +22,12 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 from .contracts.config import get_settings
 from .host.dev_server import describe_occupant, find_available_port, port_available
+from .host.instance_lock import InstanceLock, InstanceLockError
 
 _AUTO_PORT_ATTEMPTS = 20
 
@@ -82,14 +84,40 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    port = _resolve_port(args.host, args.port, auto_port=args.auto_port)
-    print(f"服务地址：http://{args.host}:{port}")
+    # **先取单实例锁，再谈端口**：`--auto-port` 换的只是监听端口，库与 .part 还是同一份 ——
+    # 让它绕过锁，等于给「两个进程同时恢复、同时写同一个 .part」开了正门。
+    lock = InstanceLock(settings.data_dir)
+    try:
+        lock.acquire(note=f"pid={os.getpid()}")
+    except InstanceLockError as exc:
+        print(f"{exc}。", file=sys.stderr)
+        print(
+            "两个实例同时跑会同时恢复同一批孤儿任务、往同一个 .part 写，产物会坏，而界面上看不到任何报错。",
+            file=sys.stderr,
+        )
+        print("下一步（任选一条）：", file=sys.stderr)
+        print("  1) 找到并关掉那个实例（锁文件里写着它的 pid）", file=sys.stderr)
+        print(
+            "  2) 让这一份用另一个数据目录："
+            + r"YTDL_DATA_DIR=D:\cascade-data-2"
+            + "（两份各用各的库与产物）",
+            file=sys.stderr,
+        )
+        print("  3) 确认那个进程已经死了：删掉锁文件后重试（操作系统锁会随进程退出自动释放）", file=sys.stderr)
+        raise SystemExit(2)
 
-    # 延迟导入：--help 与端口预检失败这两条路径不必付 uvicorn 的导入开销。
-    import uvicorn
+    try:
+        port = _resolve_port(args.host, args.port, auto_port=args.auto_port)
+        lock.update_note(f"pid={os.getpid()} port={port}")
+        print(f"服务地址：http://{args.host}:{port}")
 
-    uvicorn.run("app.main:app", host=args.host, port=port, reload=args.reload)
-    return 0
+        # 延迟导入：--help 与端口预检失败这两条路径不必付 uvicorn 的导入开销。
+        import uvicorn
+
+        uvicorn.run("app.main:app", host=args.host, port=port, reload=args.reload)
+        return 0
+    finally:
+        lock.release()
 
 
 if __name__ == "__main__":

@@ -63,6 +63,7 @@
 | [033](033-the-response-keeps-counting-after-success.md) | 手动补传字幕成功了，界面还在倒计时 | `—` | 两条路的「收工」都发生在**读模型构造之后**：`_reverify_work` / `_group_work` 先 `read_upload(...)` （此时 `auto_retry=waiting`），`retry_upload` / `retry_season` 才 `_close_auto_retry()` ⇒ 响应说 waiting、库里说 done；而收工也不发事件，被 `*_finished` 叫去刷新的客户端读到的还是旧值。修法：收工后重读一次读模型 + `_close_auto_retry` 补发 `bili_auto_retry_changed` |
 | [034](034-vitest-drops-test-files-when-parallel.md) | 并行跑 vitest 会丢掉整个测试文件，汇总行仍写 passed | `—` | 本机 fs shim 对同一临时路径的并发写回 `EPERM`，vitest 的 module runner `fetch` 失败 ⇒ 该文件的模块取不到、**从未被收集**；三次并行丢的不是同一批（24/255、23 文件、24/212）。只 grep `Tests … passed` 或只看退出码都不可靠 —— 唯一判据是「跑了几个文件」与磁盘对齐。修法：`npm test` 默认 `--no-file-parallelism` + 新增 `npm run test:counts` 核数闸门 |
 | [035](035-diagnostics-shows-the-stored-value.md) | 诊断只回显「库里的值」，看不出进程还在用旧值 | `—` | `/api/diagnostics` 从未读过 `Setting` 表，也没区分「库」与「运行态」⇒ 032 那类故障（无异常、无日志）唯一的现场反而在说「配置是对的」。修法：新增 `settings_effective`，每项给出 `stored` 与 `runtime`（从 `YtDlpService` / 调度器策略上读）+ `differs`；自检只读，设置页仅在真有差异时多一条红字 |
+| [036](036-two-instances-write-the-same-part.md) | 两个进程同时跑在同一份 `data/` 上，同时写同一个 `.part` | `—` | 启动路径只有端口预检，而 `--auto-port` 会换端口继续起 —— 端口是网络资源，库与 `.part` 是磁盘资源，换端口对后者毫无保护；两个进程同时恢复同一批孤儿条目，坏的是产物且没有任何报错。修法：`data/app.instance.lock` 上的操作系统文件锁（Windows `msvcrt` / POSIX `flock`），在解析端口**之前**取锁；实测两个坑：Windows 字节锁连读都禁止（备注要挪到第 1 字节）、空文件锁 1 字节等于没锁（先写第 0 字节） |
 
 ## 本轮（2026-10-01）背景
 
@@ -303,9 +304,11 @@ TOTAL 89%），再逐个看**未覆盖的行本身**是不是也可能错 ——
 20. **浮层没有做过浏览器级测量**（014 遗留）。右下角 20px 间距、360px 上限、`z-index: 60`
    是按 `.modal-backdrop`（50）推的，没量过它会不会盖住任务中心右下角的按钮
    （`ai/ui/` 那套 CDP 探针本轮没跑）。
-21. **两份进程同时启动会重复恢复同一批孤儿条目**（015 遗留）。端口预检默认只允许一个实例，
-   但 `--auto-port` 可以绕过；此时两个进程会同时重新排队、同时往同一个 `.part` 写。
-   修复前也有同类风险（两人同时点同一个下载），本轮没加锁。
+21. ~~**两份进程同时启动会重复恢复同一批孤儿条目**~~ → 已由 [036](036-two-instances-write-the-same-part.md) 处理
+   （2026-11-04）：`data/app.instance.lock` 上的操作系统文件锁，`--auto-port` 不能绕过；
+   强杀进程后锁自动释放（实测）。
+   **遗留**：只有 `python -m app` 这条路加锁，直接 `uvicorn app.main:app` 不受保护；
+   两个不同 `data/` 指向同一批下载目录时无法判断，那是用户显式选择的两套库。
 22. **恢复不做分批也不做聚合**（015 遗留）。一次启动可能立刻把几百条塞进队列（受并发限制，
    但「一开应用就开始跑几十 GB」对用户是突然的），且 300 个任务被恢复就写 300 条
    `jobs_recovered` 事件。要改得先想清楚「分批」的判据是什么。

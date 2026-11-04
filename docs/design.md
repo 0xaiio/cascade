@@ -78,6 +78,7 @@
 | [error_advice.py](../backend/app/download/error_advice.py#L116) | L3 领域 | 异常链 → 可执行诊断（JS challenge / cookies / 代理 / 媒体流四类）。 | 纯字符串判定，不联网、不读库、不改变重试行为。 |
 | [runtime_env.py](../backend/app/host/runtime_env.py#L58) | L5 纯工具 | 摘除会打坏 JS 运行时的宿主环境变量，并返回可留痕的记录。 | 只动本进程 `os.environ`，不改系统设置。 |
 | [dev_server.py](../backend/app/host/dev_server.py#L44) | L5 纯工具 | 端口可用性探测、向后找可用端口、`netstat` / `tasklist` 输出的解析。 | 不启动服务、不改配置；拿不到占用者信息时返回 `None` 而不是猜一个名字。 |
+| [instance_lock.py](../backend/app/host/instance_lock.py#L1) | L5 纯工具 | **单实例锁**：对 `data/app.instance.lock` 取操作系统的非阻塞文件锁（Windows `msvcrt` / POSIX `flock`），拿不到就抛 `InstanceLockError`。 | 锁**跟着 `data/` 走**（两份不同数据目录是合法用法）；用文件锁而不是「存在即占用」，否则强杀会留下一个永远挡路的标记文件；锁文件不删（避免 inode 竞态）。 |
 | [output_paths.py](../backend/app/download/output_paths.py#L13) | L3 领域 | 输出文件、中间文件与 sidecar 的候选路径解析与发现。 | 不删除文件（删除由 `job_manager` 在受限根目录内执行）。 |
 | [safe_delete.py](../backend/app/download/safe_delete.py#L22) | L3 领域 | 删除产物的**路径安全判定**：允许范围（`DeleteScope`）、某路径是否可删、任务目录是否可收走。纯函数，可单测。 | 不删任何东西（`unlink` / `rmdir` 由 `job_manager` 执行），不枚举候选（枚举在 `output_paths`）。 |
 | [bili_upload.py](../backend/app/bilibili/bili_upload.py#L299) | L3 领域 | **单次上传的领域逻辑**：编排 `bili_bin` + `bili_api` + `bili_meta`，产出「已发布/审核中/待核对/失败」的结论与下一步。含模板批量渲染与逐条校验。纯函数式，可整链离线单测。 | 不写库、不发事件、不做队列；不重试、不改状态。 |

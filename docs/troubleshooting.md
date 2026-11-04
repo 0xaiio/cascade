@@ -75,6 +75,35 @@
 [PLAN.md 全局约束](../ai/plan/plan.md)。也**不要**只改后端端口就让前端照旧跑 ——
 Vite 的代理如果还指着旧端口，`/api` 会静默打到别的程序上，报出来的错与真实病因毫无关系。
 
+## 启动就失败：已有一个实例在跑
+
+### 症状
+
+```text
+已有一个实例在跑（锁文件 D:\code-repo\cascade\data\app.instance.lock，持有者：pid=48988 port=8021）。
+两个实例同时跑会同时恢复同一批孤儿任务、往同一个 .part 写，产物会坏，而界面上看不到任何报错。
+```
+
+退出码是 **2**（与端口被占同一档）。
+
+### 为什么现在会挡住
+
+启动即恢复（[015](../ai/bug-fix/015-orphan-items-never-resume.md)）让「两个进程」从偶发风险变成
+**每次双开都会发生**：两边同时把同一批孤儿条目重新排队、同时往同一个 `.part` 写。
+`--auto-port` 只是换一个**监听端口**，库与产物还是同一份，所以它绕不过这把锁
+（见 [036](../ai/bug-fix/036-two-instances-write-the-same-part.md)）。
+
+### 现在做什么
+
+1. **先确认那个 pid 真的还在**：`tasklist /FI "PID eq <pid>"`。锁文件里写着它的 pid 与端口。
+2. **要开两份就用两个数据目录**：`YTDL_DATA_DIR=D:\cascade-data-2 python -m app --port 8022`。
+   两份各用各的库与产物，互不干扰 —— 这是合法用法，锁也是按 `data/` 分的。
+3. **那个进程已经死了却还报占用**：正常不会发生（锁随进程退出释放，强杀也一样）。
+   真遇到就删掉 `data/app.instance.lock` 再启动。
+
+> 锁只保护 `python -m app` 这条启动路径。直接 `uvicorn app.main:app` 不经过入口，不受保护 ——
+> 日常请用 `init/` 脚本或 `python -m app`。
+
 ## 重启服务后页面还是旧样子
 
 ### 症状
