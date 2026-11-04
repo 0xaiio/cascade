@@ -64,6 +64,7 @@
 | [034](034-vitest-drops-test-files-when-parallel.md) | 并行跑 vitest 会丢掉整个测试文件，汇总行仍写 passed | `—` | 本机 fs shim 对同一临时路径的并发写回 `EPERM`，vitest 的 module runner `fetch` 失败 ⇒ 该文件的模块取不到、**从未被收集**；三次并行丢的不是同一批（24/255、23 文件、24/212）。只 grep `Tests … passed` 或只看退出码都不可靠 —— 唯一判据是「跑了几个文件」与磁盘对齐。修法：`npm test` 默认 `--no-file-parallelism` + 新增 `npm run test:counts` 核数闸门 |
 | [035](035-diagnostics-shows-the-stored-value.md) | 诊断只回显「库里的值」，看不出进程还在用旧值 | `—` | `/api/diagnostics` 从未读过 `Setting` 表，也没区分「库」与「运行态」⇒ 032 那类故障（无异常、无日志）唯一的现场反而在说「配置是对的」。修法：新增 `settings_effective`，每项给出 `stored` 与 `runtime`（从 `YtDlpService` / 调度器策略上读）+ `differs`；自检只读，设置页仅在真有差异时多一条红字 |
 | [036](036-two-instances-write-the-same-part.md) | 两个进程同时跑在同一份 `data/` 上，同时写同一个 `.part` | `—` | 启动路径只有端口预检，而 `--auto-port` 会换端口继续起 —— 端口是网络资源，库与 `.part` 是磁盘资源，换端口对后者毫无保护；两个进程同时恢复同一批孤儿条目，坏的是产物且没有任何报错。修法：`data/app.instance.lock` 上的操作系统文件锁（Windows `msvcrt` / POSIX `flock`），在解析端口**之前**取锁；实测两个坑：Windows 字节锁连读都禁止（备注要挪到第 1 字节）、空文件锁 1 字节等于没锁（先写第 0 字节） |
+| [037](037-deleting-a-job-leaves-its-uploads.md) | 删任务不删投稿记录：摘要里一直有「已不存在的任务」 | `—` | `JobManager.delete()` / `delete_items()` 只删 `JobEvent`/`JobItem`/`Job`，而 `read_all_job_uploads()` 的 job 集合取自 `bili_upload`/`bili_season` 的并集 ⇒ `uploads/summary` 一直回已删任务的记录，`bili_auto_retry` 还会继续问平台。修法：`BiliManager.active_upload_message()` / `forget_job()` + 三条删除路径「预检 → 删任务 → 清记录」；**有在途投稿时拒绝（409）**而不是取消再删，批量删除整批预检 |
 
 ## 本轮（2026-10-01）背景
 
@@ -268,15 +269,10 @@ TOTAL 89%），再逐个看**未覆盖的行本身**是不是也可能错 ——
 12. **`is_requested_format_unavailable_error` 是纯字符串匹配**（010 遗留）。yt-dlp 一旦改这句英文，
    两处归一同时失效，缺陷会以「降级不执行」的形式回归。有意保持窄匹配（宁可失效也不吞真故障），
    但没有版本探测或第二个关键词兜底。
-13. **删任务不连带删 B站 上传记录**（bilibili 分支移植发现）。`JobManager.delete()` /
-   `delete_items()` 只删 `JobEvent` / `JobItem` / `Job`，`bili_upload` / `bili_season` 会留下；
-   而 `read_all_job_uploads()` 的 job 集合正是从这两张表取并集，于是
-   `GET /api/bilibili/uploads/summary` 会一直为已不存在的任务回记录，行数也无限累积
-   （界面上看不见：前端按 `/api/jobs` 渲染徽标，所以这是个静默的存储面损伤）。
-   修法不止一行删表 —— 投稿跑在 `BiliManager` 的另一个 worker 上，删任务时可能正有一条在途，
-   删完再写回等于白删；要先给 `BiliManager` 加**按 job 取消在途上传**的能力
-   （现在还只有整体 `stop()`）。详见
-   [03-implementation.md §5.5](../feature/bilibili-upload/03-implementation.md#55-删任务不连带删上传记录)。
+13. ~~**删任务不连带删 B站 上传记录**~~ → 已由 [037](037-deleting-a-job-leaves-its-uploads.md) 处理（2026-11-04）：
+   三条删除路径都接上「预检 → 删任务 → `forget_job()`」，`bili_auto_retry` / `bili_season` / `bili_upload` 一并清。
+   **遗留**：没有「按 job 取消在途投稿」，所以有在途时删除会被拒（409）而不是「取消再删」；
+   B站 平台侧的稿件不会被删，只是本机不再追踪。
 14. **令牌的自动续期（`renew_tokens`）没有实测过**（011 遗留）。`token_info` 的有效期是 180 天，
    到期后 biliup 会拿 `refresh_token` 自己去续；我们只保证了 `platform="BiliTV"`（它靠这个挑 appkey）
    与 `refresh_token` 已写入，**没有构造过「令牌将过期」的状态来跑那条路**。

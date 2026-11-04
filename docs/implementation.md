@@ -150,7 +150,7 @@ yt-dlp 对字幕、缩略图、HTTP chunk 和分离视频/音频流会多次发�
 
 **下载有字节级进度，上传没有**：`biliup` 在管道模式（非 TTY）下不输出已传字节数，只在三个节点各打一行（`pre_upload` / `Upload completed` / `APP接口投稿成功`），[_PROGRESS_STAGES](../backend/app/bilibili/bili_bin.py#L196) 把它们折成 0.2 / 0.6 / 0.95。所以界面上给的是**四段轨迹**（排队 / 传输 / 提交 / 核对）与「已用时间」，不是百分比条 —— 一个停在 20% 不动的数字比没有数字更糟。阶段映射与聚合在 [biliProgress.ts](../frontend/src/bilibili/biliProgress.ts#L23)。
 
-事件侧有一条与下载不同的约定：[_store_progress](../backend/app/bilibili/bili_manager.py#L1425) **只在进度值真的变大时才发 `bili_upload_progress`**。`on_progress` 是每读一行输出回调一次，不判「变没变」会往 SSE 里灌几百条同值事件；判了之后，一次投稿最多 3 条。前端沿用「收到任何一条事件就重拉」的既有口径，因此不需要为进度维护第二份状态。
+事件侧有一条与下载不同的约定：[_store_progress](../backend/app/bilibili/bili_manager.py#L1463) **只在进度值真的变大时才发 `bili_upload_progress`**。`on_progress` 是每读一行输出回调一次，不判「变没变」会往 SSE 里灌几百条同值事件；判了之后，一次投稿最多 3 条。前端沿用「收到任何一条事件就重拉」的既有口径，因此不需要为进度维护第二份状态。
 
 ## 读模型
 
@@ -206,7 +206,7 @@ B站 上传是一条与下载完全解耦的链路，模块划分（详见 [设�
   所以 `zh-Hans` 压成 `zh`、繁体三档原样保留、认不出来退 `en`。
   这条实测靠 `submit=false`（只存草稿、不发布）逐个枚举候选值得到 —— 它是唯一能在
   **不动任何已发布稿件**的前提下验证接口形态的方式。
-- **字幕路径只在 `JobItem` 上存一份**（[`_subtitle_of`](../backend/app/bilibili/bili_manager.py#L1367) 从那里读），
+- **字幕路径只在 `JobItem` 上存一份**（[`_subtitle_of`](../backend/app/bilibili/bili_manager.py#L1405) 从那里读），
   投稿记录里不复制；读的时候还要**再看一次文件在不在**，不在就当没有。
 - **字幕失败有专门的补救动作**：已发布/审核中且 `subtitle_state=failed` 的稿件，重试走
   `_reverify_work` 并带上字幕，回执「已重新上传字幕」。**绝不**为了字幕重投一次视频。

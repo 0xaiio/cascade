@@ -267,7 +267,12 @@
 > 本类条目大多来自 [`ai/bug-fix/README.md`](../bug-fix/README.md) 的遗留项：表面是缺陷，实质是**生命周期与数据完整性**，因此放功能池排期。
 
 #### F-01　删除任务时连带清理投稿记录（含自动重试表）
-- [ ] **未完成** · 状态：候选　优先级：**P1**
+- [x] **已完成**（2026-11-04 · [`ai/bug-fix/037`](../bug-fix/037-deleting-a-job-leaves-its-uploads.md)）　优先级：~~P1~~
+- 结论：删除只发生在「任务」这条线上，而投稿是另一个域 —— `JobManager` 连 `BiliManager` 的存在都不知道，于是「任务没了、投稿记录还在」可以同时成立；`uploads/summary` 的 job 集合取自那两张表的并集，所以它会一直为已删任务回记录，`bili_auto_retry` 还会继续问平台。
+- 修法：`BiliManager.active_upload_message()`（查在途）+ `forget_job()`（按 job 清三张表），三个删除入口统一「预检 → 删任务 → 清记录」；批量删除**整批预检**，避免删一半被拒。
+- 取舍：有在途投稿时**拒绝（409）**而不是「取消再删」—— 后者要把取消令牌传进业务层，会破坏「自动与手动复用同一套逻辑」；拒绝 + 一句「先等它结束或取消」不丢数据。
+- 验证：5 条用例（三张表清空且摘要不再出现 / 在途拒绝且记录保留 / 删光最后一个子视频同样清 / 批量整批拦截 / 别的任务不受影响）；A/B 还原实现后 5 条全红。
+- 遗留：没有单条取消在途上传的能力（只有整体 `stop()`）；平台侧的稿件不会被删。
 - 现状：`job_manager.delete()`（`backend/app/download/job_manager.py:375`）只删 `JobEvent` / `JobItem` / `Job`；`bili_upload` / `bili_season` 留下，而 `read_all_job_uploads()` 的 job 集合取自这两张表的并集 → `GET /api/bilibili/uploads/summary` 会一直为**已不存在的任务**回记录。本轮核对：`bili_auto_retry`（遗留 33）同样只增不减，且**没有清理策略**，正好与这条是同一处改动。
 - 痛点：存储面随时间单调恶化，界面上完全看不见。
 - 建议：先给 `BiliManager` 加「按 job 取消在途上传」（现在只有整体 `stop()`），再连带删除四张表；删除前若有在途投稿，拒绝并说明。

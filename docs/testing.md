@@ -22,13 +22,13 @@ python -m pytest backend\tests -q
 > 沙箱的批量删除守卫是**累积计数**的（一轮命令内累计到阈值就整条拒掉），于是 1069 个用例放在一个进程里跑会在中途被拦下。
 > 现象很好认：**大量 `at setup of ...` 的 error，而 `FAILED` 一个都没有** —— 那是环境问题，不是代码问题。
 >
-> 按下面的分块跑，六块相加应恰好等于 1326（各块 133～278 项；若某块仍被拦下，继续拆小即可）：
+> 按下面的分块跑，六块相加应恰好等于 1331（各块 133～278 项；若某块仍被拦下，继续拆小即可）：
 >
 > ```powershell
 > python -m pytest backend\tests\test_bili_policy.py backend\tests\test_bili_meta.py backend\tests\test_bili_auth.py backend\tests\test_bili_bin.py -q -p no:cacheprovider --basetemp=tmp_pytest\a   # 221
 > python -m pytest backend\tests\test_bili_read_model.py backend\tests\test_bili_subtitle.py backend\tests\test_bili_api.py -q -p no:cacheprovider --basetemp=tmp_pytest\b                                            # 201
 > python -m pytest backend\tests\test_bili_upload.py backend\tests\test_bili_manager.py backend\tests\test_bili_auto_retry.py backend\tests\test_bili_auto_retry_integration.py backend\tests\test_api_bilibili.py -q -p no:cacheprovider --basetemp=tmp_pytest\c                                                # 278
-> python -m pytest backend\tests\test_ytdlp_service.py backend\tests\test_subtitle_plan.py backend\tests\test_subtitle_recording.py backend\tests\test_api.py backend\tests\test_diagnostics_settings_audit.py -q -p no:cacheprovider --basetemp=tmp_pytest\d                # 231
+> python -m pytest backend\tests\test_ytdlp_service.py backend\tests\test_subtitle_plan.py backend\tests\test_subtitle_recording.py backend\tests\test_api.py backend\tests\test_diagnostics_settings_audit.py backend\tests\test_job_delete_cleans_uploads.py -q -p no:cacheprovider --basetemp=tmp_pytest\d                # 236
 > python -m pytest backend\tests\test_resolution_decisions.py backend\tests\test_output_paths.py backend\tests\test_safe_delete.py backend\tests\test_system_open.py backend\tests\test_open_with_registry.py backend\tests\test_dev_server.py backend\tests\test_instance_lock.py backend\tests\test_config_paths.py backend\tests\test_proxy.py backend\tests\test_cookie_health.py backend\tests\test_stall_guard.py backend\tests\test_ytdlp_formats.py backend\tests\test_resolution_input.py backend\tests\test_job_routes.py -q -p no:cacheprovider --basetemp=tmp_pytest\e   # 262
 > python -m pytest backend\tests\test_error_advice.py backend\tests\test_connectivity.py backend\tests\test_download_progress.py backend\tests\test_runtime_env.py backend\tests\test_job_manager_finally.py backend\tests\test_finally_guards.py backend\tests\test_check_layers.py backend\tests\test_orphan_recovery.py backend\tests\test_completion_notification.py backend\tests\test_db.py backend\tests\test_logging_setup.py backend\tests\test_paths.py backend\tests\test_transfer_stats.py backend\tests\test_progress_persist.py backend\tests\test_log_safety.py backend\tests\test_events.py backend\tests\test_job_artifacts.py backend\tests\test_bili_http.py -q -p no:cacheprovider --basetemp=tmp_pytest\f   # 133
 > ```
@@ -133,7 +133,7 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 
 > **数字必须自己数一遍**，不要只信 `-q` 的汇总行。逐文件规模用
 > `pytest backend/tests/<文件> -q -p no:cacheprovider --co` 取，各文件之和应**恰等于**全集
-> （2026-11-03 实测：49 个文件逐项相加 = 1326 = 全集）。历史上有过把「收集不全的那一次」当成
+> （2026-11-03 实测：50 个文件逐项相加 = 1331 = 全集）。历史上有过把「收集不全的那一次」当成
 > 基线的教训（见过 267 / 286 / 289 三个数，真实基线一直是当时的 913）。
 
 > **夹具里被 worker 认领的状态会让「同步断言写库结果」变成竞态**（2026-10-21 修掉一条）：
@@ -148,6 +148,7 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 | --- | --- |
 | [test_api.py](../backend/tests/test_api.py) | API 行为、任务创建、重启、删除、cookies、设置、诊断、代理自检、cookies 体检、运行环境自检刷新，合集子视频按并发并行下载，happy-path 不再二次 extract_metadata，以及**探针抛异常时降级仍要真的执行并开始下载**。打开字幕另加 8 条：单视频与条目级各自打开的是**自己**那份字幕、**缺省（不传 `mode`）走选择器**而 `?mode=default` 走文件关联（两条不同的入口）、没有字幕是 `409`（且什么都没打开）、`mode` 取别的值 `422`、读模型给出 `subtitle_path`、**旧记录（该列为空）能靠视频旁边的同名字幕找到**、文件没了要回 `null` 而不是回显旧路径。 |
 | [test_diagnostics_settings_audit.py](../backend/tests/test_diagnostics_settings_audit.py) | 诊断的「配置两栏对照」（[035](../ai/bug-fix/035-diagnostics-shows-the-stored-value.md)，5 条）：每一项都有 `stored` 与 `runtime`、**库改了但进程没跟上要标出差异且只标这一项**、自检**只读**（连调两次不许把库值灌回运行态）、自动重试旋钮的运行值取自**调度器策略**、布尔按库里的 `"1"/"0"` 形态比较。 |
+| [test_job_delete_cleans_uploads.py](../backend/tests/test_job_delete_cleans_uploads.py) | 删任务要连带清投稿记录（[037](../ai/bug-fix/037-deleting-a-job-leaves-its-uploads.md)，5 条）：三张表清空且 `uploads/summary` 不再出现该任务、**在途投稿时 409 且记录保留**、删光最后一个子视频同样会清（走的是另一条路）、批量删除**整批预检**、别的任务记录不受影响。 |
 | [test_db.py](../backend/tests/test_db.py) | SQLite WAL、`busy_timeout`、`synchronous=NORMAL` 与 WAL checkpoint。 |
 | [test_ytdlp_service.py](../backend/tests/test_ytdlp_service.py) | yt-dlp 参数、profile、PO token、aria2c、格式选择和错误识别；**预检把「选不出格式」归一成 `is_selectable=False` 而不是抛出去，且无关异常仍要原样抛出**；JS 运行时探测（跳过坏候选、原样报错、探测本身不抛异常、诊断暴露失败原因）。字幕计划另加 7 条：显式语言优先于默认、**非中英语言被忽略**、混合列表只留中英、计划随 `DownloadPreparation` 回传（语言/轨码/来源/理由）、`subtitles_only` 也算出计划且元数据失败在那里不致命。 |
 | [test_download_progress.py](../backend/tests/test_download_progress.py) | 多子流进度聚合：字幕/chunk 不锁死在 99.9%，分离音视频不把已下载字节重置为 0。 |

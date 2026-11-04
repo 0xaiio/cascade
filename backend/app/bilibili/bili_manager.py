@@ -565,6 +565,44 @@ class BiliManager:
             session.commit()
         self._publish_threadsafe({"type": "bili_auto_retry_changed", "job_id": job_id})
 
+    # ------------------------------------------------------ 删除任务时的清理
+    def active_upload_message(self, job_id: str) -> str | None:
+        """这个任务还有没有**在途**投稿。有就返回一句能照着做的话，没有就 `None`。
+
+        为什么删除任务前必须问这一句：投稿跑在另一个 worker 上，删掉记录之后它还会把结论
+        写回来 —— 写不进就是一次静默丢失（界面上那条投稿变成「从来没有过」）。见
+        [ai/bug-fix/037](../ai/bug-fix/037-deleting-a-job-leaves-its-uploads.md)。
+        """
+        with Session(self.engine) as session:
+            rows = session.exec(
+                select(BiliUpload).where(
+                    BiliUpload.job_id == job_id,
+                    BiliUpload.status.in_(sorted(IN_FLIGHT_STATUSES)),
+                )
+            ).all()
+        if not rows:
+            return None
+        return (
+            f"这个任务还有 {len(rows)} 条稿件在上传或核对中，先等它结束（或取消）再删任务 —— "
+            "删掉记录会让那次投稿的结果无处可写。"
+        )
+
+    def forget_job(self, job_id: str) -> int:
+        """删掉这个任务的**全部投稿侧记录**（稿件 / 合集 / 自动重试），返回删除行数。
+
+        这三张表都不随任务删除而消失，`/api/bilibili/uploads/summary` 取自它们的并集 ——
+        不清理的话，已删掉的任务会一直在摘要里出现，而 `bili_auto_retry` 还会继续问平台。
+        """
+        removed = 0
+        with Session(self.engine) as session:
+            for model in (BiliAutoRetry, BiliSeason, BiliUpload):
+                for row in session.exec(select(model).where(model.job_id == job_id)).all():
+                    session.delete(row)
+                    removed += 1
+            session.commit()
+        return removed
+
+
     # ------------------------------------------------------------ 登录态
     def current_jar(self) -> dict[str, str]:
         return load_cookie_jar(self.settings.bili_cookie_path)

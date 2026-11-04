@@ -26,7 +26,7 @@
 | FR-4 | 用户只选择清晰度，默认 `1440p`；后端自动选择具体格式。 | [`format_selector`](../backend/app/download/ytdlp_formats.py#L9) |
 | FR-5 | 下载前预检测计划分辨率、格式和视频大小，任务中心展示实际值。 | [`prepare_download`](../backend/app/download/ytdlp_service.py#L395)、[`_apply_download_preparation`](../backend/app/download/job_manager.py#L1032) |
 | FR-6 | 支持明确的分辨率降级原因和重启建议。 | [`fallback_policy.py`](../backend/app/download/fallback_policy.py#L4)、[`resolution_decisions.py`](../backend/app/download/resolution_decisions.py#L87) |
-| FR-7 | 支持任务暂停、重启、删除、playlist 子视频删除、批量操作，以及本地播放/打开文件夹。 | [`batch_job_action`](../backend/app/api/routers/jobs.py#L80)、[`system_open.py`](../backend/app/host/system_open.py) |
+| FR-7 | 支持任务暂停、重启、删除、playlist 子视频删除、批量操作，以及本地播放/打开文件夹。 | [`batch_job_action`](../backend/app/api/routers/jobs.py#L91)、[`system_open.py`](../backend/app/host/system_open.py) |
 | FR-8 | 默认请求人工字幕和自动字幕；缺少某类字幕时 fallback 到另一类可用字幕，并显示来源与格式。 | [`DownloadOptions`](../backend/app/contracts/schemas.py#L117)、[`DownloadOptionsPanel`](../frontend/src/download-request/DownloadOptionsPanel.tsx#L26) |
 | FR-9 | 支持 cookies 上传、浏览器导入和清除。 | [`/api/cookies`](../backend/app/api/routers/cookies.py#L60)、[`BrowserCookieImporter`](../backend/app/host/browser_cookies.py#L67) |
 | FR-10 | 支持并发、限速、重试次数和单视频并发下载数（aria2c）作为运行时设置即时保存；限速/重试变更会让当前视频断点续传重启以应用新参数。 | [`SettingsUpdate`](../backend/app/contracts/schemas.py#L268)、[`set_runtime_download_defaults`](../backend/app/download/job_manager.py#L138) |
