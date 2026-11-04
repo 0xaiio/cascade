@@ -343,7 +343,11 @@
 ### I. 工程与测试基建
 
 #### I-01　vitest 并行跑会静默丢文件，而它仍报「全部通过」
-- [ ] **未完成** · 状态：候选　优先级：**P1**　（本轮新增）
+- [x] **已完成**（2026-11-04 · [`ai/bug-fix/034`](../bug-fix/034-vitest-drops-test-files-when-parallel.md)）　优先级：~~P1~~
+- 结论：**根因不是「vitest 不可靠」**——本机 fs shim 对转译缓存的**并发写**回 `EPERM`，module runner `fetch` 失败 ⇒ 该文件的模块取不到、**从未被收集**；汇总行的 `passed` 只统计跑了的那些。三次并行丢的不是同一批（24 文件/255 条、23 文件、24 文件/212 条）。
+- 修法：`npm test` 默认 `--no-file-parallelism`；新增 `npm run test:counts`（自己串行跑一遍，拿 JSON 报告把**实跑文件集合**与磁盘 `src/**/*.test.{ts,tsx}` 做集合比较，少一个就退出 1）；配置本身由 `src/test/test-runner.test.ts`（3 条）钉住。
+- 验证：串行 26 文件 / 335 条全绿、tsc 0；核数闸门串行 26/26 通过、加 `-- --parallel` 时打印缺失文件清单并退出 1（实测丢了 `bili-upload.test.tsx` 与 `task-center-files.test.tsx`）。
+- 遗留：核数只保证「文件都跑了」，文件内被 `skip` 的用例不在比较范围内；串行比并行慢约 2.5 倍。
 - 现状：同一条 `npx vitest run --environment jsdom` 连续运行，实测得到 **21 文件/286 条、20/275、19/261、15/172** 四种结果，**全部报 passed**：被丢掉的用例不会失败，只会消失。加 `--no-file-parallelism` 后稳定 21/286（遗留 25，2026-10-28 实测）。
 - 痛点：这不是某条用例的问题，是**闸门本身**的问题 —— 它让「测试全绿」这句话在任何一次运行里都可能不成立，包括用它当验收依据的那一刻。
 - 建议：`package.json` 的 `test` 脚本默认加 `--no-file-parallelism`（或固定 `--maxWorkers=1`）；并在测试文档里写明「核数必须报文件数 + 用例数，不接受只报 passed」。

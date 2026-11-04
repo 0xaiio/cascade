@@ -61,6 +61,7 @@
 | [031](031-bili-requests-fall-into-an-ipv6-black-hole.md) | 点「扫码登录」「重新体检」都只得到一句超时 | `—` | 两条投诉看着无关，其实是同一个根因：`bili_http` 的 `timeout=20` 只是**单次 socket 操作**的预算，而 `create_connection` 会把解析出的每个地址都试一遍（本机 6 个 IPv6 全黑洞）⇒ 实测 **160 秒**。于是「重新体检」的 12 s 预算永远先到（每次只剩离线结论），「扫码登录」挂满 60 s 被前端掐断，而用户看到的是**上一条重试请求**遗留的页面级红条。修法：只解析 IPv4 + 整段共享一个截止时刻；前端预算改为 25 s 并**必须大于后端那 20 秒**，探测失败也退回离线结论，超时消息点名动作，开始动作时清掉旧红条 |
 | [032](032-auto-retry-settings-need-a-restart.md) | 关掉「自动重试」的开关，机器还在问平台 | `—` | 调度器把策略存成**构造时的快照**（`self.policy = policy`），而 `BiliManager` 传的是 `auto_retry_policy()` 的**返回值**，此后全仓没有更新点 ⇒ 设置接口里那句「改完立刻生效，不用重启」是假的：关掉开关照旧扫、间隔 300→10 要等旧的睡完、上限 3→7 仍判 `exhausted`。修法：策略改成**每轮现取**（可传函数）+ 睡眠按 1 秒切片 + 停机后不再 `tick()` |
 | [033](033-the-response-keeps-counting-after-success.md) | 手动补传字幕成功了，界面还在倒计时 | `—` | 两条路的「收工」都发生在**读模型构造之后**：`_reverify_work` / `_group_work` 先 `read_upload(...)` （此时 `auto_retry=waiting`），`retry_upload` / `retry_season` 才 `_close_auto_retry()` ⇒ 响应说 waiting、库里说 done；而收工也不发事件，被 `*_finished` 叫去刷新的客户端读到的还是旧值。修法：收工后重读一次读模型 + `_close_auto_retry` 补发 `bili_auto_retry_changed` |
+| [034](034-vitest-drops-test-files-when-parallel.md) | 并行跑 vitest 会丢掉整个测试文件，汇总行仍写 passed | `—` | 本机 fs shim 对同一临时路径的并发写回 `EPERM`，vitest 的 module runner `fetch` 失败 ⇒ 该文件的模块取不到、**从未被收集**；三次并行丢的不是同一批（24/255、23 文件、24/212）。只 grep `Tests … passed` 或只看退出码都不可靠 —— 唯一判据是「跑了几个文件」与磁盘对齐。修法：`npm test` 默认 `--no-file-parallelism` + 新增 `npm run test:counts` 核数闸门 |
 
 ## 本轮（2026-10-01）背景
 
@@ -323,13 +324,11 @@ TOTAL 89%），再逐个看**未覆盖的行本身**是不是也可能错 ——
     于是所有「已填 N / 上限」实际是 `.field > span` 的 `#334155`。
     本轮只保证**超限档**（`.char-count.is-over`，0,2,0）压得赢、红色真的显示（探针量到
     `rgb(180,35,24)`）；合规档改不改颜色属另一处改动，未顺手做。
-25. **并行跑前端用例时 vitest 会静默少跑文件**（2026-10-28 实测，影响的是测试闸门本身）。
-   同一条 `npx vitest run --environment jsdom` 连续运行，得到过 **21 文件/286 条**、
-   **20 文件/275 条**、**19 文件/261 条**、甚至 **15 文件/172 条** 四种结果，**全部报「passed」**：
-   被丢掉的用例不会变成失败，只会消失。加 `--no-file-parallelism` 后稳定复现 21/286。
-   怀疑是本机并行 fork 的 worker 被静默回收（32 位？内存？未见报错）。**判据**：
-   在这台机器上核数一律加 `--no-file-parallelism`，且不相信「文件数变少了但全绿」。
-   未改 `package.json` 的 `test` 脚本（那是所有人的默认速度，要不要默认串行是另一个决定）。
+25. ~~**并行跑前端用例时 vitest 会静默少跑文件**~~ → 已由 [034](034-vitest-drops-test-files-when-parallel.md) 处理
+   （2026-11-04）：根因不是「worker 被回收」，而是本机 fs shim 对**同一临时路径的并发写**回 `EPERM`，
+   vitest 的 module runner `fetch` 失败 ⇒ 该文件从未被收集。`npm test` 现在默认
+   `--no-file-parallelism`，并新增 `npm run test:counts` 把「实跑文件集合」与磁盘比对。
+   **遗留**：核数只保证文件都跑了，文件内被 `skip` 的用例仍不在比较范围内。
 26. **老数据里无法解释的清晰度仍会静默变成「最佳可用」**（026 遗留）。入口已收紧，
    但库里早于校验的行（例如 `hd`）恢复出来仍是 `best`；只有大小写差异（`1440P`）会被救回。
    要做数据迁移得先枚举存活行，收益不明。

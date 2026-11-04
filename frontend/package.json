@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc && vite build",
-    "test": "vitest run --environment jsdom"
+    "test": "vitest run --environment jsdom --no-file-parallelism",
+    "test:counts": "node scripts/verify-test-counts.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",
