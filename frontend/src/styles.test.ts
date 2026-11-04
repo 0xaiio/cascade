@@ -140,4 +140,20 @@ describe("styles.css · 源文不变式", () => {
     expect(title.length).toBeGreaterThan(0);
     expect(title.join("\n")).toMatch(/font-weight:\s*\d/);
   });
+  // 390px 下，任务卡片头部那 8 颗图标按钮把标题列压到约 30px ⇒ 中文一个字一行（ai/ui/011）。
+  // jsdom 不做布局，所以能盯的是**根因那条声明**：`.job-row` 允许换行，且标题列有
+  // **非零的 flex-basis** —— 不带 basis 的 `flex: 1` 会一路缩到 0，而按钮不缩，谁也拦不住。
+  test("keeps the job title from collapsing into a column of single characters", () => {
+    const bodies = cssRuleBodies(stylesCss);
+
+    const row = (bodies.get(".job-row") ?? []).join("\n");
+    expect(row).toMatch(/flex-wrap:\s*wrap/);
+
+    const main = bodies.get(".job-main") ?? [];
+    expect(main.some((body) => /flex:\s*1\s+1\s+[1-9]\d*px/.test(body))).toBe(true);
+
+    // 操作区自己占一整排：按钮换行而不是被压扁（动作藏进菜单等于没有，ai/ui/007）。
+    const actions = bodies.get(".job-actions") ?? [];
+    expect(actions.some((body) => /flex:\s*1\s+1\s+100%/.test(body))).toBe(true);
+  });
 });

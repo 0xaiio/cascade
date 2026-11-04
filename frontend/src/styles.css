@@ -1075,6 +1075,25 @@ th {
     padding: 16px;
   }
 
+  /* 任务卡片：标题与操作区**分两排**。
+     8 颗图标按钮不换行也不缩，窄屏（390px）下把标题列压到约 30px，
+     中文只能一个字一行（ai/ui/011）。优先换行而不是把按钮收进菜单 ——
+     动作藏起来等于没有（ai/ui/007 的结论）。
+     给 `.job-main` 一个**非零的 flex-basis** 是关键：不带 basis 的 `flex: 1`
+     会一路缩到 0，而按钮不缩，谁也拦不住它。 */
+  .job-row {
+    flex-wrap: wrap;
+  }
+
+  .job-main {
+    flex: 1 1 200px;
+  }
+
+  .job-actions {
+    flex: 1 1 100%;
+    justify-content: flex-end;
+  }
+
   .media-heading {
     align-items: flex-start;
   }
