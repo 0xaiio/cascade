@@ -19,6 +19,7 @@ import type { CloneJobOverrides } from "../shared/api";
 import { EMPTY_JOB_FILTER, filterJobs, JOB_STATUS_FILTERS } from "./jobFilter";
 import type { JobStatusFilter } from "./jobFilter";
 import { batchRestartHint, itemRestartHint, jobRestartHint, resolutionRestartHint } from "./restartSemantics";
+import { PAUSED_TICK_MS, pausedDurationLabel } from "./pausedSince";
 import { SubtitleOpenButton } from "./SubtitleOpenButton";
 
 type MaybePromise = void | Promise<void>;
@@ -101,6 +102,12 @@ export function JobQueue({
   const [pendingLocalActionKey, setPendingLocalActionKey] = useState<string | null>(null);
   // 克隆面板一次只在一个任务行里展开；切换任务时旧面板自然收起。
   const [cloningJobId, setCloningJobId] = useState<string | null>(null);
+  // E-05：暂停时长按分钟推进即可（不是秒表）。没有新通知渠道，只是让这一行不撒谎。
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), PAUSED_TICK_MS);
+    return () => window.clearInterval(timer);
+  }, []);
   // E-02：筛选是**展示层**的。`App` 的全量 `jobs` 仍要留给完成提醒的状态跃迁比对、
   // B站 徽标和选中集合清理，因此这里只派生一份可见列表，绝不回写 props。
   const [statusFilter, setStatusFilter] = useState<JobStatusFilter>("all");
@@ -265,6 +272,11 @@ export function JobQueue({
       <div className="job-list">
         {visibleJobs.map((job) => {
           const title = job.title || "未命名任务";
+          // 只有 `paused` 才显示；服务端已保证其它状态的 `paused_at` 为 null，
+          // 这里再判一次是为了防止旧缓存里的脏值让「已暂停」出现在跑完的任务上。
+          const pausedLabel = job.status === "paused"
+            ? pausedDurationLabel(job.paused_at, nowMs, job.paused_since_approximate)
+            : null;
           const isPlaylist = job.total_items > 1;
           const primaryItem = job.items[0] ?? null;
           const canPlayJob = !isPlaylist && Boolean(primaryItem?.output_path);
@@ -317,6 +329,11 @@ export function JobQueue({
                   {!isPlaylist && ["queued", "running"].includes(job.status) ? " · 单视频任务不受并发设置影响" : ""}
                   {job.error ? ` · ${job.error}` : ""}
                 </p>
+                {pausedLabel && (
+                  <p className="paused-since" data-approximate={job.paused_since_approximate}>
+                    {pausedLabel} · 点「重启」继续（不会从零重下）
+                  </p>
+                )}
               </div>
               <div className="job-actions">
                 <BiliUploadButton

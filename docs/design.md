@@ -108,7 +108,7 @@
 | [shared/](../frontend/src/shared/) | 跨功能复用：`api`（HTTP 边界 + 超时看门狗）、`errors` / `formatting` / `quality` / `subtitles`；[ui/](../frontend/src/shared/ui/) 放**无业务判断**的基础件（`HelpPopover` / `Toggle` / `StatusPill`） | 不依赖任何功能目录 |
 | [download-request/](../frontend/src/download-request/) | 发起下载：解析链接（`UrlAnalyzer`）、解析结果（`AnalysisPanel`）、下载选项（`DownloadOptionsPanel` / `SearchableLanguageSelect`） | 依赖 `shared` / `cookies` |
 | [cookies/](../frontend/src/cookies/) | cookies 的**体检**与上传入口（`CookieSection` / `CookieHowToPopover`）。不提供浏览器导入 —— 应用只读用户导出的文件（[038](../ai/bug-fix/038-browser-cookie-import-is-gone.md)）。 | 依赖 `shared` |
-| [task-center/](../frontend/src/task-center/) | 任务中心：控制 / 删除 / 展开、进度与明细、本地文件操作、清晰度降级的重启（`JobQueue` / `SubtitleOpenButton`）、筛选与搜索的**纯判定**（`jobFilter`，E-02）、重启语义文案（`restartSemantics`，E-03）与克隆面板（`CloneJobPanel`，E-04） | 依赖 `shared` / `bilibili` |
+| [task-center/](../frontend/src/task-center/) | 任务中心：控制 / 删除 / 展开、进度与明细、本地文件操作、清晰度降级的重启（`JobQueue` / `SubtitleOpenButton`）、筛选与搜索的**纯判定**（`jobFilter`，E-02）、重启语义文案（`restartSemantics`，E-03）、克隆面板（`CloneJobPanel`，E-04）与长暂停时长的**纯判定**（`pausedSince`，E-05） | 依赖 `shared` / `bilibili` |
 | [settings/](../frontend/src/settings/) | 设置、代理检测与运行环境自检（`SettingsPanel` / `SettingsGroup` / `ProxySection` / `RuntimeSection`） | 依赖 `shared` / `bilibili`（登录区） |
 | [bilibili/](../frontend/src/bilibili/) | B站 上传：入口、表单、进度、状态明细、登录区，以及 `biliForm` / `biliStatus` / `biliProgress` / `biliHealth` 四块判定与文案 | 依赖 `shared` / `contracts` |
 | [notifications/](../frontend/src/notifications/) | 任务完成提醒：终态判定与浮层队列（`notifications`）、右下角浮层（`CompletionToasts`） | 依赖 `contracts` |
@@ -195,7 +195,7 @@ PlantUML 源文件：[runtime-concurrency.puml](diagrams/runtime-concurrency.pum
 由此推出三条必须遵守的约定：
 
 1. **进度 hook 在工作线程上执行**，所以它使用自己的 `Session` 写库，不能复用请求级 session。
-2. **从线程发布事件要跨回事件循环**：[_publish_threadsafe](../backend/app/download/job_manager.py#L1216) 先写 `JobEvent` 行，再 `loop.call_soon_threadsafe` 调度 `broker.publish`。异步路径直接用 [_publish](../backend/app/download/job_manager.py#L1203)。
+2. **从线程发布事件要跨回事件循环**：[_publish_threadsafe](../backend/app/download/job_manager.py#L1221) 先写 `JobEvent` 行，再 `loop.call_soon_threadsafe` 调度 `broker.publish`。异步路径直接用 [_publish](../backend/app/download/job_manager.py#L1208)。
 3. **锁只保护状态转换，不保护下载**：`_item_claim_lock` 只覆盖"刷新 → 校验 queued → 置 running → commit"。下载本身靠 `should_cancel` 回调协作取消，而不是靠锁。（并发导入浏览器 cookies 用的那把锁已随入口移除，见 [ai/bug-fix/038](../ai/bug-fix/038-browser-cookie-import-is-gone.md)。）
 4. **单个条目的收尾出错不能带走 worker**：worker 循环对每条 item 的整段工作加了兜底 —— 崩溃的条目被标记为 `failed`（而不是永远停在 `running`），worker 继续消费队列。没有这层兜底，一个条目的记账错误就会静默地少掉一个并发口。见 [008](../ai/bug-fix/008-return-in-finally-swallows-the-real-error.md)。
 5. **队列不跨进程存活，所以启动时必须先对账**：`asyncio.Queue` 随进程消失，而库里还留着 `queued`/`running`。启动序列是「先改库、再 `start()`」——反过来 worker 会与被扫描的行并发读写。见 [015](../ai/bug-fix/015-orphan-items-never-resume.md)。
@@ -251,7 +251,7 @@ yt-dlp 自己按「人工先占、自动只补缺」的顺序挑 → 下载成�
 
 ### 删除与文件清理
 
-删除统一走 `JobManager`：先删数据库记录与关联 `JobEvent`，再按需删除文件。文件删除只在"下载根目录"或"该任务下载目录"之内执行，并对 `output_path`、合并后的最终文件与 sidecar 分别枚举候选，见 [_delete_output_files](../backend/app/download/job_manager.py#L401)。删除 playlist 的最后一个子项时父任务一并删除。
+删除统一走 `JobManager`：先删数据库记录与关联 `JobEvent`，再按需删除文件。文件删除只在"下载根目录"或"该任务下载目录"之内执行，并对 `output_path`、合并后的最终文件与 sidecar 分别枚举候选，见 [_delete_output_files](../backend/app/download/job_manager.py#L406)。删除 playlist 的最后一个子项时父任务一并删除。
 
 ### 播放与打开本地文件
 
@@ -317,8 +317,8 @@ yt-dlp 自己按「人工先占、自动只补缺」的顺序挑 → 下载成�
 `Job` 与 `JobItem` 共用 `JobStatus` 六态，但驱动者不同：
 
 - `JobItem` 由 worker 驱动：认领时置 `running`，结束按结果置 `succeeded` / `failed` / `cancelled` / `paused`。
-- `Job` 由 [_maybe_finish_job](../backend/app/download/job_manager.py#L543) 收敛：只要还有 running 或 queued 子项就保持 `running`；全部结束才由 [_finish_job](../backend/app/download/job_manager.py#L810) 判定终态（有失败项 → `failed`；被暂停 → `paused`；被取消 → `cancelled`；否则 `succeeded`）。
-- 任务级进度是子项进度的算术平均，见 [_refresh_job_counts](../backend/app/download/job_manager.py#L858)。
+- `Job` 由 [_maybe_finish_job](../backend/app/download/job_manager.py#L548) 收敛：只要还有 running 或 queued 子项就保持 `running`；全部结束才由 [_finish_job](../backend/app/download/job_manager.py#L815) 判定终态（有失败项 → `failed`；被暂停 → `paused`；被取消 → `cancelled`；否则 `succeeded`）。
+- 任务级进度是子项进度的算术平均，见 [_refresh_job_counts](../backend/app/download/job_manager.py#L863)。
 
 并发一致性依赖三点：单条 `JobItem` 只会被一个 worker 认领（`_item_claim_lock` + 状态校验）；worker 线程各自持有 session 并独立 commit；读模型只读不写，避免与写入路径争抢状态。
 
@@ -335,12 +335,12 @@ B站 上传有**自己的两套状态**，与 `JobStatus` 无关：
 | --- | --- | --- |
 | WAL + `busy_timeout=5000` + `synchronous=NORMAL` | 每个连接建立时下发 pragma，见 [_configure_sqlite_connection](../backend/app/infra/db.py#L14)。 | 多 worker 并发写入时"等待"而不是直接 `database is locked`；被其他进程锁住时只跳过 pragma，不让应用起不来。 |
 | 追加式补列 | [_ensure_columns](../backend/app/infra/db.py#L43) 用 `PRAGMA table_info` + `ALTER TABLE ADD COLUMN`。 | 兼容旧库，无需迁移框架。**只支持追加**，不支持删除/改名/改类型。 |
-| WAL checkpoint | lifespan 启动与停止各执行一次 `wal_checkpoint(TRUNCATE)`，见 [checkpoint_wal](../backend/app/infra/db.py#L109)。 | 避免进程被强杀后 `-wal` 侧车无界增长，也避免每次读都回放 WAL。失败只记日志。 |
+| WAL checkpoint | lifespan 启动与停止各执行一次 `wal_checkpoint(TRUNCATE)`，见 [checkpoint_wal](../backend/app/infra/db.py#L112)。 | 避免进程被强杀后 `-wal` 侧车无界增长，也避免每次读都回放 WAL。失败只记日志。 |
 | 进度写入节流 | `ProgressPersistGate`：首次、终态、间隔 ≥250ms 或进度跳变 ≥0.5% 才写。 | 5 路并行时避免把每个 chunk 回调都变成一次事务。 |
 | 进度聚合 | `DownloadProgressAggregator` 按子流分别累计已下载字节，分母取"各子流已知总和的较大者"并以下限钳制。 | 字幕/chunk/分离音视频都会各自回调；不能让小文件或当前 chunk 的 100% 冒充整体完成，也不能把已下载字节归零。 |
 | B站 上传两张表 | `bili_upload`（一条稿件一行）与 `bili_season`（一个任务的合集一行）。前者存投稿入参（标题/简介/标签/分区/视频路径/是否做封面/评论）+ 结果（`bvid`/`aid`/`cid`/`verified_state`/`progress`/`attempt`/`log_tail`），后者存 `season_id` 与归集状态。 | **入参也落库**：投稿是异步的，worker 必须能在用户关掉页面之后照着重投；只存结果会让重试变成「拿当前表单再猜一次」。`attempt` 让重投复用同一行，界面不出现重复条目。 |
 | 合集模板另存一列 | `bili_season.template_json` 存**模板原文**（[template_to_json](../backend/app/bilibili/bili_meta.py#L407)），老行补列时是空串。 | `bili_upload` 每行存的是**渲染后**的元数据；重投时想从那些行反推模板只能猜哪些字是占位符，猜错的后果是「重投一次，每条标题都变了」。存原文是最便宜也最准的做法。单视频投稿走同一个归集记录时**不清空**这一列（见 `_upsert_season`）。 |
-| 跨接口的时间一律带时区 | 所有对外的 `started_at` / `finished_at` / `created_at` 都是 **UTC 且以 `Z` 结尾**（[UtcDateTime](../backend/app/contracts/schemas.py#L35)）。SQLite 不存时区，读回来是 naive 的墙上时间；原样发出时前端 `Date.parse` 按**本地**时间解析（ECMAScript 规定），本机 UTC+8 上每个时长凭空多 8 小时（实测 52 秒显示成「已提交 8:00:52」，见 [020](../ai/bug-fix/020-the-progress-clock-is-eight-hours-off.md)）。前端解析收敛到 [parseServerTime](../frontend/src/shared/formatting.ts#L48)，界面显示时刻时按本地时区渲染。 | `docs/openapi.yaml` 里这些字段本来就写着 `format: date-time`（RFC 3339 要求偏移量）—— 实现一直在违反自己的契约，而契约闸门只比字段名不看格式。 |
+| 跨接口的时间一律带时区 | 所有对外的 `started_at` / `finished_at` / `created_at` / `paused_at`（E-05）都是 **UTC 且以 `Z` 结尾**（[UtcDateTime](../backend/app/contracts/schemas.py#L35)）。SQLite 不存时区，读回来是 naive 的墙上时间；原样发出时前端 `Date.parse` 按**本地**时间解析（ECMAScript 规定），本机 UTC+8 上每个时长凭空多 8 小时（实测 52 秒显示成「已提交 8:00:52」，见 [020](../ai/bug-fix/020-the-progress-clock-is-eight-hours-off.md)）。前端解析收敛到 [parseServerTime](../frontend/src/shared/formatting.ts#L48)，界面显示时刻时按本地时区渲染。 | `docs/openapi.yaml` 里这些字段本来就写着 `format: date-time`（RFC 3339 要求偏移量）—— 实现一直在违反自己的契约，而契约闸门只比字段名不看格式。 |
 | B站 凭据不入库 | 登录态只以文件形式放 `data/bilibili/cookies.json`（gitignored），API 只回传名字与计数。 | 凭据落库会被 `GET` 读模型、备份与 SQL 转储带出去；文件形态还能直接被 `biliup` 复用，不必在两层之间搬运凭据。 |
 | 字幕结论分两处记 | 下载侧在 `JobItem`（`subtitle_language` 族名 / `subtitle_source` / `subtitle_path`），上传侧在 `BiliUpload`（`subtitle_state` / `subtitle_lan` / `subtitle_message`）。**上传侧不复制字幕路径**，只存这一次的结论。 | 下载与上传是两条链路；路径复制一份会让「记录里有路径」与「磁盘上有文件」脱钩。`subtitle_state` 独立于 `status`，是为了让「字幕失败」不翻掉「稿件已发布」。历史行的补列默认 `skipped`（改动前从不传字幕，写 `failed` 等于给旧记录凭空编一个失败）。 |
 

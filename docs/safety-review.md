@@ -41,7 +41,7 @@
 
 详情：
 
-- 文件删除在 [_delete_output_files](../backend/app/download/job_manager.py#L401) 中执行，所有候选路径通过 [_is_under_allowed_root](../backend/app/download/job_manager.py#L372) 验证，仅允许在下载根目录或任务下载子目录下操作
+- 文件删除在 [_delete_output_files](../backend/app/download/job_manager.py#L406) 中执行，所有候选路径通过 [_is_under_allowed_root](../backend/app/download/job_manager.py#L372) 验证，仅允许在下载根目录或任务下载子目录下操作
 - 本地播放/打开文件夹/打开字幕接口（[routers/job_files.py](../backend/app/api/routers/job_files.py#L17) 起）仅使用数据库记录的 `output_path`、`subtitle_path` 和 `download_dir`，不接受前端传入任意路径；`open-subtitle` 的 `mode` 是 `Literal["default", "chooser"]`，越界取值由 FastAPI 直接 `422`
 - [safe_path_name](../backend/app/common/paths.py#L7) 为 playlist 目录名移除 `<>:"/\|?*` 等不安全字符，并限制长度为 120 字符
 - [discover_output_file_candidates](../backend/app/download/output_paths.py#L52) 仅在给定的 `job_download_dir` 内按 YouTube video ID 匹配文件，不遍历上级目录
@@ -55,8 +55,8 @@
 详情：
 
 - 所有查询通过 `session.exec(select(...))` 执行，使用 SQLModel 的声明式查询
-- [_ensure_columns](../backend/app/infra/db.py#L43) 使用 f-string 构建 `ALTER TABLE` 语句，但表名和列名来自硬编码字典，非用户输入
-- [checkpoint_wal](../backend/app/infra/db.py#L109) 的 `PRAGMA wal_checkpoint(...)` 同样由常量与函数默认参数构成
+- [_ensure_columns](../backend/app/infra/db.py#L43) 使用 f-string 构建 `ALTER TABLE` 语句，但表名和列名来自硬编码字典，非用户输入（E-05 追加的 `paused_at DATETIME` 同样只来自该字典；老库已有的行留 `NULL`，由读模型按 `updated_at` 兜底并明确标成近似值，不猜测精确起点）
+- [checkpoint_wal](../backend/app/infra/db.py#L112) 的 `PRAGMA wal_checkpoint(...)` 同样由常量与函数默认参数构成
 - 无原始 SQL 拼接
 
 ## 4. 跨站脚本攻击（XSS）

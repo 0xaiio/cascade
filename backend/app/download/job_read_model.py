@@ -6,7 +6,7 @@ from pathlib import Path
 from sqlmodel import Session, select
 
 from .fallback_policy import build_resolution_fallback
-from ..contracts.models import Job, JobItem, utc_now
+from ..contracts.models import Job, JobItem, JobStatus, utc_now
 from .output_paths import discover_existing_output_path, existing_subtitle_file, resolve_existing_output_path
 from ..contracts.schemas import DownloadOptions, JobItemRead, JobRead, ResolutionFallback
 
@@ -16,6 +16,7 @@ def read_job(session: Session, job_id: str) -> JobRead | None:
     if not job:
         return None
     items = session.exec(select(JobItem).where(JobItem.job_id == job_id).order_by(JobItem.index)).all()
+    paused_at, paused_approximate = _paused_since(job)
     return JobRead(
         id=job.id,
         url=job.url,
@@ -39,8 +40,25 @@ def read_job(session: Session, job_id: str) -> JobRead | None:
         finished_at=job.finished_at,
         elapsed_seconds=elapsed_seconds(job.started_at, job.finished_at),
         notify_on_complete=_notify_on_complete(job),
+        paused_at=paused_at,
+        paused_since_approximate=paused_approximate,
         items=[_read_job_item(item, job.download_dir) for item in items],
     )
+
+
+def _paused_since(job: Job) -> tuple[datetime | None, bool]:
+    """暂停起点 + 「是不是近似值」（E-05）。
+
+    - 非暂停态一律返回 `(None, False)`：库里可能留着上一轮的脏值，界面不该据此报「已暂停」。
+    - `paused_at` 是 `pause()` 写下的**专用**时刻；重复暂停不覆盖它。
+    - 补列之前的历史任务没有这一列，只能拿 `updated_at` 兜底；那是「最后一次更新」
+      而不是「进入暂停」，因此必须标成近似，让文案带一个「约」字。
+    """
+    if job.status != JobStatus.paused.value:
+        return None, False
+    if job.paused_at is not None:
+        return as_aware_utc(job.paused_at), False
+    return as_aware_utc(job.updated_at), True
 
 
 def _notify_on_complete(job: Job) -> bool:

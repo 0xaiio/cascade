@@ -48,6 +48,11 @@ class Job(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utc_now)
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
+    # 进入 `paused` 的时刻（E-05）。**不能用 `updated_at` 顶替**：那是「最后一次改了什么」，
+    # 暂停之后任何一次字段写入都会把它推后，于是「已暂停 3 小时」悄悄变成「刚暂停」。
+    # 重复暂停不重置起点；重启时清空。补列之前的历史任务由读模型按 `updated_at` 兜底，
+    # 并明确标成近似值。
+    paused_at: Optional[datetime] = None
 
 
 class JobItem(SQLModel, table=True):

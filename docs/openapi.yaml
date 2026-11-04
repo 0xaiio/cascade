@@ -2549,6 +2549,20 @@ components:
           description: >-
             Whether this job was created with the completion reminder enabled. Derived
             from the stored options so the frontend still knows it after a page reload.
+        paused_at:
+          type: [string, "null"]
+          format: date-time
+          default: null
+          description: >-
+            When the job entered `paused` (UTC, `Z` suffix). Always null for other
+            statuses. Repeated pauses do not reset it; restarting clears it.
+        paused_since_approximate:
+          type: boolean
+          default: false
+          description: >-
+            True for jobs created before `paused_at` existed: the read model falls
+            back to `updated_at`, so the UI must say "about" instead of an exact
+            duration. No notification is sent for a long pause (see bug-fix/014).
         items:
           type: array
           items:

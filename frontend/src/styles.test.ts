@@ -184,4 +184,13 @@ describe("styles.css · 源文不变式", () => {
     const label = (bodies.get(".clone-job-fields label") ?? []).join("\n");
     expect(label).toMatch(/flex:\s*1\s+1\s+[1-9]\d*px/);
   });
+
+  // E-05 长暂停提示跟在状态行下面：文案带时长与下一步，窄屏下必须能断行。
+  test("lets the E-05 paused notice wrap without clipping", () => {
+    const bodies = cssRuleBodies(stylesCss);
+    const notice = (bodies.get(".paused-since") ?? []).join("\n");
+    expect(notice).toMatch(/overflow-wrap:\s*anywhere/);
+    expect(notice).not.toMatch(/white-space:\s*nowrap/);
+    expect(notice).not.toMatch(/text-overflow\s*:/);
+  });
 });

@@ -29,7 +29,7 @@ FastAPI 应用由 [create_app](../backend/app/main.py#L40) 创建，启动时：
 | `BiliUpload` | B站 投稿记录：入参（标题/简介/标签/分区/视频路径/是否做封面/评论）+ 结果（`bvid`/`aid`/`cid`、进度、对账结论 `verified_state`、`attempt`、`log_tail`）+ 字幕结论（`subtitle_state` / `subtitle_lan` / `subtitle_message`，**独立于稿件状态**）。**入参也落库**，这样用户在关掉页面之后重试仍能照原样重投。 |
 | `BiliSeason` | B站 合集归集记录：`season_id`（建好后即使补加视频失败也保留，重试只补加不重建）、归集状态与错误。 |
 
-数据库初始化调用 [init_db](../backend/app/infra/db.py#L38)。为了兼容旧数据库，[_ensure_columns](../backend/app/infra/db.py#L43) 会补齐新增列。[create_app_engine](../backend/app/infra/db.py#L27) 在每条 SQLite 连接上先设置 `busy_timeout=5000`，再启用 WAL 和 `synchronous=NORMAL`，让多个下载 worker 的进度写入互相等待而不是立刻报 `database is locked`。如果数据库已被其他进程锁住（例如本机已有 uvicorn），WAL pragma 会跳过而不是让应用启动失败。应用启动和停止时各执行一次 `PRAGMA wal_checkpoint(TRUNCATE)`（[checkpoint_wal](../backend/app/infra/db.py#L109)）：避免进程被强杀后遗留的 `-wal` 文件无界增长，也避免每次读取都要回放 WAL；该操作失败只记日志，不影响启动或停止。
+数据库初始化调用 [init_db](../backend/app/infra/db.py#L38)。为了兼容旧数据库，[_ensure_columns](../backend/app/infra/db.py#L43) 会补齐新增列。[create_app_engine](../backend/app/infra/db.py#L27) 在每条 SQLite 连接上先设置 `busy_timeout=5000`，再启用 WAL 和 `synchronous=NORMAL`，让多个下载 worker 的进度写入互相等待而不是立刻报 `database is locked`。如果数据库已被其他进程锁住（例如本机已有 uvicorn），WAL pragma 会跳过而不是让应用启动失败。应用启动和停止时各执行一次 `PRAGMA wal_checkpoint(TRUNCATE)`（[checkpoint_wal](../backend/app/infra/db.py#L112)）：避免进程被强杀后遗留的 `-wal` 文件无界增长，也避免每次读取都要回放 WAL；该操作失败只记日志，不影响启动或停止。
 
 ## 任务调度
 
@@ -38,14 +38,14 @@ FastAPI 应用由 [create_app](../backend/app/main.py#L40) 创建，启动时：
 关键流程：
 
 1. `POST /api/jobs` 写入 `Job` 和 `JobItem`，然后调用 [enqueue](../backend/app/download/job_manager.py#L180) 把待处理子视频入队。
-2. worker 从队列取出 `JobItem` id，调用 [_run_item_work](../backend/app/download/job_manager.py#L489)。
+2. worker 从队列取出 `JobItem` id，调用 [_run_item_work](../backend/app/download/job_manager.py#L494)。
 3. 并发上限按**视频**计，而不是按任务计：一个合集的多个子视频可以同时占用多个 worker。
-4. 单项由 [_run_item](../backend/app/download/job_manager.py#L581) 处理，负责预检测、下载、进度 hook、错误分类和终态写入。
-5. 每个子项结束后调用 [_maybe_finish_job](../backend/app/download/job_manager.py#L543)；没有 queued/running 子项时才 [_finish_job](../backend/app/download/job_manager.py#L810) 聚合任务终态。
-6. worker 对每条 item 的整段工作有兜底：抛出的异常记进日志，并由 [_mark_item_failed_after_crash](../backend/app/download/job_manager.py#L443) 把该条目落成 `failed`（已经落定的条目不动），worker 继续消费队列。因此 `finally` 这类收尾块里**不允许**出现 `return` —— 那会吞掉正在传播的异常，见 [008](../ai/bug-fix/008-return-in-finally-swallows-the-real-error.md)。
+4. 单项由 [_run_item](../backend/app/download/job_manager.py#L586) 处理，负责预检测、下载、进度 hook、错误分类和终态写入。
+5. 每个子项结束后调用 [_maybe_finish_job](../backend/app/download/job_manager.py#L548)；没有 queued/running 子项时才 [_finish_job](../backend/app/download/job_manager.py#L815) 聚合任务终态。
+6. worker 对每条 item 的整段工作有兜底：抛出的异常记进日志，并由 [_mark_item_failed_after_crash](../backend/app/download/job_manager.py#L448) 把该条目落成 `failed`（已经落定的条目不动），worker 继续消费队列。因此 `finally` 这类收尾块里**不允许**出现 `return` —— 那会吞掉正在传播的异常，见 [008](../ai/bug-fix/008-return-in-finally-swallows-the-real-error.md)。
 7. 进程启动时先调 [recover_orphaned_work](../backend/app/download/job_manager.py#L85) 收上一次退出留下的孤儿条目，**然后**才允许 worker 消费队列，见本节的「进程退出与恢复」。
 
-暂停和重启会重置运行中字段，但保留可重新执行的任务记录，见 [restart](../backend/app/download/job_manager.py#L222) 和 [restart_item](../backend/app/download/job_manager.py#L273)。Playlist 子视频删除由 `delete_items()` 处理：删除指定 `JobItem` 后刷新父任务聚合状态；如果删除最后一个子视频，父任务也会被删除。
+暂停和重启会重置运行中字段，但保留可重新执行的任务记录，见 [restart](../backend/app/download/job_manager.py#L225) 和 [restart_item](../backend/app/download/job_manager.py#L277)。Playlist 子视频删除由 `delete_items()` 处理：删除指定 `JobItem` 后刷新父任务聚合状态；如果删除最后一个子视频，父任务也会被删除。
 
 运行时下载设置由 `PUT /api/settings` 触发：并发调用 `set_concurrency()` 立即调整 worker；限速和重试次数调用 `set_runtime_download_defaults()` 更新 queued/running/paused 任务的 `options_json`。当当前 `JobItem` 正在下载时，`should_cancel` 会让 yt-dlp 在下一个可中断点退出，该子项被重新置为 queued 并重新入队，依靠断点续传应用新的限速或重试次数。前端在下载选项面板复用设置保存状态样式，并用请求序号避免快速输入时旧响应覆盖最后一次输入。
 
@@ -54,7 +54,7 @@ FastAPI 应用由 [create_app](../backend/app/main.py#L40) 创建，启动时：
 - `_item_claim_lock` 只包住「刷新状态 → 检查 queued → 置 running → commit」，不覆盖下载过程。
 - 原先还有一把 `_cookie_import_lock`（并发下载同时去读浏览器 cookies 时用）；浏览器导入入口已移除，这把锁随之删除（见 [038](../ai/bug-fix/038-browser-cookie-import-is-gone.md)）。
 
-事件有两份记录：内存中的 `EventBroker`（SSE 推送）和持久化的 `JobEvent` 行。worker 线程通过 [_publish_threadsafe](../backend/app/download/job_manager.py#L1216) 写库，再用 `loop.call_soon_threadsafe` 把推送调度回事件循环；纯异步路径直接用 [_publish](../backend/app/download/job_manager.py#L1203)。
+事件有两份记录：内存中的 `EventBroker`（SSE 推送）和持久化的 `JobEvent` 行。worker 线程通过 [_publish_threadsafe](../backend/app/download/job_manager.py#L1221) 写库，再用 `loop.call_soon_threadsafe` 把推送调度回事件循环；纯异步路径直接用 [_publish](../backend/app/download/job_manager.py#L1208)。
 
 **订阅者必须被显式注销**：[EventBroker.subscribe](../backend/app/infra/events.py#L16) 是一个异步生成器，
 它在 `finally` 里把自己从订阅集合里 `discard` 掉。但 `async for` **不会**关闭子异步生成器（PEP 525 的老坑），
@@ -70,7 +70,7 @@ FastAPI 应用由 [create_app](../backend/app/main.py#L40) 创建，启动时：
 [recover_orphaned_work](../backend/app/download/job_manager.py#L85) 在 lifespan 里、`start()` 之前执行。它把工作拆成两半：
 
 - [orphan_recovery.recover_orphaned_items](../backend/app/download/orphan_recovery.py#L77) 只改**条目**状态并返回报告，不碰任务终态；
-- 任务终态回到运行期同一个 [_maybe_finish_job](../backend/app/download/job_manager.py#L543)，避免「什么算结束」出现两份定义。
+- 任务终态回到运行期同一个 [_maybe_finish_job](../backend/app/download/job_manager.py#L548)，避免「什么算结束」出现两份定义。
 
 顺序是硬要求：**先改库（工作线程里、一个 worker 都还没有），再 `start()`**。反过来 worker 会与被扫描的行并发读写，`item.status` 的读-改-写互相覆盖。
 
@@ -114,7 +114,7 @@ FastAPI 应用由 [create_app](../backend/app/main.py#L40) 创建，启动时：
 
 [error_advice.advise](../backend/app/download/error_advice.py#L140) 把异常链上的文本翻成「code + 结论 + 下一步」，判定顺序是 JS challenge → cookies → 代理 → 媒体流。异常链本身由 `error_advice.exception_chain()` 展开（BFS 遍历 `__cause__` / `__context__`，去重防环）；`ytdlp_service` 里的分类函数**直接调用它**，不再经过本类的转发方法（见 [ai/refactor/009](../ai/refactor/009-reclaim-compat-proxies.md)）。
 
-调用点有两处，**都被 `try/except` 保护**（诊断本身出错绝不能改变重试与失败行为，测试里的 fake service 也没有这个方法）：profile 失败处与任务失败处，后者见 [_log_item_failure](../backend/app/download/job_manager.py#L1153)。
+调用点有两处，**都被 `try/except` 保护**（诊断本身出错绝不能改变重试与失败行为，测试里的 fake service 也没有这个方法）：profile 失败处与任务失败处，后者见 [_log_item_failure](../backend/app/download/job_manager.py#L1158)。
 
 profile 顺序由 [_download_profiles](../backend/app/download/ytdlp_service.py#L819) 决定：`default`、`default_aria2c`（仅当 aria2c 启用且可执行文件存在）、`mweb_pot_chrome`、`safari_hls`、`chrome_default`。`default` profile 如果不是媒体流阻断错误会立即抛出（不换 profile），其余错误才继续下一个 profile。`DownloadCancelled` 与 `DownloadStalled` 都会跳出重试链直接上抛，见 [download](../backend/app/download/ytdlp_service.py#L554)。
 
@@ -128,11 +128,11 @@ profile 顺序由 [_download_profiles](../backend/app/download/ytdlp_service.py#
 
 格式选择和分辨率工具位于 [ytdlp_formats.py](../backend/app/download/ytdlp_formats.py)，降级文案在 [fallback_policy.py](../backend/app/download/fallback_policy.py)，而**降级决策**在 [resolution_decisions.py](../backend/app/download/resolution_decisions.py#L87)。后者是纯模块：四个 `decide_*` 函数只吃「用户选的清晰度 + 可用格式列表」，吐「降级到哪 / 原因 / 报哪句话」，不联网也不认识 `JobManager` —— 所以 `backend/tests/test_resolution_decisions.py` 能在 0.1 秒内把每条规则单独验一遍。
 
-下载前先调用 [_probe_preparation](../backend/app/download/job_manager.py#L936) 探测目标清晰度能否选出可下载组合。能选出就直接用这批 options 下载，不再额外调用 `extract_metadata`（上一轮性能修复的成果）。探针报「不可选」时 —— 无论是返回 `is_selectable=False`，还是抛 yt-dlp 的 `Requested format is not available` —— 才由 [_extract_formats_or_none](../backend/app/download/job_manager.py#L1125) 再解析一次元数据，交给 `decide_probe_fallback` 区分 `requested_resolution_missing`、`source_below_720_only` 和 `requested_resolution_unselectable`，然后用降级清晰度**再探一次**；通过才把降级后的 options 交给下载步骤。注意 `_extract_formats_or_none` 取不到元数据时返回 `None` 而不是空列表 —— 这是接口约定（"没取到"与"没有格式"是两件事），但 `resolution_decisions` 当前对两者的结论相同，该等价性由 `test_missing_metadata_and_empty_format_list_currently_agree` 钉住。
+下载前先调用 [_probe_preparation](../backend/app/download/job_manager.py#L941) 探测目标清晰度能否选出可下载组合。能选出就直接用这批 options 下载，不再额外调用 `extract_metadata`（上一轮性能修复的成果）。探针报「不可选」时 —— 无论是返回 `is_selectable=False`，还是抛 yt-dlp 的 `Requested format is not available` —— 才由 [_extract_formats_or_none](../backend/app/download/job_manager.py#L1130) 再解析一次元数据，交给 `decide_probe_fallback` 区分 `requested_resolution_missing`、`source_below_720_only` 和 `requested_resolution_unselectable`，然后用降级清晰度**再探一次**；通过才把降级后的 options 交给下载步骤。注意 `_extract_formats_or_none` 取不到元数据时返回 `None` 而不是空列表 —— 这是接口约定（"没取到"与"没有格式"是两件事），但 `resolution_decisions` 当前对两者的结论相同，该等价性由 `test_missing_metadata_and_empty_format_list_currently_agree` 钉住。
 
 探针的两种失败表现必须都算否定结论，否则降级分支会变成死代码（症状：提示「已自动降级」却不下载），见 [010](../ai/bug-fix/010-unselectable-probe-raise-skips-the-fallback.md)。与之相对，网络 / JS challenge / cookies 失效等异常要原样抛出，不能被降级吞掉。
 
-媒体流 403/连接重置只标注 `media_stream_blocked` 并给重启建议，不自动降清晰度重下：判定见 `decide_media_stream_fallback`（允许降到 720p 以下），调用点见 [_annotate_media_stream_fallback](../backend/app/download/job_manager.py#L1097)。
+媒体流 403/连接重置只标注 `media_stream_blocked` 并给重启建议，不自动降清晰度重下：判定见 `decide_media_stream_fallback`（允许降到 720p 以下），调用点见 [_annotate_media_stream_fallback](../backend/app/download/job_manager.py#L1102)。
 
 ## 进度与平均速度
 
@@ -142,9 +142,9 @@ yt-dlp 对字幕、缩略图、HTTP chunk 和分离视频/音频流会多次发�
 
 视频大小复用 `JobItem.total_bytes`：下载前由 `prepare_download()` 从所选格式的 `filesize/filesize_approx` 写入，下载中由 progress payload 校准，下载完成后继续保留，前端在任务行和 playlist 子视频行展示。
 
-视频时长走的是另一条路，因为它**不需要等选出格式**：`POST /api/jobs` 建任务时就把解析结果里每个条目的 `duration` 写进 `JobItem.duration`（[routers/jobs.py](../backend/app/api/routers/jobs.py#L57)），任务一进队列就能显示。`duration` 这一列是后补的，补列之前建的旧任务重启时由 [_apply_download_preparation](../backend/app/download/job_manager.py#L1020) 从预检的同一份 `info` 里补上（预检反正要取一次元数据，不为时长多发一次请求）。前端格式化见 [formatMediaDuration](../frontend/src/shared/formatting.ts#L15)：固定 `时:分:秒`，与「已用/剩余」用的 `formatClock` 刻意不同 —— 后者不到一小时时省掉时位，而时长是视频的固有属性，三段位数固定更好扫读。任务行的时长由 [formatJobDuration](../frontend/src/task-center/JobQueue.tsx#L718) 按子视频求和，与「大小」同一套折法（有子视频未知时前缀「已知」）。
+视频时长走的是另一条路，因为它**不需要等选出格式**：`POST /api/jobs` 建任务时就把解析结果里每个条目的 `duration` 写进 `JobItem.duration`（[routers/jobs.py](../backend/app/api/routers/jobs.py#L57)），任务一进队列就能显示。`duration` 这一列是后补的，补列之前建的旧任务重启时由 [_apply_download_preparation](../backend/app/download/job_manager.py#L1025) 从预检的同一份 `info` 里补上（预检反正要取一次元数据，不为时长多发一次请求）。前端格式化见 [formatMediaDuration](../frontend/src/shared/formatting.ts#L15)：固定 `时:分:秒`，与「已用/剩余」用的 `formatClock` 刻意不同 —— 后者不到一小时时省掉时位，而时长是视频的固有属性，三段位数固定更好扫读。任务行的时长由 [formatJobDuration](../frontend/src/task-center/JobQueue.tsx#L735) 按子视频求和，与「大小」同一套折法（有子视频未知时前缀「已知」）。
 
-平均速度由 [TransferStats](../backend/app/download/transfer_stats.py#L5) 根据聚合下载字节和时间计算。运行中 `speed` 是 yt-dlp 当前瞬时速度，终态 `speed` 是平均速度，终态聚合见 [_terminal_job_speed](../backend/app/download/job_manager.py#L913)。
+平均速度由 [TransferStats](../backend/app/download/transfer_stats.py#L5) 根据聚合下载字节和时间计算。运行中 `speed` 是 yt-dlp 当前瞬时速度，终态 `speed` 是平均速度，终态聚合见 [_terminal_job_speed](../backend/app/download/job_manager.py#L918)。
 
 ### B站 上传的进度
 
@@ -164,7 +164,7 @@ API 返回不直接暴露 SQLModel，而由 [read_job](../backend/app/download/j
 - 投影字幕结论（`subtitle_language` / `subtitle_source`）。**不在这里拼展示文案**：投稿表单里那句
   `en · 人工` 由 [`subtitle_summary`](../backend/app/download/subtitle_plan.py#L92) 在服务端的预填阶段算好
   （`BiliPrefillItem.subtitle`），前端原样显示 —— 两处各拼一遍就会出现「界面写自动生成、后端写 ASR」。
-- 把逐任务的「完成后通知」开关从 `options_json` 抬进读模型（[_notify_on_complete](../backend/app/download/job_read_model.py#L46)）。
+- 把逐任务的「完成后通知」开关从 `options_json` 抬进读模型（[_notify_on_complete](../backend/app/download/job_read_model.py#L64)）。
   它只存在于 `options_json` 里，而 SSE 的每个事件只是让前端重拉 `/api/jobs` —— 不抬出来的话，
   「这次会话里提交的任务会提醒、重开页面后同一个任务就不提醒」。提醒本身在浏览器里做，
   后端只存偏好（`completion_notification`）与这个逐任务开关，见 [FR-48](requirements.md#功能需求)。
@@ -213,7 +213,7 @@ B站 上传是一条与下载完全解耦的链路，模块划分（详见 [设�
 
 ## 前端实现
 
-前端 API 调用集中在 [api.ts](../frontend/src/shared/api.ts#L40)。共享类型集中在 [types.ts](../frontend/src/contracts/types.ts)。[App.tsx](../frontend/src/App.tsx#L68) 只做状态编排与布局，展示拆成解析面板 [UrlAnalyzer](../frontend/src/download-request/UrlAnalyzer.tsx#L19)、解析结果 [AnalysisPanel](../frontend/src/download-request/AnalysisPanel.tsx#L12)、下载选项 [DownloadOptionsPanel](../frontend/src/download-request/DownloadOptionsPanel.tsx#L26)、任务中心 [JobQueue](../frontend/src/task-center/JobQueue.tsx#L29)、设置 [SettingsPanel](../frontend/src/settings/SettingsPanel.tsx#L78)，基础件是 [SearchableLanguageSelect](../frontend/src/download-request/SearchableLanguageSelect.tsx#L16) / [Toggle](../frontend/src/shared/ui/Toggle.tsx#L9) / [StatusPill](../frontend/src/shared/ui/StatusPill.tsx#L4)；cookies 区域与代理区域分别是 [CookieSection](../frontend/src/cookies/CookieSection.tsx#L121) 和 [ProxySection](../frontend/src/settings/ProxySection.tsx#L120)。字幕文案与来源归一是纯模块 [subtitles.ts](../frontend/src/shared/subtitles.ts#L12)。
+前端 API 调用集中在 [api.ts](../frontend/src/shared/api.ts#L40)。共享类型集中在 [types.ts](../frontend/src/contracts/types.ts)。[App.tsx](../frontend/src/App.tsx#L68) 只做状态编排与布局，展示拆成解析面板 [UrlAnalyzer](../frontend/src/download-request/UrlAnalyzer.tsx#L19)、解析结果 [AnalysisPanel](../frontend/src/download-request/AnalysisPanel.tsx#L12)、下载选项 [DownloadOptionsPanel](../frontend/src/download-request/DownloadOptionsPanel.tsx#L26)、任务中心 [JobQueue](../frontend/src/task-center/JobQueue.tsx#L30)、设置 [SettingsPanel](../frontend/src/settings/SettingsPanel.tsx#L78)，基础件是 [SearchableLanguageSelect](../frontend/src/download-request/SearchableLanguageSelect.tsx#L16) / [Toggle](../frontend/src/shared/ui/Toggle.tsx#L9) / [StatusPill](../frontend/src/shared/ui/StatusPill.tsx#L4)；cookies 区域与代理区域分别是 [CookieSection](../frontend/src/cookies/CookieSection.tsx#L121) 和 [ProxySection](../frontend/src/settings/ProxySection.tsx#L120)。字幕文案与来源归一是纯模块 [subtitles.ts](../frontend/src/shared/subtitles.ts#L12)。
 
 设置面板的结构由 [SettingsGroup](../frontend/src/settings/SettingsGroup.tsx#L19) 定义：`section` + `aria-labelledby` + `h3`（浏览器据此给出 `role="region"`，读屏用户可以按区跳转）。五个区按**作用对象**划分、按用户碰到的先后排列：下载与存储 → 代理与网络 → 完成提醒 → B站 上传 → 运行环境；一项设置只能属于一个区。边界由「标题 + 1px 分隔线 + 组内 16px / 组间 62.5px 的间距差」共同成立，`.field` 自带的 16px 上边距因此必须在组内清零 —— 否则组内 32px ≈ 组间 33px，分区会退化成几个加粗小标题（实测数据与取舍见 [ai/ui/010](../ai/ui/010-settings-panel-is-a-flat-list.md)）。运行环境自检单独拆成 [RuntimeSection](../frontend/src/settings/RuntimeSection.tsx#L42)：它与代理共用 `GET /api/diagnostics`，但「数据同源」不等于「功能同类」。
 
@@ -301,7 +301,7 @@ B站 上传的界面由四个组件加一个图标组成：[BiliIcon](../fronten
 
 ## 日志安全
 
-下载失败日志会记录 job id、item id、标题、清晰度、错误分类和清洗后的错误文本，见 [_log_item_failure](../backend/app/download/job_manager.py#L1153)。日志清洗工具位于 [log_safety.py](../backend/app/common/log_safety.py#L20)，用于避免敏感 query、cookies 或 token 进入日志。
+下载失败日志会记录 job id、item id、标题、清晰度、错误分类和清洗后的错误文本，见 [_log_item_failure](../backend/app/download/job_manager.py#L1158)。日志清洗工具位于 [log_safety.py](../backend/app/common/log_safety.py#L20)，用于避免敏感 query、cookies 或 token 进入日志。
 
 ## 日志落盘
 

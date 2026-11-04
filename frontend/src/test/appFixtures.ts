@@ -56,6 +56,8 @@ export const jobPayload: Job = {
   // 出厂给 false：既有用例里没有任何任务会跑到终态，勾了也无事发生；
   // 要测提醒的用例自己覆盖成 true（见 completion-notification.test.tsx）。
   notify_on_complete: false,
+  paused_at: null,
+  paused_since_approximate: false,
   items: [
     {
       id: "item-running",

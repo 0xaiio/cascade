@@ -22,7 +22,7 @@
 
 ## 下载前预检测
 
-在实际下载前，`JobManager` 先调用 [prepare_download](../backend/app/download/ytdlp_service.py#L373) 让 yt-dlp 按当前 selector 选择计划下载格式。源视频清晰度匹配时不再额外 `extract_metadata`——这是上一轮性能修复的成果，见 [PLAN.md](../ai/perf/PLAN.md)。只有计划格式不可选时，才会再解析元数据并按降级原因分类。结果通过 [_apply_download_preparation](../backend/app/download/job_manager.py#L1020) 写入：
+在实际下载前，`JobManager` 先调用 [prepare_download](../backend/app/download/ytdlp_service.py#L373) 让 yt-dlp 按当前 selector 选择计划下载格式。源视频清晰度匹配时不再额外 `extract_metadata`——这是上一轮性能修复的成果，见 [PLAN.md](../ai/perf/PLAN.md)。只有计划格式不可选时，才会再解析元数据并按降级原因分类。结果通过 [_apply_download_preparation](../backend/app/download/job_manager.py#L1025) 写入：
 
 - `actual_width`
 - `actual_height`
@@ -59,7 +59,7 @@
 | 改限速 / 重试次数 | `set_runtime_download_defaults` → `_runtime_restart_items` | 只把在跑的 item 置回 `queued`，**不清产物路径** | `item_requeued`（`reason=runtime_download_options_changed`） |
 | 进程启动时的孤儿恢复 | `recover_orphaned_work` | 收敛上次残留的 `queued`/`running`；`paused` 不动 | `jobs_recovered` |
 
-`restart` 重置的字段：job 的 `status/progress/speed/eta/completed_items/failed_items/current_item_title/error/started_at/finished_at`，item 的 `status/progress/downloaded_bytes/total_bytes/speed/eta/output_path/actual_*/options_json/降级三列/error/started_at/finished_at`。**不重置**任务级 `options_json`（清晰度沿用）、`JobEvent` 历史，也**完全不碰磁盘** —— `.part` 由 `build_download_options` 里的 `continuedl: True` 在下一次 yt-dlp 运行时续传，界面进度从 0 起跳再由首个进度回调纠正。
+`restart` 重置的字段：job 的 `status/progress/speed/eta/completed_items/failed_items/current_item_title/error/started_at/finished_at/paused_at`（E-05 的暂停起点），item 的 `status/progress/downloaded_bytes/total_bytes/speed/eta/output_path/actual_*/options_json/降级三列/error/started_at/finished_at`。**不重置**任务级 `options_json`（清晰度沿用）、`JobEvent` 历史，也**完全不碰磁盘** —— `.part` 由 `build_download_options` 里的 `continuedl: True` 在下一次 yt-dlp 运行时续传，界面进度从 0 起跳再由首个进度回调纠正。
 
 条目重新入队后会重新走 [`prepare_download`](#下载前预检测)，因此计划分辨率、格式、大小与字幕计划都会重算。`item_restart` 只重置那一条并用 `_refresh_job_counts` 重算任务计数，其它条目的状态与 `output_path` 保持原样。行为判据逐条钉在 `backend/tests/test_restart_semantics.py`，界面文案由 [`restartSemantics.ts`](../frontend/src/task-center/restartSemantics.ts) 一处生成。
 
@@ -68,6 +68,14 @@
 `POST /api/jobs` 与 `POST /api/jobs/{id}/clone` 都调用 [`create_job_records`](../backend/app/api/api_support.py)：选条目 → 磁盘预算预检（E-01）→ 写 `Job` + N 个 `JobItem` → 由路由 `enqueue`。把这段抽出来不是为了复用代码本身，而是为了**让两条路径不可能各自漏掉一道预检** —— 克隆若自己写一遍 INSERT，就绕过了 409。
 
 克隆的选项合并写成 `DownloadOptions.model_validate({**original.model_dump(), **overrides})`：**026 的归一化/拒绝发生在请求体 `CloneJobRequest.resolution` 上**，覆盖项到业务层时已是合法值；这里的整份重建是防御性判据，保证交给写库路径的一定是完整有效对象，不依赖「调用方已经校验过」这个隐含前提。变异验证过：把这一行换成 `model_copy(update=overrides)`，当时的 14 条克隆用例仍全绿 —— 所以不能把「整份重建」写成「唯一能挡住 026 的地方」（见 [E-04](../ai/feature/E-04-clone-job.md) 的「变异验证」一节）。`CloneJobRequest` 只暴露 `resolution` / `mode`，`None` 表示沿用；前端只送改过的字段。源任务的 `options_json`、`JobEvent` 与 B站 投稿记录都不动，新任务额外写一条 `job_cloned`（含 `source_job_id`）。
+
+### 长暂停的起点是一个专用状态列（E-05）
+
+「已暂停多久」的起点是 `Job.paused_at`，**不是 `updated_at`**：后者记的是「最后一次改了什么」，暂停之后任何一次字段写入（速度/ETA 归零、设置同步、状态刷新）都会把它推后，界面上的「已暂停 3 小时」会悄悄变成「刚暂停」。`pause()` 用 `job.paused_at or utc_now()` 幂等写入（重复点暂停不重置），`restart()` / `restart_item()` 清空，下一次暂停自然拿到新起点；列由 `init_db._ensure_columns` 追加，老库不必手工迁移。
+
+[`_paused_since`](../backend/app/download/job_read_model.py) 是**唯一**把这一列变成对外结论的地方：非 `paused` 状态一律返回 `(None, False)`（库里残留的脏值不能让跑完的任务继续显示「已暂停」）；补列前的历史任务没有该列，用 `updated_at` 兜底但置 `paused_since_approximate=true`，前端文案因此必须带「约」—— 不把猜测伪装成精确值。前端 [`pausedSince.ts`](../frontend/src/task-center/pausedSince.ts) 只做纯判定与格式化，时间解析统一走 `parseServerTime`（无偏移量按 UTC），时钟回拨 / 未来时间 / 坏值一律不编数字；`JobQueue` 按分钟重算而不是秒表，并在组件里再判一次 `paused` 防旧缓存脏值。
+
+这条与 [014](../ai/bug-fix/014-a-dead-notify-switch.md) 的边界要一起读：`paused` 不是终态，长暂停只补任务行里的一行状态文案，**不新增通知渠道**、不进 toast 队列、不响声音。判据逐条钉在 `backend/tests/test_paused_since.py`，见 [E-05](../ai/feature/E-05-paused-since.md)。
 
 ## 字幕来源与格式
 
@@ -98,7 +106,7 @@
 
 ### 落库信磁盘，不信计划
 
-[`_record_subtitle_result`](../backend/app/download/job_manager.py#L1050) 用**字幕文件是否真的在磁盘上**判定：
+[`_record_subtitle_result`](../backend/app/download/job_manager.py#L1055) 用**字幕文件是否真的在磁盘上**判定：
 yt-dlp 对「请求的语言不存在」是静默跳过（不报错），所以「计划说有」与「写出来了」是两件事。
 存一个不存在的文件路径，等于让一次上传在最后一刻才发现没有字幕。
 
@@ -206,10 +214,10 @@ Cookies 用于合法账号态、年龄确认或 bot 校验场景。**只有一�
 解析阶段逻辑见 [_extract_metadata_with_cookies](../backend/app/api/api_support.py#L95)：失败只尝试一次，
 命中「需要登录 / bot 校验」时把 [COOKIE_EXPORT_ADVICE](../backend/app/download/error_advice.py#L71)
 （导出 → 上传 → 校验）写进错误消息。下载阶段同理，见
-[_download_with_cookie_guidance](../backend/app/download/job_manager.py#L781)。两处共用同一个句子，
+[_download_with_cookie_guidance](../backend/app/download/job_manager.py#L786)。两处共用同一个句子，
 因为它要说的本来就是同一件事。
 
-未配置 cookies 时，YouTube 媒体流 403 概率显著上升。任务中心的媒体流失败文案会前置「当前 cookies 状态：已配置 / 未配置」，见 [_media_stream_failure_message](../backend/app/download/job_manager.py#L1149)，便于先排除这个最常见的前置条件。
+未配置 cookies 时，YouTube 媒体流 403 概率显著上升。任务中心的媒体流失败文案会前置「当前 cookies 状态：已配置 / 未配置」，见 [_media_stream_failure_message](../backend/app/download/job_manager.py#L1154)，便于先排除这个最常见的前置条件。
 
 已配置的 cookies 是否真的可用，由 [cookie_health.py](../backend/app/host/cookie_health.py#L234) 判定（`POST /api/cookies/verify`）。它把两件事合成一个结论：
 
@@ -321,7 +329,7 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 ### 归集方式：`season_id` 预置就是全部的「加入已有」（单视频与合集共用）
 
 界面上让用户选**新建合集 / 加入已有合集 / 不归集**，但后端的新逻辑只有一行赋值：
-`submit_collection` / `submit_single` 把用户选中的编号写进 [BiliSeason.season_id](../backend/app/contracts/models.py#L199)，
+`submit_collection` / `submit_single` 把用户选中的编号写进 [BiliSeason.season_id](../backend/app/contracts/models.py#L204)，
 而 [_group_work](../backend/app/bilibili/bili_manager.py#L1641) 本来就读它当 `existing_season_id`
 并据此跳过 `create_season`。**复用既有的「重试不重复建合集」机制，而不是另开一条归集分支** ——
 另开一条就要把「建集 + 加集 + 失败重试 + 状态收敛」再实现一遍。
@@ -362,7 +370,7 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 
 **「不归集」在两条路径上的落库行为相反，这是刻意的**：
 
-- **合集**：落成终态 [skipped](../backend/app/contracts/models.py#L129) 而不是 `pending`。
+- **合集**：落成终态 [skipped](../backend/app/contracts/models.py#L134) 而不是 `pending`。
   [_maybe_group](../backend/app/bilibili/bili_manager.py#L1546) 只自动归集 `pending`，留 `pending` 会让
   「不归集」根本不管用，且界面上挂一个永远不会结束的徽标。但记录**照建** —— 不落库的话界面上
   什么都不显示，用户分不清是「没归集」还是「还没开始归」。

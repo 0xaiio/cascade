@@ -207,6 +207,9 @@ class JobManager:
             job.speed = None
             job.eta = None
             job.finished_at = None
+            # E-05：只记**第一次**进入暂停的时刻。重复点暂停不该把「已暂停 3 小时」
+            # 清零；真正重新开始时由 `restart` 清空，下一轮暂停自然拿到新起点。
+            job.paused_at = job.paused_at or utc_now()
             job.updated_at = utc_now()
             session.add(job)
             items = session.exec(select(JobItem).where(JobItem.job_id == job_id)).all()
@@ -240,6 +243,7 @@ class JobManager:
             job.error = None
             job.started_at = None
             job.finished_at = None
+            job.paused_at = None  # 退出暂停，下一次暂停重新计时（E-05）
             job.updated_at = utc_now()
             session.add(job)
             items = session.exec(select(JobItem).where(JobItem.job_id == job_id)).all()
@@ -308,6 +312,7 @@ class JobManager:
             job.error = None
             job.started_at = None
             job.finished_at = None
+            job.paused_at = None  # 条目级重启同样退出暂停（E-05）
             job.updated_at = utc_now()
             session.add(item)
             session.add(job)

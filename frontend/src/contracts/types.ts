@@ -158,6 +158,10 @@ export interface Job {
   elapsed_seconds: number;
   /** 创建这个任务时勾没勾「完成后通知」。由服务端从 `options_json` 派生 —— 刷新页面后前端仍然拿得到。 */
   notify_on_complete: boolean;
+  /** 进入暂停的时刻（UTC，带 Z）；非暂停态一律为 `null`（E-05）。 */
+  paused_at: string | null;
+  /** 历史任务没有 `paused_at` 列时，服务端用 `updated_at` 兜底；文案必须带「约」。 */
+  paused_since_approximate: boolean;
   items: JobItem[];
 }
 

@@ -262,6 +262,20 @@ button {
   margin-top: 10px;
 }
 
+/* E-05 长暂停提示：只是一行状态补充，不是错误也不是通知。
+   用暖色边框而非红色，避免被读成「任务坏了」。 */
+.paused-since {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  border-left: 3px solid #d99a3a;
+  border-radius: 4px;
+  background: #fff8ec;
+  color: #8a4b0f;
+  font-size: 13px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
 .clone-job-error {
   margin: 10px 0 0;
   padding: 8px 10px;

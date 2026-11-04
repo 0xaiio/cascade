@@ -257,6 +257,11 @@ class JobRead(BaseModel):
     # 前端刷新页面后就再也拿不到了（SSE 每次事件只是重拉 `/api/jobs`）—— 于是「这次会话里
     # 提交的任务会提醒、重开页面后同一个任务就不提醒」。
     notify_on_complete: bool = False
+    # E-05：只有 `paused` 状态才给 `paused_at`。非暂停态一律置空，避免脏值在
+    # 任务跑完之后还让界面显示「已暂停」；`paused_since_approximate` 表示这一列
+    # 是补列之前的历史任务，读模型用 `updated_at` 兜底，文案必须带「约」。
+    paused_at: UtcDateTime | None = None
+    paused_since_approximate: bool = False
     items: list[JobItemRead] = Field(default_factory=list)
 
 

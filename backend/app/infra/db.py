@@ -59,6 +59,9 @@ def _ensure_columns(engine: Engine) -> None:
             "started_at": "DATETIME",
             "finished_at": "DATETIME",
             "download_dir": "TEXT",
+            # E-05：老表里已经暂停的任务拿不到准确起点，留 NULL；读模型会用
+            # `updated_at` 兜底并把结论标成「约」，不把近似值伪装成精确值。
+            "paused_at": "DATETIME",
         },
         "jobitem": {
             # 视频时长（秒）。补列时库里已有的行拿不到时长（那时没记），留 NULL 即可：
