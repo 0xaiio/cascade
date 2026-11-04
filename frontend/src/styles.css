@@ -164,6 +164,59 @@ button {
   font-weight: 850;
 }
 
+/* E-02 任务筛选：整条允许换行，查询列给非零 flex-basis —— 窄屏下不会被
+   旁边的下拉框挤成 0px（ui/011 的教训：flex:1 的 basis 是 0）。 */
+.job-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid #d9e1ee;
+  border-radius: 10px;
+  background: #f7f9fc;
+}
+
+.job-filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  color: #657187;
+  font-size: 12px;
+}
+
+.job-filter-field select {
+  min-width: 128px;
+}
+
+.job-filter-query {
+  flex: 1 1 220px;
+}
+
+.job-filter-query input {
+  width: 100%;
+}
+
+.job-filter-empty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 12px;
+  border: 1px dashed #d9e1ee;
+  border-radius: 8px;
+  color: #657187;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.job-hidden-selection-hint {
+  color: #8a4b0f;
+}
+
 .panel-title svg {
   color: #1f6feb;
 }

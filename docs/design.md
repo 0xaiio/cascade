@@ -108,7 +108,7 @@
 | [shared/](../frontend/src/shared/) | 跨功能复用：`api`（HTTP 边界 + 超时看门狗）、`errors` / `formatting` / `quality` / `subtitles`；[ui/](../frontend/src/shared/ui/) 放**无业务判断**的基础件（`HelpPopover` / `Toggle` / `StatusPill`） | 不依赖任何功能目录 |
 | [download-request/](../frontend/src/download-request/) | 发起下载：解析链接（`UrlAnalyzer`）、解析结果（`AnalysisPanel`）、下载选项（`DownloadOptionsPanel` / `SearchableLanguageSelect`） | 依赖 `shared` / `cookies` |
 | [cookies/](../frontend/src/cookies/) | cookies 的**体检**与上传入口（`CookieSection` / `CookieHowToPopover`）。不提供浏览器导入 —— 应用只读用户导出的文件（[038](../ai/bug-fix/038-browser-cookie-import-is-gone.md)）。 | 依赖 `shared` |
-| [task-center/](../frontend/src/task-center/) | 任务中心：控制 / 删除 / 展开、进度与明细、本地文件操作、清晰度降级的重启（`JobQueue` / `SubtitleOpenButton`） | 依赖 `shared` / `bilibili` |
+| [task-center/](../frontend/src/task-center/) | 任务中心：控制 / 删除 / 展开、进度与明细、本地文件操作、清晰度降级的重启（`JobQueue` / `SubtitleOpenButton`），以及筛选与搜索的**纯判定**（`jobFilter`，E-02） | 依赖 `shared` / `bilibili` |
 | [settings/](../frontend/src/settings/) | 设置、代理检测与运行环境自检（`SettingsPanel` / `SettingsGroup` / `ProxySection` / `RuntimeSection`） | 依赖 `shared` / `bilibili`（登录区） |
 | [bilibili/](../frontend/src/bilibili/) | B站 上传：入口、表单、进度、状态明细、登录区，以及 `biliForm` / `biliStatus` / `biliProgress` / `biliHealth` 四块判定与文案 | 依赖 `shared` / `contracts` |
 | [notifications/](../frontend/src/notifications/) | 任务完成提醒：终态判定与浮层队列（`notifications`）、右下角浮层（`CompletionToasts`） | 依赖 `contracts` |

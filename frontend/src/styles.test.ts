@@ -156,4 +156,20 @@ describe("styles.css · 源文不变式", () => {
     const actions = bodies.get(".job-actions") ?? [];
     expect(actions.some((body) => /flex:\s*1\s+1\s+100%/.test(body))).toBe(true);
   });
+
+  // E-02 筛选条是新增的一排控件：窄屏下它同样受 ui/011 那条判据约束 ——
+  // 查询列若写成裸 `flex: 1`（basis 0），旁边不缩的下拉框会把它压到 0px。
+  // jsdom 量不出宽度，所以盯住「允许换行 + 非零 basis + 空态可断行」三条声明。
+  test("keeps the E-02 filter bar usable on a narrow screen", () => {
+    const bodies = cssRuleBodies(stylesCss);
+
+    const bar = (bodies.get(".job-filter-bar") ?? []).join("\n");
+    expect(bar).toMatch(/flex-wrap:\s*wrap/);
+
+    const query = (bodies.get(".job-filter-query") ?? []).join("\n");
+    expect(query).toMatch(/flex:\s*1\s+1\s+[1-9]\d*px/);
+
+    const empty = (bodies.get(".job-filter-empty") ?? []).join("\n");
+    expect(empty).toMatch(/overflow-wrap:\s*anywhere/);
+  });
 });

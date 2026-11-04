@@ -14,6 +14,8 @@ import {
 import { resolutionFallbackRestartLabel } from "../shared/quality";
 import { BiliJobStatus } from "../bilibili/BiliJobStatus";
 import { BiliUploadButton } from "../bilibili/BiliUploadButton";
+import { EMPTY_JOB_FILTER, filterJobs, JOB_STATUS_FILTERS } from "./jobFilter";
+import type { JobStatusFilter } from "./jobFilter";
 import { SubtitleOpenButton } from "./SubtitleOpenButton";
 
 type MaybePromise = void | Promise<void>;
@@ -91,6 +93,19 @@ export function JobQueue({
   // 哪个本地动作还在路上。打开字幕要先试两种系统入口再退回自带对话框，可能要 1~2 秒 ——
   // 这期间界面必须有反馈，否则又回到「点了没反应」。
   const [pendingLocalActionKey, setPendingLocalActionKey] = useState<string | null>(null);
+  // E-02：筛选是**展示层**的。`App` 的全量 `jobs` 仍要留给完成提醒的状态跃迁比对、
+  // B站 徽标和选中集合清理，因此这里只派生一份可见列表，绝不回写 props。
+  const [statusFilter, setStatusFilter] = useState<JobStatusFilter>("all");
+  const [filterQuery, setFilterQuery] = useState("");
+  const view = filterJobs(jobs, { status: statusFilter, query: filterQuery });
+  const visibleJobs = view.jobs;
+  const visibleJobIds = new Set(visibleJobs.map((job) => job.id));
+  const hiddenSelectedCount = Array.from(selectedJobIds).filter((id) => !visibleJobIds.has(id)).length;
+
+  function clearJobFilter() {
+    setStatusFilter(EMPTY_JOB_FILTER.status);
+    setFilterQuery(EMPTY_JOB_FILTER.query);
+  }
 
   useEffect(() => {
     setExpandedJobIds((current) => {
@@ -160,11 +175,62 @@ export function JobQueue({
           <Gauge size={20} />
           <h2>任务中心</h2>
         </div>
-        <span className="job-count-badge">{jobs.length ? `${jobs.length} 个任务` : "暂无任务"}</span>
+        <span className="job-count-badge">
+          {view.filtered
+            ? `显示 ${visibleJobs.length} / 共 ${jobs.length} 个任务`
+            : jobs.length
+              ? `${jobs.length} 个任务`
+              : "暂无任务"}
+        </span>
       </div>
+
+      <div className="job-filter-bar" role="search" aria-label="任务筛选">
+        <label className="job-filter-field">
+          <span>状态</span>
+          <select
+            aria-label="任务状态筛选"
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value as JobStatusFilter)}
+          >
+            {JOB_STATUS_FILTERS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="job-filter-field job-filter-query">
+          <span>标题</span>
+          <input
+            aria-label="搜索任务标题"
+            type="search"
+            value={filterQuery}
+            placeholder="任务 / 条目标题或链接"
+            onChange={(event) => setFilterQuery(event.target.value)}
+          />
+        </label>
+        {view.filtered && (
+          <button type="button" className="ghost-button" onClick={clearJobFilter}>
+            清空筛选
+          </button>
+        )}
+      </div>
+
+      {jobs.length > 0 && visibleJobs.length === 0 && (
+        <p className="job-filter-empty" role="status">
+          没有符合条件的任务：共 {jobs.length} 个，已隐藏 {view.hiddenCount} 个。
+          <button type="button" className="ghost-button" onClick={clearJobFilter}>
+            清空筛选
+          </button>
+        </p>
+      )}
+
       {selectedCount > 0 && (
         <div className="batch-toolbar" aria-label="批量任务操作">
           <span>{selectedCount} 个已选择</span>
+          {hiddenSelectedCount > 0 && view.filtered && (
+            <span className="job-hidden-selection-hint">其中 {hiddenSelectedCount} 个当前被筛选隐藏</span>
+          )}
           <button type="button" className="ghost-button" onClick={() => onBatchAction("pause")}>
             <Pause size={16} />
             批量暂停
@@ -184,7 +250,7 @@ export function JobQueue({
         </div>
       )}
       <div className="job-list">
-        {jobs.map((job) => {
+        {visibleJobs.map((job) => {
           const title = job.title || "未命名任务";
           const isPlaylist = job.total_items > 1;
           const primaryItem = job.items[0] ?? null;
@@ -197,7 +263,11 @@ export function JobQueue({
           const jobCopyKey = `job:${job.id}`;
           const isJobCopied = copiedKey === jobCopyKey;
           const defaultExpanded = isPlaylist && ["running", "failed"].includes(job.status);
-          const isExpanded = isPlaylist ? expandedJobIds[job.id] ?? defaultExpanded : true;
+          // 搜索命中**条目标题**时自动展开合集：否则用户只看到任务名，找不到命中的那一条。
+          // 用户手动折叠过的话以手动优先（`expandedJobIds` 里有值就不再覆盖）。
+          const isExpanded = isPlaylist
+            ? expandedJobIds[job.id] ?? (defaultExpanded || view.itemMatchJobIds.has(job.id))
+            : true;
           const jobRestartResolution = job.resolution_fallback?.restart_resolution ?? null;
           const jobRestartLabel = job.resolution_fallback
             ? resolutionFallbackRestartLabel(job.resolution_fallback, "job")
