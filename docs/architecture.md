@@ -19,7 +19,7 @@ PlantUML 源文件：[system-context.puml](diagrams/system-context.puml)。
 | React/Vite 前端 | 解析表单、下载选项、任务中心、cookies 操作和设置面板。 | [App.tsx](../frontend/src/App.tsx)、[api.ts](../frontend/src/shared/api.ts#L40) |
 | FastAPI 后端 | HTTP API、SSE、任务调度、SQLite 持久化、调用 yt-dlp。 | [create_app](../backend/app/main.py#L40) |
 | 启动入口 | 解析命令行、启动前做端口预检并识别占用者、把实际监听地址打印出来，再交给 uvicorn。 | [__main__.py](../backend/app/__main__.py#L64)、[dev_server.py](../backend/app/host/dev_server.py#L44) |
-| 任务调度与执行 | 队列、worker、暂停/重启/删除、进度聚合、错误分类与终态收敛。 | [JobManager](../backend/app/download/job_manager.py#L52) |
+| 任务调度与执行 | 队列、worker、暂停/重启/删除、进度聚合、错误分类与终态收敛。 | [JobManager](../backend/app/download/job_manager.py#L54) |
 | SQLite | 存储任务、子任务、设置和事件。 | [models.py](../backend/app/contracts/models.py#L27)、[db.py](../backend/app/infra/db.py#L27) |
 | yt-dlp 服务 | 元数据解析、下载参数构建、profile 重试、格式选择和依赖诊断。 | [YtDlpService](../backend/app/download/ytdlp_service.py#L183) |
 | 停滞看门狗 | 观测 progress 回调，把静默卡死转为可见失败。 | [StallGuard](../backend/app/download/stall_guard.py#L32) |
@@ -65,7 +65,7 @@ PlantUML 源文件：[cookies-flow.puml](diagrams/cookies-flow.puml)。
 
 Cookies **只能来自用户自己导出的文件**：浏览器扩展导出后上传，或运行 `scripts/export_cookies_via_cdp.py` 写到 `data/cookies.txt`。应用不读任何浏览器配置 —— Edge 的 cookie 是 v20 app-bound 加密，离线必然解不开，而旧实现的失败分支会结束用户所有 Edge 进程（见 [038](../ai/bug-fix/038-browser-cookie-import-is-gone.md)）。
 
-解析阶段遇到需要登录 / bot 校验时**只尝试一次**，失败消息里带「怎么导出 cookies.txt」的下一步，逻辑见 [_extract_metadata_with_cookies](../backend/app/api/api_support.py#L95)。下载阶段同理，见 [_download_with_cookie_guidance](../backend/app/download/job_manager.py#L765)。
+解析阶段遇到需要登录 / bot 校验时**只尝试一次**，失败消息里带「怎么导出 cookies.txt」的下一步，逻辑见 [_extract_metadata_with_cookies](../backend/app/api/api_support.py#L95)。下载阶段同理，见 [_download_with_cookie_guidance](../backend/app/download/job_manager.py#L781)。
 
 ### 上传到 B站
 
@@ -96,7 +96,7 @@ B站 上传有**自己的两套状态**，与 `JobStatus` 无关：
 
 进程重启后，停在 `uploading` 的记录（含 `queued`）一律折成**可重试的失败**，而不是永远停在「上传中」，见 [resume_interrupted](../backend/app/bilibili/bili_manager.py#L489)。
 
-**下载侧的策略与它相反**：残留的 `queued`/`running` 条目默认**重新排队并断点续传**，见 [recover_orphaned_work](../backend/app/download/job_manager.py#L83)。判据是「重做一次的代价」：下载是幂等且可续传的（`.part` 接着用），最坏只是多下一遍；投稿重投会在平台上留下重复稿件。同一条原则在两个链路上导出两个相反的默认值 —— 别把其中一个当成通用规则。用户按过「暂停」的任务在任何策略下都不恢复。
+**下载侧的策略与它相反**：残留的 `queued`/`running` 条目默认**重新排队并断点续传**，见 [recover_orphaned_work](../backend/app/download/job_manager.py#L85)。判据是「重做一次的代价」：下载是幂等且可续传的（`.part` 接着用），最坏只是多下一遍；投稿重投会在平台上留下重复稿件。同一条原则在两个链路上导出两个相反的默认值 —— 别把其中一个当成通用规则。用户按过「暂停」的任务在任何策略下都不恢复。
 
 ## 数据模型
 

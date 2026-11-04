@@ -12,6 +12,7 @@ from sqlalchemy.engine import Engine
 from sqlmodel import Session, select
 
 from ..contracts.config import AppSettings
+from .disk_budget import InsufficientDiskSpace, assess_for_item
 from .download_progress import DownloadProgressAggregator
 from .error_advice import cookie_required_message
 from ..infra.events import EventBroker
@@ -20,6 +21,7 @@ from ..common.log_safety import sanitize_log_message
 from ..contracts.models import Job, JobEvent, JobItem, JobStatus, utc_now
 from .orphan_recovery import OrphanRecoveryReport, recover_orphaned_items
 from .output_paths import (
+    discover_existing_output_path,
     find_subtitle_file,
     item_artifact_candidates,
     output_file_candidates,
@@ -563,6 +565,19 @@ class JobManager:
             return
         self._finish_job(session, job)
 
+    def _guard_item_disk_budget(self, item: JobItem, options: DownloadOptions, download_dir: Path) -> None:
+        """逐条开始前的第二次空间校验（E-01）。
+
+        与建任务那次的区别：这里拿的是 `prepare_download` 给**这一条**的真实大小，
+        所以 playlist（解析走 flat、拿不到每条的 filesize）也在这里被兜住。
+        已有成品时 yt-dlp 会跳过写入，磁盘满不该把一个本来能完成的任务判失败。
+        """
+        if options.skip_existing and discover_existing_output_path(item.source_url, download_dir):
+            return
+        budget = assess_for_item(item.total_bytes, download_dir)
+        if budget.blocks:
+            raise InsufficientDiskSpace(budget.message)
+
     def _run_item(
         self,
         session: Session,
@@ -654,6 +669,7 @@ class JobManager:
 
         try:
             options, subtitle_plan = self._prepare_download(session, item, options)
+            self._guard_item_disk_budget(item, options, download_dir)
             progress_aggregator.set_expected_total_bytes(item.total_bytes)
             should_cancel = (
                 lambda: job.id in self._cancelled

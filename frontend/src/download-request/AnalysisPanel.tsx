@@ -44,6 +44,17 @@ export function AnalysisPanel({
         </div>
       </div>
 
+      {/* E-01：空间结论由服务端算好（数字、单位、下一步都在 message 里），这里只按档位配色。
+          解析阶段它只是提示 —— 真正的阻断发生在 POST /api/jobs，那时才知道用户选了哪个清晰度。 */}
+      {analysis.disk_budget ? (
+        <p
+          className={`disk-budget-hint is-${analysis.disk_budget.status}`}
+          data-status={analysis.disk_budget.status}
+        >
+          {analysis.disk_budget.message}
+        </p>
+      ) : null}
+
       {analysis.is_playlist ? (
         <div className="table-wrap">
           <div className="table-actions">

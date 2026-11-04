@@ -57,6 +57,8 @@ export const mockState = {
    * 真实路径可测 —— 只测 cookies 那条，等于把「任务行上点出来的错误」交给人工看。
    */
   jobActionFailure: null as string | null,
+  /** `POST /api/jobs` 的阻断文案；非 `null` 时返回 409（E-01 磁盘空间不足）。 */
+  jobCreateFailure: null as string | null,
   /** 本地文件动作的人为延迟（毫秒），用来观察「正在打开…」这一态。 */
   localFileDelayMs: 0,
   /** `PUT /api/settings` 的人为延迟（毫秒），用来观察「保存中...」这一态。 */
@@ -159,6 +161,7 @@ function resetMockState(): void {
   mockState.analyzeCookieRequired = false;
   mockState.localFileActionFailure = null;
   mockState.jobActionFailure = null;
+  mockState.jobCreateFailure = null;
   mockState.localFileDelayMs = 0;
   mockState.settingsUpdateDelayMs = 0;
   mockState.settingsUpdateShouldFail = false;
@@ -269,6 +272,9 @@ export function installAppHarness(): void {
         }
         if (url.endsWith("/api/jobs")) {
           if (init?.method === "POST") {
+            if (mockState.jobCreateFailure) {
+              return Response.json({ detail: mockState.jobCreateFailure }, { status: 409 });
+            }
             return Response.json({ id: "job-1", status: "queued", total_items: 1, items: [] }, { status: 201 });
           }
           return Response.json(mockState.jobs);

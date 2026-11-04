@@ -22,7 +22,7 @@
 
 ## 下载前预检测
 
-在实际下载前，`JobManager` 先调用 [prepare_download](../backend/app/download/ytdlp_service.py#L373) 让 yt-dlp 按当前 selector 选择计划下载格式。源视频清晰度匹配时不再额外 `extract_metadata`——这是上一轮性能修复的成果，见 [PLAN.md](../ai/perf/PLAN.md)。只有计划格式不可选时，才会再解析元数据并按降级原因分类。结果通过 [_apply_download_preparation](../backend/app/download/job_manager.py#L1004) 写入：
+在实际下载前，`JobManager` 先调用 [prepare_download](../backend/app/download/ytdlp_service.py#L373) 让 yt-dlp 按当前 selector 选择计划下载格式。源视频清晰度匹配时不再额外 `extract_metadata`——这是上一轮性能修复的成果，见 [PLAN.md](../ai/perf/PLAN.md)。只有计划格式不可选时，才会再解析元数据并按降级原因分类。结果通过 [_apply_download_preparation](../backend/app/download/job_manager.py#L1020) 写入：
 
 - `actual_width`
 - `actual_height`
@@ -34,6 +34,20 @@
 **「不可选」有两种表现形式，两者都必须被当成否定结论。** yt-dlp 的格式选择发生在 `extract_info` **内部**，匹配不到时它**抛 `DownloadError: Requested format is not available`**，而不是返回空结果；只有少数路径才走得到「返回空列表」。`YtDlpService.prepare_download` 负责把该异常归一成 `is_selectable=False`，`JobManager._probe_preparation` 再兜一层，保证降级逻辑不会因为「探针换了一种方式说不行」而整段失效 —— 那种失效的症状是界面提示「已自动降级到 1080p」，而下载根本没有开始，见 [010](../ai/bug-fix/010-unselectable-probe-raise-skips-the-fallback.md)。
 
 反向的约束同样重要：**只把「格式选不出来」当作否定结论，其余异常必须继续向上抛**。网络失败、JS challenge、cookies 失效都是真故障，被降级逻辑吞掉只会让真实病因更难查。
+
+### 磁盘预算（E-01）
+
+预检测写下的 `total_bytes` 同时是**逐条空间校验**的依据，判定集中在 [`disk_budget.py`](../backend/app/download/disk_budget.py)（`ok` / `insufficient` / `unknown` 三档）。它有两次调用，不能合并成一次：
+
+| 时机 | 估值来源 | 处置 |
+| --- | --- | --- |
+| 解析结果 `POST /api/analyze` | `formats[].filesize` × 条目数，按**设置默认清晰度**挑最接近的格式 | 只挂一条 `disk_budget` 提示 |
+| 建任务 `POST /api/jobs` | 同一算法，但按**本次请求里的 `options`** 重算 | 两个数字都读到了且不够 → `409`，写库之前返回 |
+| 每条视频开始前（`_guard_item_disk_budget`） | `prepare_download` 给这一条的**真实** `filesize` | 不够 → 抛 `InsufficientDiskSpace`，该条 `failed`，不启动 yt-dlp |
+
+第三次不是冗余：合集的 flat 条目没有 `formats`，解析与建任务两处都估不出来（如实报 `unknown`），只有逐条这一层兜得住「批量下到一半撑爆磁盘」。`skip_existing` 命中已有成品时跳过校验；分区 `disk_usage` 抛 `OSError` 时返回 `None`，判为 `unknown` 而不是「空间不足」。所有失败文案都带预计量、可用量、差额与「清理 / 换目录 / 重启这一条」的下一步，且明确已有文件不会被删。
+
+估值刻意**不用时长折算码率**：那是猜，会把一条提示伪装成预估。安全余量固定 512 MiB，判据是合并、字幕、缩略图与元数据都要占地方，以及文件系统接近写满时的写放大。
 
 ## 字幕来源与格式
 
@@ -64,7 +78,7 @@
 
 ### 落库信磁盘，不信计划
 
-[`_record_subtitle_result`](../backend/app/download/job_manager.py#L1034) 用**字幕文件是否真的在磁盘上**判定：
+[`_record_subtitle_result`](../backend/app/download/job_manager.py#L1050) 用**字幕文件是否真的在磁盘上**判定：
 yt-dlp 对「请求的语言不存在」是静默跳过（不报错），所以「计划说有」与「写出来了」是两件事。
 存一个不存在的文件路径，等于让一次上传在最后一刻才发现没有字幕。
 
@@ -172,10 +186,10 @@ Cookies 用于合法账号态、年龄确认或 bot 校验场景。**只有一�
 解析阶段逻辑见 [_extract_metadata_with_cookies](../backend/app/api/api_support.py#L95)：失败只尝试一次，
 命中「需要登录 / bot 校验」时把 [COOKIE_EXPORT_ADVICE](../backend/app/download/error_advice.py#L71)
 （导出 → 上传 → 校验）写进错误消息。下载阶段同理，见
-[_download_with_cookie_guidance](../backend/app/download/job_manager.py#L765)。两处共用同一个句子，
+[_download_with_cookie_guidance](../backend/app/download/job_manager.py#L781)。两处共用同一个句子，
 因为它要说的本来就是同一件事。
 
-未配置 cookies 时，YouTube 媒体流 403 概率显著上升。任务中心的媒体流失败文案会前置「当前 cookies 状态：已配置 / 未配置」，见 [_media_stream_failure_message](../backend/app/download/job_manager.py#L1133)，便于先排除这个最常见的前置条件。
+未配置 cookies 时，YouTube 媒体流 403 概率显著上升。任务中心的媒体流失败文案会前置「当前 cookies 状态：已配置 / 未配置」，见 [_media_stream_failure_message](../backend/app/download/job_manager.py#L1149)，便于先排除这个最常见的前置条件。
 
 已配置的 cookies 是否真的可用，由 [cookie_health.py](../backend/app/host/cookie_health.py#L234) 判定（`POST /api/cookies/verify`）。它把两件事合成一个结论：
 

@@ -38,6 +38,15 @@ export interface VideoEntry {
   thumbnail: string | null;
 }
 
+/** 解析结果附带的磁盘预算结论（服务端算好，前端不自己拼数字）。 */
+export interface DiskBudget {
+  status: "ok" | "insufficient" | "unknown";
+  estimated_bytes: number | null;
+  free_bytes: number | null;
+  required_bytes: number | null;
+  message: string;
+}
+
 export interface AnalyzeResponse {
   url: string;
   title: string;
@@ -49,6 +58,7 @@ export interface AnalyzeResponse {
   subtitles: SubtitleOption[];
   automatic_subtitles: SubtitleOption[];
   ffmpeg: Record<string, boolean>;
+  disk_budget: DiskBudget | null;
 }
 
 export interface DownloadOptions {

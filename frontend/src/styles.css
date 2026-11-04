@@ -371,6 +371,31 @@ select:focus {
   font-weight: 850;
 }
 
+/* E-01 磁盘预算提示：三档共用一条，只有「不够」才用警示底色。
+   文案可能很长（含多个数字与下一步），固定宽度轨道里必须允许断行。 */
+.disk-budget-hint {
+  margin: 12px 0 0;
+  padding: 8px 10px;
+  border: 1px solid #d9e1ee;
+  border-radius: 8px;
+  color: #334155;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.disk-budget-hint.is-insufficient {
+  border-color: #f2c894;
+  background: #fff7ed;
+  color: #8a4b0f;
+}
+
+.disk-budget-hint.is-unknown {
+  border-color: #d9e1ee;
+  background: #f7f9fc;
+  color: #657187;
+}
+
 .table-wrap {
   margin-top: 18px;
   overflow-x: auto;

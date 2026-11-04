@@ -20,6 +20,11 @@ def analyze(request: AnalyzeRequest, ctx: ContextDep) -> AnalyzeResponse:
     「怎么导出 cookies.txt」的下一步（见 `extract_metadata_with_cookies`）。
     """
     try:
-        return api_support.extract_metadata_with_cookies(ctx.service, ctx.settings, request.url, request.cookies_enabled)
+        analysis = api_support.extract_metadata_with_cookies(
+            ctx.service, ctx.settings, request.url, request.cookies_enabled
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # 空间结论是解析结果的一部分：**在建任务之前**就让用户看到「这一批大概要占多少」。
+    # 它只是提示；真正的阻断发生在 POST /api/jobs（那里才知道用户选了哪个清晰度）。
+    return api_support.attach_analysis_disk_budget(analysis, ctx.settings)

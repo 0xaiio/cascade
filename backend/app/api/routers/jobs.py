@@ -10,6 +10,7 @@ from sqlmodel import select
 from .. import api_support
 from ..api_context import ContextDep, SessionDep
 from ...download.job_manager import new_id
+from ...download.disk_budget import assess_for_job
 from ...contracts.models import Job, JobItem
 from ...contracts.schemas import (
     CreateJobRequest,
@@ -51,6 +52,11 @@ async def create_job(request: CreateJobRequest, session: SessionDep, ctx: Contex
 
     job_id = new_id()
     download_dir = api_support.job_download_dir(ctx.settings.download_dir, analysis, job_id)
+    # 建任务前的阻断：这里的 `request.options` 是**本次实际所选**的清晰度，
+    # 与解析结果里那条按默认清晰度算的提示不同。写库之前判，拒绝时不留孤儿任务。
+    budget = assess_for_job(analysis, request.options, len(entries), download_dir)
+    if budget.blocks:
+        raise HTTPException(status_code=409, detail=budget.message)
     job = Job(
         id=job_id,
         url=request.url,

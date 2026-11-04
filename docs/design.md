@@ -65,6 +65,7 @@
 | [subtitle_plan.py](../backend/app/download/subtitle_plan.py#L200) | L3 领域 | 字幕下载**计划**：主语言判定（`-orig` 原声轨）、同族轨偏好、人工→ASR→跳过的收敛、来源标签与摘要文案。**纯逻辑**：不联网、不读库、不 import yt-dlp。 | 不写库、不发请求；不知道 `JobItem` 的存在（结论由 `job_manager` 取走）。 |
 | [bili_subtitle.py](../backend/app/bilibili/bili_subtitle.py#L277) | L3 领域 | B站 CC 字幕：SRT/VTT → BCC 转换、语言标识映射、一次字幕上传（`posted` / `skipped` / `failed`）。 | **不参与稿件状态判定**、不写库、不重试；不知道端点长什么样（端点在 `bili_api`）。 |
 | [ytdlp_formats.py](../backend/app/download/ytdlp_formats.py#L9) | L3 领域 | 格式选择器、分辨率/大小/codec 提取、降级候选计算。 | 不导入 yt-dlp。 |
+| [disk_budget.py](../backend/app/download/disk_budget.py#L1) | L3 领域 | **磁盘预算判定**：按目标清晰度估单条 / 整批大小、量目标分区可用空间（向上找存在的祖先）、给出 `ok` / `insufficient` / `unknown` 三档结论与带数字的下一步。读不到只提示、绝不阻断；磁盘量取只在这一处。 | 不写库、不改任务状态、不删文件；不猜码率（flat playlist 没给 `filesize` 就如实返回 `unknown`），阻断与否由调用方按 `blocks` 决定。 |
 | [stall_guard.py](../backend/app/download/stall_guard.py#L32) | L3 领域 | 纯函数式停滞判定与 `DownloadStalled`。 | 不写库、不发布事件。 |
 | [fallback_policy.py](../backend/app/download/fallback_policy.py#L10) | L3 领域 | 降级原因常量与用户可读文案、重启建议。 | 不做降级决策（决策在 `resolution_decisions`）。 |
 | [resolution_decisions.py](../backend/app/download/resolution_decisions.py#L71) | L3 领域 | 降级**决策**：值不值得找降级候选、降到哪、为什么、降不了时报哪句话。纯函数，可单测。 | 不发请求、不读库、不改 `JobItem`；可用清晰度由 `job_manager` 取好传进来。 |
@@ -194,7 +195,7 @@ PlantUML 源文件：[runtime-concurrency.puml](diagrams/runtime-concurrency.pum
 由此推出三条必须遵守的约定：
 
 1. **进度 hook 在工作线程上执行**，所以它使用自己的 `Session` 写库，不能复用请求级 session。
-2. **从线程发布事件要跨回事件循环**：[_publish_threadsafe](../backend/app/download/job_manager.py#L1200) 先写 `JobEvent` 行，再 `loop.call_soon_threadsafe` 调度 `broker.publish`。异步路径直接用 [_publish](../backend/app/download/job_manager.py#L1187)。
+2. **从线程发布事件要跨回事件循环**：[_publish_threadsafe](../backend/app/download/job_manager.py#L1216) 先写 `JobEvent` 行，再 `loop.call_soon_threadsafe` 调度 `broker.publish`。异步路径直接用 [_publish](../backend/app/download/job_manager.py#L1203)。
 3. **锁只保护状态转换，不保护下载**：`_item_claim_lock` 只覆盖"刷新 → 校验 queued → 置 running → commit"。下载本身靠 `should_cancel` 回调协作取消，而不是靠锁。（并发导入浏览器 cookies 用的那把锁已随入口移除，见 [ai/bug-fix/038](../ai/bug-fix/038-browser-cookie-import-is-gone.md)。）
 4. **单个条目的收尾出错不能带走 worker**：worker 循环对每条 item 的整段工作加了兜底 —— 崩溃的条目被标记为 `failed`（而不是永远停在 `running`），worker 继续消费队列。没有这层兜底，一个条目的记账错误就会静默地少掉一个并发口。见 [008](../ai/bug-fix/008-return-in-finally-swallows-the-real-error.md)。
 5. **队列不跨进程存活，所以启动时必须先对账**：`asyncio.Queue` 随进程消失，而库里还留着 `queued`/`running`。启动序列是「先改库、再 `start()`」——反过来 worker 会与被扫描的行并发读写。见 [015](../ai/bug-fix/015-orphan-items-never-resume.md)。
@@ -209,11 +210,13 @@ PlantUML 源文件：[download-data-flow.puml](diagrams/download-data-flow.puml)
 
 ### 解析链接
 
-`POST /api/analyze` → `YtDlpService.extract_metadata()`（`extract_flat="in_playlist"`，带 cookies）→ `AnalyzeResponse`。若 yt-dlp 抛出的错误同时命中 cookies 提示词，则自动导入浏览器 cookies 后**重试一次**，见 [extract_metadata_with_cookies](../backend/app/api/api_support.py#L94)。
+`POST /api/analyze` → `YtDlpService.extract_metadata()`（`extract_flat="in_playlist"`，带 cookies）→ `AnalyzeResponse`（附一条 `disk_budget` 提示：按设置里的默认清晰度估，只是提示）。cookies **只来自用户自己导出的文件**；需要登录时失败消息直接给导出指引，不读浏览器、也不重试，见 [038](../ai/bug-fix/038-browser-cookie-import-is-gone.md)。
 
 ### 建任务与入队
 
-`POST /api/jobs` → 解析 → 选条目（单视频合成 1 条 `VideoEntry`）→ 写 `Job` + N 个 `JobItem` → `enqueue()` 把 queued item id 放进队列。playlist 任务会额外在下载根目录下按安全化标题创建子目录，见 [job_download_dir](../backend/app/api/api_support.py#L86)。
+`POST /api/jobs` → 解析 → 选条目（单视频合成 1 条 `VideoEntry`）→ **磁盘预算复核**（按本次实际所选清晰度重算；两边数字都读到了且不够就回 409，库里一行都不写）→ 写 `Job` + N 个 `JobItem` → `enqueue()` 把 queued item id 放进队列。playlist 任务会额外在下载根目录下按安全化标题创建子目录，见 [job_download_dir](../backend/app/api/api_support.py#L89)。
+
+每条视频真正开始前，`_guard_item_disk_budget` 会用 `prepare_download` 给这一条的**真实** `filesize` 再核一次可用空间：不足则该条直接判失败并给带数字的下一步，一个字节都不写；`skip_existing` 命中已有成品时不核（那一轮不会写入大文件）。这一步是 flat playlist 没有 `filesize` 时唯一的兜底。
 
 ### 下载与进度
 
@@ -246,7 +249,7 @@ yt-dlp 自己按「人工先占、自动只补缺」的顺序挑 → 下载成�
 
 ### 删除与文件清理
 
-删除统一走 `JobManager`：先删数据库记录与关联 `JobEvent`，再按需删除文件。文件删除只在"下载根目录"或"该任务下载目录"之内执行，并对 `output_path`、合并后的最终文件与 sidecar 分别枚举候选，见 [_delete_output_files](../backend/app/download/job_manager.py#L399)。删除 playlist 的最后一个子项时父任务一并删除。
+删除统一走 `JobManager`：先删数据库记录与关联 `JobEvent`，再按需删除文件。文件删除只在"下载根目录"或"该任务下载目录"之内执行，并对 `output_path`、合并后的最终文件与 sidecar 分别枚举候选，见 [_delete_output_files](../backend/app/download/job_manager.py#L401)。删除 playlist 的最后一个子项时父任务一并删除。
 
 ### 播放与打开本地文件
 
@@ -312,8 +315,8 @@ yt-dlp 自己按「人工先占、自动只补缺」的顺序挑 → 下载成�
 `Job` 与 `JobItem` 共用 `JobStatus` 六态，但驱动者不同：
 
 - `JobItem` 由 worker 驱动：认领时置 `running`，结束按结果置 `succeeded` / `failed` / `cancelled` / `paused`。
-- `Job` 由 [_maybe_finish_job](../backend/app/download/job_manager.py#L541) 收敛：只要还有 running 或 queued 子项就保持 `running`；全部结束才由 [_finish_job](../backend/app/download/job_manager.py#L794) 判定终态（有失败项 → `failed`；被暂停 → `paused`；被取消 → `cancelled`；否则 `succeeded`）。
-- 任务级进度是子项进度的算术平均，见 [_refresh_job_counts](../backend/app/download/job_manager.py#L842)。
+- `Job` 由 [_maybe_finish_job](../backend/app/download/job_manager.py#L543) 收敛：只要还有 running 或 queued 子项就保持 `running`；全部结束才由 [_finish_job](../backend/app/download/job_manager.py#L810) 判定终态（有失败项 → `failed`；被暂停 → `paused`；被取消 → `cancelled`；否则 `succeeded`）。
+- 任务级进度是子项进度的算术平均，见 [_refresh_job_counts](../backend/app/download/job_manager.py#L858)。
 
 并发一致性依赖三点：单条 `JobItem` 只会被一个 worker 认领（`_item_claim_lock` + 状态校验）；worker 线程各自持有 session 并独立 commit；读模型只读不写，避免与写入路径争抢状态。
 
@@ -369,7 +372,7 @@ B站 上传有**自己的两套状态**，与 `JobStatus` 无关：
 ## 已知限制与设计债
 
 1. **停滞判定依赖 progress 回调**：如果 yt-dlp 完全阻塞在 socket 读且不回调，看门狗不会触发，此时只有 `socket_timeout=30` 兜底。因此不能声称"解决了所有卡死"。
-2. ~~**进程重启不恢复在途任务**：历史 `queued`/`running` item 在进程退出后不会自动重新入队或标记为取消，界面上表现为"永远排队"。~~ **已修复**（[`ai/bug-fix/015`](../ai/bug-fix/015-orphan-items-never-resume.md)，`ead7b81`）：启动时 [recover_orphaned_work](../backend/app/download/job_manager.py#L83) 先收敛孤儿条目再起 worker，默认重新排队并断点续传，准入分支的判据见 [实现文档](implementation.md#进程退出与恢复)。原记录（`ai/perf/PLAN.md` §8）保留作为历史上下文。
+2. ~~**进程重启不恢复在途任务**：历史 `queued`/`running` item 在进程退出后不会自动重新入队或标记为取消，界面上表现为"永远排队"。~~ **已修复**（[`ai/bug-fix/015`](../ai/bug-fix/015-orphan-items-never-resume.md)，`ead7b81`）：启动时 [recover_orphaned_work](../backend/app/download/job_manager.py#L85) 先收敛孤儿条目再起 worker，默认重新排队并断点续传，准入分支的判据见 [实现文档](implementation.md#进程退出与恢复)。原记录（`ai/perf/PLAN.md` §8）保留作为历史上下文。
 3. **无正式迁移框架**：`_ensure_columns` 只能加列。删除列、改类型或数据回填都需要手工 SQL，且没有版本记录表。
 4. **单视频无法内部并行**：yt-dlp 内建 http 下载器是单连接，`concurrent_fragment_downloads=1`，因此单视频提速只能靠 aria2c（默认关闭，且会推高 403 风险）。
 5. **profile 链是串行且昂贵的**：每个 profile 都是一次完整 extract，失败路径的耗时按 profile 数累加；`DownloadStalled` 与 `DownloadCancelled` 已跳过链路，其余错误仍会逐级重试。

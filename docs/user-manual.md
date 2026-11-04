@@ -49,12 +49,13 @@ YouTube Downloader 是本机单用户工具。前端提供链接解析、下载�
 1. 在首页输入单视频或 playlist 链接，点击解析。
 2. Playlist 会展示条目列表，可选择要下载的子视频；后端会根据选择生成 `JobItem`，见 [创建任务路由](../backend/app/api/routers/jobs.py#L28)。
 3. 在下载选项中选择下载模式、清晰度、字幕语言、字幕来源、字幕格式、metadata、缩略图、限速、重试和通知；默认清晰度为 `1440p`，默认字幕来源为“两者都要”。
-4. 点击加入下载队列，在任务中心观察进度、速度、预计剩余时间、实际分辨率和实际格式。
-5. 对任务执行暂停、重启、仅删除任务，或删除任务并删除已下载文件；前端 API 调用见 [api.ts](../frontend/src/shared/api.ts#L56)。
+4. 解析结果下方有一行**磁盘预算**提示，写明「这批大概需要多少、目标分区还剩多少」。它按设置里的默认清晰度估算，只是提示；点「加入下载队列」时会用你这一次实际选的清晰度复核，真的不够才拦下来（见 [下载空间不够时会怎样](#下载空间不够时会怎样)）。
+5. 点击加入下载队列，在任务中心观察进度、速度、预计剩余时间、实际分辨率和实际格式。
+6. 对任务执行暂停、重启、仅删除任务，或删除任务并删除已下载文件；前端 API 调用见 [api.ts](../frontend/src/shared/api.ts#L56)。
 
 ## 下载选项
 
-下载选项的数据结构由 [DownloadOptions](../backend/app/contracts/schemas.py#L117) 定义，前端对应类型见 [types.ts](../frontend/src/contracts/types.ts#L43)。
+下载选项的数据结构由 [DownloadOptions](../backend/app/contracts/schemas.py#L133) 定义，前端对应类型见 [types.ts](../frontend/src/contracts/types.ts#L43)。
 
 | 选项 | 行为 |
 | --- | --- |
@@ -112,7 +113,7 @@ YouTube Downloader 是本机单用户工具。前端提供链接解析、下载�
 
 ## 任务中心
 
-任务中心展示任务级和子视频级状态。后端 API 返回的字段见 [JobRead](../backend/app/contracts/schemas.py#L203) 和 [JobItemRead](../backend/app/contracts/schemas.py#L164)，前端展示组件见 [JobQueue](../frontend/src/task-center/JobQueue.tsx#L24)。
+任务中心展示任务级和子视频级状态。后端 API 返回的字段见 [JobRead](../backend/app/contracts/schemas.py#L219) 和 [JobItemRead](../backend/app/contracts/schemas.py#L180)，前端展示组件见 [JobQueue](../frontend/src/task-center/JobQueue.tsx#L24)。
 Playlist 展开后会用浅色分组背景承载子视频列表，便于区分合集任务行和单个视频任务。
 
 | 信息 | 说明 |
@@ -506,6 +507,18 @@ YouTube 把登录态与出口 IP 绑定。导出 cookies 时走代理 A、下载
 默认下载根目录是 `downloads/`，数据库和 cookies 默认在 `data/`，配置默认值见 [AppSettings](../backend/app/contracts/config.py#L19)。Playlist 会在下载根目录下创建同名子文件夹；目录选择和保存逻辑见 [select_download_dir](../backend/app/api/routers/settings.py#L99)。
 
 产物命名模板固定为 `<标题(最多200字节)> [<YouTube id>].<扩展名>`，见 [build_download_options](../backend/app/download/ytdlp_service.py#L474)。因此即使数据库里的 `output_path` 丢失，后端仍能按文件名中的 id 找回同名视频与 sidecar。
+
+### 下载空间不够时会怎样
+
+**解析之后**：结果面板里有一行提示，写明预计需要多少、当前分区可用多少。这条按设置里的默认清晰度估算，只是让你先有个数 —— 即使它说「不够」，也**不会**挡住解析或提交。
+
+**点「加入下载队列」时**：后端按你这一次实际选的清晰度重新算一次。只有当「预计大小」和「可用空间」两个数字都拿得到、且可用空间小于预计大小 + 512 MiB 余量时，才会回一句 `409`，把差额写清楚，并告诉你去清理该分区或在设置里换一个下载目录。这时**任务不会被创建**，任务列表里看不到它；已经下载好的文件不会被删。
+
+**两种不会拦你的情况**：平台没给文件大小（合集用 flat 方式解析时很常见）、或者分区可用空间读不出来（例如网络盘）。界面会说「暂时无法预估」而不编一个数字。作为兜底，每一条视频真正开始下载之前，后端还会用预检测拿到的**这一条的真实大小**再查一次空间：不够就把这一条标成失败并写明差额与下一步，一个字节都不会写，也就不会留下半截 `.part`。腾出空间后重启这一条即可接着跑。
+
+**已有成品不会误伤**：勾选了「跳过已下载」且本地确实已经找到同名成品时，这一轮不会写大文件，因此不做空间检查。
+
+> 余量固定为 512 MiB，用于合并后的文件、字幕、缩略图与元数据，也避免文件系统接近写满时明显变慢。它不是一个可配置项；判定的单一实现见 [`disk_budget.py`](../backend/app/download/disk_budget.py)。
 
 ## 常见问题入口
 

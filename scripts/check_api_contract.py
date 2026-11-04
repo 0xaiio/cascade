@@ -41,6 +41,7 @@ SCHEMA_PAIRS: dict[str, str | None] = {
     "FormatOption": "FormatOption",
     "SubtitleOption": "SubtitleOption",
     "VideoEntry": "VideoEntry",
+    "DiskBudget": "DiskBudgetRead",
     "AnalyzeResponse": "AnalyzeResponse",
     "DownloadOptions": "DownloadOptions",
     "ResolutionFallback": "ResolutionFallback",

@@ -101,6 +101,21 @@ class VideoEntry(BaseModel):
     thumbnail: str | None = None
 
 
+class DiskBudgetRead(BaseModel):
+    """解析结果附带的磁盘预算结论（E-01）。
+
+    三档语义见 `download/disk_budget.py`：`unknown` 只提示、不阻断；`insufficient`
+    在点「下载」时会被后端用**实际所选清晰度**复核成 409。解析请求里还没有选项，
+    这里按设置里的默认清晰度估，因此文案必须说清是「预估」。
+    """
+
+    status: Literal["ok", "insufficient", "unknown"]
+    estimated_bytes: int | None = None
+    free_bytes: int | None = None
+    required_bytes: int | None = None
+    message: str
+
+
 class AnalyzeResponse(BaseModel):
     url: str
     title: str
@@ -112,6 +127,7 @@ class AnalyzeResponse(BaseModel):
     subtitles: list[SubtitleOption] = Field(default_factory=list)
     automatic_subtitles: list[SubtitleOption] = Field(default_factory=list)
     ffmpeg: dict[str, bool] = Field(default_factory=dict)
+    disk_budget: DiskBudgetRead | None = None
 
 
 class DownloadOptions(BaseModel):

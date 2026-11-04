@@ -5,6 +5,7 @@
   BiliUpload,
   CookieHealth,
   Diagnostics,
+  DiskBudget,
   Job,
   ProxyTestResult,
   Settings
@@ -26,7 +27,8 @@ export const analyzePayload = {
   ],
   subtitles: [{ language: "en", name: null, formats: ["vtt"] }],
   automatic_subtitles: [{ language: "zh-Hans", name: null, formats: ["vtt"] }],
-  ffmpeg: { ffmpeg: true, ffprobe: true }
+  ffmpeg: { ffmpeg: true, ffprobe: true },
+  disk_budget: null as DiskBudget | null
 };
 
 export const jobPayload: Job = {

@@ -33,6 +33,7 @@ package "L2 orchestration" {
 package "L3 domain and policy" {
   [download/ytdlp_service.py\nyt-dlp boundary] as Service
   [download/ytdlp_formats.py\nselectors, fallback math] as Formats
+  [download/disk_budget.py\ndisk budget, free space] as DiskBudget
   [download/subtitle_plan.py\nsubtitle decisions] as SubtitlePlan
   [download/stall_guard.py\nstall watchdog] as Stall
   [download/fallback_policy.py\nreason and message] as Fallback
@@ -103,6 +104,7 @@ Routers --> BiliReadModel
 Routers --> BiliUpload
 Routers --> Models
 Routers --> Outputs
+Routers --> DiskBudget
 Routers --> Logging
 ApiCtx --> Manager
 ApiCtx --> Service
@@ -117,6 +119,7 @@ ApiSupport --> Proxy
 ApiSupport --> Paths
 ApiSupport --> Config
 ApiSupport --> Advice
+ApiSupport --> DiskBudget
 Artifacts --> Models
 Artifacts --> Outputs
 Artifacts --> Opener
@@ -135,6 +138,7 @@ Manager --> Recovery
 Manager --> Advice
 Manager --> SubtitlePlan
 Manager --> Deletion
+Manager --> DiskBudget
 ReadModel --> Models
 ReadModel --> Fallback
 ReadModel --> Outputs
@@ -176,6 +180,8 @@ Service --> LogSafe
 Service --> Schemas
 Service --> SubtitlePlan
 Formats --> Schemas
+DiskBudget --> Schemas
+DiskBudget --> Formats
 Schemas --> Time
 Fallback --> Schemas
 Decisions --> Fallback

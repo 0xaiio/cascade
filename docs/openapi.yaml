@@ -328,10 +328,16 @@ paths:
       operationId: analyzeUrl
       summary: Extract metadata for a video or playlist URL
       description: |
-        Runs yt-dlp metadata extraction with `extract_flat=in_playlist`. When
-        cookies are enabled and yt-dlp reports a login or bot-check error, the
-        backend imports cookies from the local browser once and retries before
-        giving up.
+        Runs yt-dlp metadata extraction with `extract_flat=in_playlist`. Cookies
+        come only from a file the user exported; the app never reads a browser
+        profile, and a cookie-required failure carries the export instruction in
+        its message (see bug-fix/038).
+
+        The response also carries `disk_budget`: a read-only estimate of how much
+        space the batch will need compared with the free space on the download
+        volume. It is computed with the **stored default resolution** (the
+        analyze request has no download options) and is a hint only. The actual
+        decision is made by `POST /api/jobs` using the options in that request.
       requestBody:
         required: true
         content:
@@ -381,6 +387,12 @@ paths:
                 ffmpeg:
                   ffmpeg: true
                   ffprobe: true
+                disk_budget:
+                  status: ok
+                  estimated_bytes: 419430400
+                  free_bytes: 8589934592
+                  required_bytes: 956301312
+                  message: "本次下载预计需要 912.00 MiB（含余量），当前可用 8.00 GiB。"
         "400":
           description: Extraction failed. Cookie-required failures carry the
             export instruction in the message (the app never reads a browser).
@@ -404,6 +416,14 @@ paths:
 
         Concurrency applies per video, so a single-video job is never affected
         by the concurrency setting.
+
+        Before inserting anything, the backend compares the estimated batch size
+        with the free space on the download volume (512 MiB reserve). If both
+        numbers are known and the space is short, it answers 409 with the deficit
+        and a concrete next step; no Job row is written. A missing size estimate
+        (flat playlist entries have no `filesize`) or an unreadable volume is
+        **not** a reason to block: each item is checked again just before its
+        download starts, using the real size from `prepare_download`.
       requestBody:
         required: true
         content:
@@ -498,6 +518,14 @@ paths:
                 noEntries:
                   value:
                     detail: No downloadable playlist entries were selected.
+        "409":
+          description: The download volume does not have room for this batch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                detail: "磁盘空间不足：本次下载预计需要 912.00 MiB（含 512.00 MiB 余量），当前可用 10.00 MiB，还差 902.00 MiB。请清理该分区，或在设置里换一个下载目录后重试；已有的文件不会被删除。"
         "422":
           $ref: "#/components/responses/ValidationError"
 
@@ -2003,6 +2031,29 @@ components:
           type: [string, "null"]
           example: https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg
 
+    DiskBudgetRead:
+      type: object
+      description: |
+        Disk-space budget attached to an analysis result (E-01). `status` is one
+        of `ok` / `insufficient` / `unknown`. Only `insufficient` blocks a job;
+        `unknown` means the platform gave no file size or the volume could not be
+        read. All numbers are bytes; `required_bytes` includes the 512 MiB
+        reserve. `message` is composed by the backend and already contains the
+        numbers, units and a next step — clients display it verbatim.
+      required: [status, estimated_bytes, free_bytes, required_bytes, message]
+      properties:
+        status:
+          type: string
+          enum: [ok, insufficient, unknown]
+        estimated_bytes:
+          type: [integer, "null"]
+        free_bytes:
+          type: [integer, "null"]
+        required_bytes:
+          type: [integer, "null"]
+        message:
+          type: string
+
     AnalyzeResponse:
       type: object
       required: [url, title, is_playlist]
@@ -2040,6 +2091,11 @@ components:
           items:
             $ref: "#/components/schemas/SubtitleOption"
           default: []
+        disk_budget:
+          allOf:
+            - $ref: "#/components/schemas/DiskBudgetRead"
+          nullable: true
+          default: null
         ffmpeg:
           type: object
           additionalProperties:

@@ -14,6 +14,7 @@ from fastapi import HTTPException
 from sqlmodel import Session, select
 
 from ..contracts.config import AppSettings
+from ..download.disk_budget import assess_for_job
 from ..download.job_read_model import read_job
 from ..contracts.models import Job, JobItem, Setting
 from ..common.paths import safe_path_name
@@ -22,6 +23,8 @@ from ..contracts.schemas import (
     COMPLETION_NOTIFICATION_MODES,
     DEFAULT_COMPLETION_NOTIFICATION,
     AnalyzeResponse,
+    DiskBudgetRead,
+    DownloadOptions,
     JobRead,
     SettingsRead,
     VideoEntry,
@@ -89,6 +92,30 @@ def job_download_dir(root_dir: Path, analysis: AnalyzeResponse, job_id: str) -> 
         return root_dir
     folder = safe_path_name(analysis.title, fallback=f"playlist-{job_id[:8]}")
     return root_dir / folder
+
+
+def attach_analysis_disk_budget(analysis: AnalyzeResponse, settings: AppSettings) -> AnalyzeResponse:
+    """在解析结果上附一条磁盘预算**提示**（E-01）。
+
+    解析请求里还没有下载选项，所以按设置里的默认清晰度估；点「下载」时
+    `POST /api/jobs` 会用**那一次实际选的清晰度**复核并决定是否阻断。
+    库里可能存着早于 026 的非法清晰度，构造 `DownloadOptions` 因此要兜底：
+    解析不该因为一条提示而 500。
+    """
+    try:
+        options = DownloadOptions(resolution=settings.default_resolution)
+    except Exception:  # noqa: BLE001 - 非法历史取值只影响提示，不影响解析
+        options = DownloadOptions()
+    entry_count = len(analysis.entries) if analysis.is_playlist else 1
+    budget = assess_for_job(analysis, options, entry_count, settings.download_dir)
+    analysis.disk_budget = DiskBudgetRead(
+        status=budget.status,
+        estimated_bytes=budget.estimated_bytes,
+        free_bytes=budget.free_bytes,
+        required_bytes=budget.required_bytes,
+        message=budget.message,
+    )
+    return analysis
 
 
 def extract_metadata_with_cookies(
