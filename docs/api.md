@@ -44,7 +44,7 @@
 
 - 后端应用由 [create_app](../backend/app/main.py#L40) 创建；API 默认绑定 `127.0.0.1:8000`（可用仓库根 `.env` 的 `YTDL_API_PORT` 或 `python -m app --port` 覆盖，见 [开发文档](development.md#端口被占用时)），单端口模式下同时托管 `frontend/dist`。
 - API 返回 JSON；`DELETE /api/jobs/{id}` 与四个本地打开接口成功时返回 `204`。
-- 前端统一请求封装在 [request](../frontend/src/shared/api.ts#L75)，非 2xx 响应会抛出 `ApiError`，并保留结构化 `detail`。
+- 前端统一请求封装在 [request](../frontend/src/shared/api.ts#L76)，非 2xx 响应会抛出 `ApiError`，并保留结构化 `detail`。
 - Cookies 只接受**用户自己导出并上传的文件**（浏览器扩展 / `scripts/export_cookies_via_cdp.py`）。
   应用内没有「从浏览器导入」这条路：Edge 的 cookie 是 v20 app-bound 加密，离线必然解不开，
   旧实现的失败分支还会结束用户所有 Edge 进程（见 [038](../ai/bug-fix/038-browser-cookie-import-is-gone.md)）。
@@ -58,18 +58,19 @@
 | 方法 | 路径 | 用途 | 主要模型 |
 | --- | --- | --- | --- |
 | `GET` | `/health` | 健康检查。 | `dict[str, bool]` |
-| `GET` | `/api/diagnostics` | 依赖和运行状态诊断。 | [`DiagnosticsRead`](../backend/app/contracts/schemas.py#L381) |
-| `POST` | `/api/diagnostics/runtime` | 清掉 JS 运行时探测缓存后重新自检，返回同一份诊断。 | [`DiagnosticsRead`](../backend/app/contracts/schemas.py#L381) |
-| `POST` | `/api/proxy/test` | 检测代理连通性，可临时试一个**未保存**的地址。 | [`ProxyTestRequest`](../backend/app/contracts/schemas.py#L315)、[`ProxyTestRead`](../backend/app/contracts/schemas.py#L320) |
-| `POST` | `/api/cookies/verify` | cookies 体检（离线格式/域名/鉴权项，可联网确认登录态）。 | [`CookieVerifyRequest`](../backend/app/contracts/schemas.py#L333)、[`CookieHealthRead`](../backend/app/contracts/schemas.py#L338) |
+| `GET` | `/api/diagnostics` | 依赖和运行状态诊断。 | [`DiagnosticsRead`](../backend/app/contracts/schemas.py#L396) |
+| `POST` | `/api/diagnostics/runtime` | 清掉 JS 运行时探测缓存后重新自检，返回同一份诊断。 | [`DiagnosticsRead`](../backend/app/contracts/schemas.py#L396) |
+| `POST` | `/api/proxy/test` | 检测代理连通性，可临时试一个**未保存**的地址。 | [`ProxyTestRequest`](../backend/app/contracts/schemas.py#L330)、[`ProxyTestRead`](../backend/app/contracts/schemas.py#L335) |
+| `POST` | `/api/cookies/verify` | cookies 体检（离线格式/域名/鉴权项，可联网确认登录态）。 | [`CookieVerifyRequest`](../backend/app/contracts/schemas.py#L348)、[`CookieHealthRead`](../backend/app/contracts/schemas.py#L353) |
 | `POST` | `/api/analyze` | 解析单视频或 playlist。 | [`AnalyzeRequest`](../backend/app/contracts/schemas.py#L75)、[`AnalyzeResponse`](../backend/app/contracts/schemas.py#L119) |
-| `POST` | `/api/jobs` | 创建下载任务并入队。**先按本次选项复核磁盘预算**：估算与可用空间都读到了且不够时回 `409`（带差额与下一步），库里不写任务；读不到则不阻断（见 [E-01](../ai/feature/E-01-disk-budget.md)）。 | [`CreateJobRequest`](../backend/app/contracts/schemas.py#L152)、[`JobRead`](../backend/app/contracts/schemas.py#L219) |
+| `POST` | `/api/jobs` | 创建下载任务并入队。**先按本次选项复核磁盘预算**：估算与可用空间都读到了且不够时回 `409`（带差额与下一步），库里不写任务；读不到则不阻断（见 [E-01](../ai/feature/E-01-disk-budget.md)）。 | [`CreateJobRequest`](../backend/app/contracts/schemas.py#L152)、[`JobRead`](../backend/app/contracts/schemas.py#L234) |
 | `GET` | `/api/jobs` | 获取任务列表。 | `list[JobRead]` |
 | `GET` | `/api/jobs/{job_id}` | 获取单个任务详情。 | `JobRead` |
-| `POST` | `/api/jobs/batch` | 批量暂停、重启或删除。删除时**整批先预检在途投稿**，任一条忙则整批 `409`（不删一半）。 | [`JobBatchActionRequest`](../backend/app/contracts/schemas.py#L161) |
+| `POST` | `/api/jobs/batch` | 批量暂停、重启或删除。删除时**整批先预检在途投稿**，任一条忙则整批 `409`（不删一半）。 | [`JobBatchActionRequest`](../backend/app/contracts/schemas.py#L176) |
 | `POST` | `/api/jobs/{job_id}/cancel` | 取消任务。 | `JobRead` |
 | `POST` | `/api/jobs/{job_id}/pause` | 暂停任务。 | `JobRead` |
-| `POST` | `/api/jobs/{job_id}/restart` | 重启任务：任务与全部条目回到 `queued`，清空进度/大小/时间/错误/产物路径/条目级选项，重新入队并**重跑一次预检**；`.part`、成品与事件历史不删。请求体带 `resolution` 才改任务级清晰度（同样走 026 的归一化/拒绝）。语义见 [E-03](../ai/feature/E-03-restart-semantics.md)。 | [`RestartJobRequest`](../backend/app/contracts/schemas.py#L157) |
+| `POST` | `/api/jobs/{job_id}/clone` | **克隆任务**：用同一链接 + 覆盖项建新任务（`201 JobRead`）。只接受 `resolution` / `mode`，缺字段沿用原任务的 `options_json`；清晰度写法在请求模型上按 026 归一化/拒绝，业务层再整份重建；源任务与它的事件、B站 记录都不动；写 `job_cloned` 事件。与建任务共用磁盘预算预检，空间不足同样 `409`（见 [E-04](../ai/feature/E-04-clone-job.md)）。 | [`CloneJobRequest`](../backend/app/contracts/schemas.py)、`JobRead` |
+| `POST` | `/api/jobs/{job_id}/restart` | 重启任务：任务与全部条目回到 `queued`，清空进度/大小/时间/错误/产物路径/条目级选项，重新入队并**重跑一次预检**；`.part`、成品与事件历史不删。请求体带 `resolution` 才改任务级清晰度（同样走 026 的归一化/拒绝）。语义见 [E-03](../ai/feature/E-03-restart-semantics.md)。 | [`RestartJobRequest`](../backend/app/contracts/schemas.py#L172) |
 | `POST` | `/api/jobs/{job_id}/play` | 播放单视频任务已下载的视频文件。 | `204 No Content` |
 | `POST` | `/api/jobs/{job_id}/open-folder` | 打开单视频任务已下载视频所在文件夹，或打开 playlist 任务文件夹。 | `204 No Content` |
 | `POST` | `/api/jobs/{job_id}/open-subtitle` | 用本机程序打开单视频任务下载到的字幕文件；缺省先请系统的「打开方式」（不可用时自动退回应用自带的对话框），`?mode=default` 才走文件关联。 | 查询参数 `mode`（`chooser` 缺省 / `default`） |
@@ -80,25 +81,25 @@
 | `POST` | `/api/jobs/{job_id}/items/delete` | 删除 playlist 中一个或多个子视频任务，可选删除输出和 sidecar 文件。 | `DeleteJobItemsRequest`、`DeleteJobItemsResponse` |
 | `DELETE` | `/api/jobs/{job_id}` | 删除任务，可选删除输出视频及字幕、metadata、缩略图、description 等相关文件。**连带清掉这个任务的 B站 投稿记录**（稿件 / 合集 / 自动重试）；若还有在途投稿则 `409` 并保持原样（见 [037](../ai/bug-fix/037-deleting-a-job-leaves-its-uploads.md)）。 | 查询参数 `delete_files` |
 | `GET` | `/api/events` | SSE 任务事件流。 | `text/event-stream` |
-| `GET` | `/api/settings` | 获取设置。 | [`SettingsRead`](../backend/app/contracts/schemas.py#L259) |
-| `PUT` | `/api/settings` | 更新设置。 | [`SettingsUpdate`](../backend/app/contracts/schemas.py#L284) |
+| `GET` | `/api/settings` | 获取设置。 | [`SettingsRead`](../backend/app/contracts/schemas.py#L274) |
+| `PUT` | `/api/settings` | 更新设置。 | [`SettingsUpdate`](../backend/app/contracts/schemas.py#L299) |
 | `POST` | `/api/settings/download-dir/select` | 打开本机目录选择对话框。 | `SettingsRead` |
-| `POST` | `/api/cookies` | 上传 cookies 文件。 | [`CookieStatus`](../backend/app/contracts/schemas.py#L302) |
+| `POST` | `/api/cookies` | 上传 cookies 文件。 | [`CookieStatus`](../backend/app/contracts/schemas.py#L317) |
 | `DELETE` | `/api/cookies` | 清除本地 cookies。 | `CookieStatus` |
-| `GET` | `/api/bilibili/status` | B站 投稿环境体检（工具 / ffmpeg / 登录态 / 缺项清单 / 分区表 / 硬限）。 | [`BiliStatusRead`](../backend/app/contracts/schemas.py#L434) |
+| `GET` | `/api/bilibili/status` | B站 投稿环境体检（工具 / ffmpeg / 登录态 / 缺项清单 / 分区表 / 硬限）。 | [`BiliStatusRead`](../backend/app/contracts/schemas.py#L449) |
 | `POST` | `/api/bilibili/tools/repair` | 修复 WinGet `Links` 目录下 0 字节的 `biliup.exe` 空壳，然后重新体检。 | `BiliStatusRead` |
-| `POST` | `/api/bilibili/login/qrcode` | 生成扫码登录二维码（返回 **SVG 文本**）。 | [`BiliQrcodeRead`](../backend/app/contracts/schemas.py#L448) |
-| `GET` | `/api/bilibili/login/poll` | 轮询扫码状态；**只有 `confirmed` 才落盘登录态**。 | [`BiliLoginPollRead`](../backend/app/contracts/schemas.py#L457) |
+| `POST` | `/api/bilibili/login/qrcode` | 生成扫码登录二维码（返回 **SVG 文本**）。 | [`BiliQrcodeRead`](../backend/app/contracts/schemas.py#L463) |
+| `GET` | `/api/bilibili/login/poll` | 轮询扫码状态；**只有 `confirmed` 才落盘登录态**。 | [`BiliLoginPollRead`](../backend/app/contracts/schemas.py#L472) |
 | `POST` | `/api/bilibili/cookies` | 导入一份已有的 B站 登录文件（`multipart/form-data`，不校验格式）。 | `BiliStatusRead` |
 | `DELETE` | `/api/bilibili/cookies` | 清除 B站 登录态；幂等，本来没有也返回体检结论。 | `BiliStatusRead` |
-| `GET` | `/api/bilibili/prefill` | 预填上传表单：单视频给一组值，合集给「模板 + 逐条预览 + 超限定位」。 | [`BiliPrefillRead`](../backend/app/contracts/schemas.py#L518) |
-| `GET` | `/api/bilibili/seasons` | 账号下**已存在**的合集，供投稿界面下拉选择。**未登录也返回 200**（空列表 + `error` 说明原因）。 | [`BiliSeasonListRead`](../backend/app/contracts/schemas.py#L584) |
-| `GET` | `/api/bilibili/uploads` | 按任务读回上传状态（任务级徽标 + 条目级明细 + 合集记录）。 | [`BiliJobUploadsRead`](../backend/app/contracts/schemas.py#L689) |
-| `POST` | `/api/bilibili/uploads` | 启动单视频投稿（可选归入某个合集）；返回**整个任务**的上传状态。 | [`BiliUploadCreate`](../backend/app/contracts/schemas.py#L552)、`BiliJobUploadsRead` |
-| `GET` | `/api/bilibili/uploads/summary` | **所有有 B站 记录的任务**的徽标汇总（任务中心每行一个图标，逐个问就是 N 个请求）。 | [`BiliJobUploadsSummaryRead`](../backend/app/contracts/schemas.py#L704) |
-| `POST` | `/api/bilibili/uploads/{upload_id}/retry` | 重试一条稿件；动作按终态三选一。 | [`BiliRetryRead`](../backend/app/contracts/schemas.py#L715) |
-| `POST` | `/api/bilibili/collections` | 启动合集投稿：按模板逐条投稿，全部确认发布后自动归集。 | [`BiliCollectionCreate`](../backend/app/contracts/schemas.py#L593)、`BiliJobUploadsRead` |
-| `POST` | `/api/bilibili/collections/{season_record_id}/group` | 重试合集归集；已有 `season_id` 时只补加视频，不重复建合集。 | [`BiliSeasonRetryRead`](../backend/app/contracts/schemas.py#L722) |
+| `GET` | `/api/bilibili/prefill` | 预填上传表单：单视频给一组值，合集给「模板 + 逐条预览 + 超限定位」。 | [`BiliPrefillRead`](../backend/app/contracts/schemas.py#L533) |
+| `GET` | `/api/bilibili/seasons` | 账号下**已存在**的合集，供投稿界面下拉选择。**未登录也返回 200**（空列表 + `error` 说明原因）。 | [`BiliSeasonListRead`](../backend/app/contracts/schemas.py#L599) |
+| `GET` | `/api/bilibili/uploads` | 按任务读回上传状态（任务级徽标 + 条目级明细 + 合集记录）。 | [`BiliJobUploadsRead`](../backend/app/contracts/schemas.py#L704) |
+| `POST` | `/api/bilibili/uploads` | 启动单视频投稿（可选归入某个合集）；返回**整个任务**的上传状态。 | [`BiliUploadCreate`](../backend/app/contracts/schemas.py#L567)、`BiliJobUploadsRead` |
+| `GET` | `/api/bilibili/uploads/summary` | **所有有 B站 记录的任务**的徽标汇总（任务中心每行一个图标，逐个问就是 N 个请求）。 | [`BiliJobUploadsSummaryRead`](../backend/app/contracts/schemas.py#L719) |
+| `POST` | `/api/bilibili/uploads/{upload_id}/retry` | 重试一条稿件；动作按终态三选一。 | [`BiliRetryRead`](../backend/app/contracts/schemas.py#L730) |
+| `POST` | `/api/bilibili/collections` | 启动合集投稿：按模板逐条投稿，全部确认发布后自动归集。 | [`BiliCollectionCreate`](../backend/app/contracts/schemas.py#L608)、`BiliJobUploadsRead` |
+| `POST` | `/api/bilibili/collections/{season_record_id}/group` | 重试合集归集；已有 `season_id` 时只补加视频，不重复建合集。 | [`BiliSeasonRetryRead`](../backend/app/contracts/schemas.py#L737) |
 
 路由实现集中在 [routers/](../backend/app/api/routers/__init__.py)。`POST /api/jobs` 成功时返回 `201`，其余返回模型或 `204`。B站 那一组统一返回 JSON 读模型（没有 `204`）。
 
@@ -106,7 +107,7 @@
 
 ### AnalyzeRequest
 
-`url` 是待解析链接；`cookies_enabled` 控制解析时是否使用本地 cookies。前端默认传 `true`，见 [analyzeUrl](../frontend/src/shared/api.ts#L128)。
+`url` 是待解析链接；`cookies_enabled` 控制解析时是否使用本地 cookies。前端默认传 `true`，见 [analyzeUrl](../frontend/src/shared/api.ts#L129)。
 
 ### DownloadOptions
 
@@ -115,7 +116,7 @@
 | 字段 | 说明 |
 | --- | --- |
 | `mode` | `video_subtitles`、`video_only`、`subtitles_only`。 |
-| `resolution` | 目标清晰度，只接受 `best` 或 `<高度>p`（例如 `1440p`、`1080p`），默认 `1440p`。取值会先**归一化**（去空白、转小写，`1080P` → `1080p`），其余写法一律 422 —— 它们没有唯一解释，猜一个就等于静默换画质（见 [026](../ai/bug-fix/026-a-resolution-that-silently-means-best.md)）。同一个校验也用在 `POST /api/jobs/{job_id}/restart` 的 `resolution` 与设置里的 `default_resolution` 上。 |
+| `resolution` | 目标清晰度，只接受 `best` 或 `<高度>p`（例如 `1440p`、`1080p`），默认 `1440p`。取值会先**归一化**（去空白、转小写，`1080P` → `1080p`），其余写法一律 422 —— 它们没有唯一解释，猜一个就等于静默换画质（见 [026](../ai/bug-fix/026-a-resolution-that-silently-means-best.md)）。同一个校验也用在 `POST /api/jobs/{job_id}/restart`、`POST /api/jobs/{job_id}/clone` 的 `resolution` 与设置里的 `default_resolution` 上。 |
 | `format_id` | 兼容旧请求保留，新 UI 不提供具体格式选择入口；有值时后端会强制该格式并要求 ffmpeg。 |
 | `subtitle_languages` | 字幕语言列表。**只处理中文与英文**，其余语种在后端被忽略（粤语 `yue` 不算中文）。留空时由后端按字幕计划收敛成一条（按主语言挑、人工优先、无则降级 ASR、都没有则跳过），**不会**退化成 `["all"]`；用户显式给了值时以用户值为准，计划不改它。 |
 | `subtitle_source` | `human`、`auto`、`both`；默认 `both`。前端会在已解析元数据缺少某类字幕时提交可用来源作为 fallback。 |
@@ -162,7 +163,7 @@
 
 ### CookieStatus
 
-`POST /api/cookies` 与 `DELETE /api/cookies` 返回 [`CookieStatus`](../backend/app/contracts/schemas.py#L302)：`enabled`、`filename`、`source`（`none` / `file`）。诊断与设置接口只返回 `cookies_enabled` 布尔值，不返回 cookies 内容。
+`POST /api/cookies` 与 `DELETE /api/cookies` 返回 [`CookieStatus`](../backend/app/contracts/schemas.py#L317)：`enabled`、`filename`、`source`（`none` / `file`）。诊断与设置接口只返回 `cookies_enabled` 布尔值，不返回 cookies 内容。
 
 ### DeleteJobItemsRequest
 
@@ -242,7 +243,7 @@ cookies 体检结果。字段分三层：
 
 ### ResolutionFallback
 
-字段定义见 [ResolutionFallback](../backend/app/contracts/schemas.py#L172)，消息构建逻辑见 [fallback_policy.py](../backend/app/download/fallback_policy.py#L10)。固定原因包括：
+字段定义见 [ResolutionFallback](../backend/app/contracts/schemas.py#L187)，消息构建逻辑见 [fallback_policy.py](../backend/app/download/fallback_policy.py#L10)。固定原因包括：
 
 - `requested_resolution_missing`
 - `source_below_720_only`
@@ -317,7 +318,7 @@ cookies 体检结果。字段分三层：
 
 ### BiliUploadRead 与 BiliJobUploadsRead
 
-前端真正消费的是 [BiliJobUploadsRead](../backend/app/contracts/schemas.py#L689)（任务级读模型）与 [BiliJobUploadsSummaryRead](../backend/app/contracts/schemas.py#L704)（全部任务的徽标汇总）。`uploads` 按条目在任务中的位置排序，对不上任何条目的记录排在最后。
+前端真正消费的是 [BiliJobUploadsRead](../backend/app/contracts/schemas.py#L704)（任务级读模型）与 [BiliJobUploadsSummaryRead](../backend/app/contracts/schemas.py#L719)（全部任务的徽标汇总）。`uploads` 按条目在任务中的位置排序，对不上任何条目的记录排在最后。
 
 条目级 `status` 是后端自己的生命周期，`badge` 是界面用的粗档位：
 

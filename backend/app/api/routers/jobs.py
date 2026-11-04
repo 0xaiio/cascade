@@ -4,18 +4,21 @@
 把结果投影成读模型。**任务状态机不在这一层** —— 暂停/重启/删除的真实语义见 `job_manager.py`。
 """
 
+import json
+
 from fastapi import APIRouter, Body, HTTPException, Response
 from sqlmodel import select
 
 from .. import api_support
 from ..api_context import ContextDep, SessionDep
 from ...download.job_manager import new_id
-from ...download.disk_budget import assess_for_job
-from ...contracts.models import Job, JobItem
+from ...contracts.models import Job, JobEvent, JobItem
 from ...contracts.schemas import (
+    CloneJobRequest,
     CreateJobRequest,
     DeleteJobItemsRequest,
     DeleteJobItemsResponse,
+    DownloadOptions,
     JobBatchActionRequest,
     JobBatchActionResponse,
     JobRead,
@@ -46,41 +49,69 @@ async def create_job(request: CreateJobRequest, session: SessionDep, ctx: Contex
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    entries = api_support.selected_entries(request.url, analysis, request.options.playlist_items)
-    if not entries:
-        raise HTTPException(status_code=400, detail="No downloadable playlist entries were selected.")
-
+    # 写库路径与「克隆」共用一条（`create_job_records`）：条目选择、磁盘预算预检、
+    # 409 阻断都只在一处实现，克隆绕不过去。
     job_id = new_id()
-    download_dir = api_support.job_download_dir(ctx.settings.download_dir, analysis, job_id)
-    # 建任务前的阻断：这里的 `request.options` 是**本次实际所选**的清晰度，
-    # 与解析结果里那条按默认清晰度算的提示不同。写库之前判，拒绝时不留孤儿任务。
-    budget = assess_for_job(analysis, request.options, len(entries), download_dir)
-    if budget.blocks:
-        raise HTTPException(status_code=409, detail=budget.message)
-    job = Job(
-        id=job_id,
-        url=request.url,
-        title=analysis.title,
-        options_json=request.options.model_dump_json(),
-        total_items=len(entries),
-        download_dir=str(download_dir),
+    api_support.create_job_records(
+        session, ctx.settings.download_dir, analysis, request.url, request.options, job_id
     )
-    session.add(job)
-    session.commit()
-    for entry in entries:
-        session.add(
-            JobItem(
-                id=new_id(),
-                job_id=job.id,
-                source_url=entry.url,
-                title=entry.title,
-                index=entry.index,
-                duration=entry.duration,
-            )
+    await ctx.manager.enqueue(job_id)
+    return api_support.read_job_or_404(session, job_id)
+
+
+@router.post("/api/jobs/{job_id}/clone", response_model=JobRead, status_code=201)
+async def clone_job(
+    job_id: str,
+    request: CloneJobRequest,
+    session: SessionDep,
+    ctx: ContextDep,
+) -> JobRead:
+    """用同一个链接 + 改过的选项**建一个新任务**，原任务一个字段都不动。
+
+    为什么不改原任务：预检之后才有「该降到 1080p」这类信息，那时任务已经建好；
+    改选项要处理 queued 之外的状态、预检时序，以及「不经过请求模型直接改库」
+    时校验该由谁负责的问题，
+    而克隆不改历史、不碰 B站 记录，已有成品由 `skip_existing` 命中，改动面小得多。
+    """
+    source = session.get(Job, job_id)
+    if not source:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    try:
+        original = DownloadOptions.model_validate_json(source.options_json)
+    except Exception as exc:  # noqa: BLE001 - 坏 JSON 是数据问题，要给可照做的结论
+        raise HTTPException(
+            status_code=409,
+            detail="这个任务的下载选项已损坏，无法克隆；请新建一个任务。",
+        ) from exc
+
+    # 覆盖项在 `CloneJobRequest` 解析时就已经过 `Resolution` 归一化 / 拒绝（026）。
+    # 这里仍**整份重建** `DownloadOptions`：让「交给写库路径的一定是完整有效对象」
+    # 只依赖这一处判据，而不是依赖「调用方已经校验过」这个隐含前提 —— 将来若有
+    # 别的入口直接调 clone 的业务层，也不会拿到半校验的对象。
+    overrides = request.model_dump(exclude_none=True)
+    options = DownloadOptions.model_validate({**original.model_dump(), **overrides})
+
+    try:
+        analysis = api_support.extract_metadata_with_cookies(ctx.service, ctx.settings, source.url, True)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    clone_id = new_id()
+    api_support.create_job_records(
+        session, ctx.settings.download_dir, analysis, source.url, options, clone_id
+    )
+    session.add(
+        JobEvent(
+            job_id=clone_id,
+            event_type="job_cloned",
+            payload_json=json.dumps(
+                {"source_job_id": job_id, "resolution": options.resolution, "mode": options.mode}
+            ),
         )
+    )
     session.commit()
-    await ctx.manager.enqueue(job.id)
-    return api_support.read_job_or_404(session, job.id)
+    await ctx.manager.enqueue(clone_id)
+    return api_support.read_job_or_404(session, clone_id)
 
 
 @router.get("/api/jobs", response_model=list[JobRead])

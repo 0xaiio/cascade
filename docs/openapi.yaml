@@ -670,6 +670,64 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /api/jobs/{job_id}/clone:
+    post:
+      tags: [jobs]
+      operationId: cloneJob
+      summary: Create a new task from an existing one with changed options
+      description: |
+        Re-analyzes the source task's URL and creates a **new** task. Only fields
+        present in the body are changed; everything else is taken from the source
+        task's stored `DownloadOptions` and revalidated as a whole, so ambiguous
+        resolution values are rejected instead of silently becoming `best`.
+        The source task, its event history and its bilibili upload records are
+        untouched. Existing local output is reused when the source task had
+        `skip_existing` enabled.
+
+        Both creation paths share the disk budget precheck, so cloning cannot
+        bypass the 409. A `job_cloned` event is written on the new task with
+        `source_job_id`.
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CloneJobRequest"
+            examples:
+              unchanged:
+                summary: Copy the settings as-is
+                value: {}
+              lowerResolution:
+                summary: Try a different quality and mode
+                value:
+                  resolution: "720p"
+                  mode: video_only
+      responses:
+        "201":
+          description: The newly created task.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobRead"
+        "400":
+          description: Re-analysis failed, or no playlist entry was selected.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The disk budget is insufficient, or the source options are corrupt.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
   /api/jobs/{job_id}/restart:
     post:
       tags: [jobs]
@@ -2188,6 +2246,26 @@ components:
           example: https://www.youtube.com/watch?v=dQw4w9WgXcQ
         options:
           $ref: "#/components/schemas/DownloadOptions"
+
+    CloneJobRequest:
+      type: object
+      description: |
+        Overrides for `POST /api/jobs/{job_id}/clone`. A missing field means
+        "keep the source task's value". Resolution normalization and rejection
+        happen on this request model (see bug-fix/026); the backend then rebuilds
+        the whole `DownloadOptions` with validation so the object written to the
+        database is always complete and valid.
+      properties:
+        resolution:
+          type: [string, "null"]
+          default: null
+          description: "New target resolution (`best` or `<height>p`); ambiguous values are rejected with 422."
+          example: "720p"
+        mode:
+          type: [string, "null"]
+          default: null
+          enum: [video_subtitles, video_only, subtitles_only, null]
+          description: New download mode.
 
     RestartJobRequest:
       type: object

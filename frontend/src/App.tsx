@@ -4,6 +4,7 @@ import {
   ApiError,
   analyzeUrl,
   batchJobAction,
+  cloneJob,
   createBiliCollection,
   createBiliUpload,
   createJob,
@@ -29,6 +30,7 @@ import {
   updateSettings,
   uploadCookies
 } from "./shared/api";
+import type { CloneJobOverrides } from "./shared/api";
 import { AnalysisPanel } from "./download-request/AnalysisPanel";
 import { BiliUploadDialog } from "./bilibili/BiliUploadDialog";
 import { CompletionToasts } from "./notifications/CompletionToasts";
@@ -342,6 +344,19 @@ export default function App() {
       handleAppError(err, "创建任务失败");
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  /** 克隆的回执留在**面板内**（区域级错误就近显示，不上升为页面级红条）。
+   *  返回 `null` = 成功；否则把可照做的错误文案交回面板。 */
+  async function handleCloneJob(jobId: string, overrides: CloneJobOverrides): Promise<string | null> {
+    clearError();
+    try {
+      const job = await cloneJob(jobId, overrides);
+      setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
+      return null;
+    } catch (err) {
+      return err instanceof Error ? err.message : "克隆任务失败";
     }
   }
 
@@ -747,6 +762,7 @@ export default function App() {
               jobs={jobs}
               selectedJobIds={selectedJobIds}
               onBatchAction={(action, deleteFiles) => void handleBatchAction(action, deleteFiles).catch((err) => setError(err.message))}
+              onCloneJob={handleCloneJob}
               onBiliRetrySeason={handleBiliRetrySeason}
               onBiliRetryUpload={(uploadId) => void handleBiliRetryUpload(uploadId)}
               onBiliRetryMany={(uploadIds) => void handleBiliRetryMany(uploadIds)}

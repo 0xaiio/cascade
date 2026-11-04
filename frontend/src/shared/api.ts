@@ -17,6 +17,7 @@ import type {
   CookieStatus,
   DeleteJobItemsResponse,
   Diagnostics,
+  DownloadMode,
   DownloadOptions,
   Job,
   JobBatchAction,
@@ -145,6 +146,21 @@ export function createJob(url: string, options: DownloadOptions): Promise<Job> {
     method: "POST",
     body: JSON.stringify({ url, options })
   });
+}
+
+/** 克隆任务时只送**要改的项**：空字段表示「沿用原任务的选项」，由后端整份重建并重新校验。 */
+export interface CloneJobOverrides {
+  resolution?: string;
+  mode?: DownloadMode;
+}
+
+export function cloneJob(jobId: string, overrides: CloneJobOverrides): Promise<Job> {
+  return request<Job>(
+    `/api/jobs/${jobId}/clone`,
+    { method: "POST", body: JSON.stringify(overrides) },
+    REQUEST_TIMEOUT_MS,
+    "克隆任务"
+  );
 }
 
 export function cancelJob(jobId: string): Promise<Job> {

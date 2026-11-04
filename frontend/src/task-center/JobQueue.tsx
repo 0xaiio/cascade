@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState } from "react";
-import { Check, ChevronDown, Copy, ExternalLink, FileX2, FolderOpen, Gauge, Pause, Play, RotateCcw, Trash2 } from "lucide-react";
+import { Check, ChevronDown, Copy, CopyPlus, ExternalLink, FileX2, FolderOpen, Gauge, Pause, Play, RotateCcw, Trash2 } from "lucide-react";
 import type { BiliJobUploads, BiliUpload, Job, JobBatchAction, ResolutionFallback } from "../contracts/types";
 import { retryableUploadIds, uploadedTargetUrl } from "../bilibili/biliStatus";
 import {
@@ -14,6 +14,8 @@ import {
 import { resolutionFallbackRestartLabel } from "../shared/quality";
 import { BiliJobStatus } from "../bilibili/BiliJobStatus";
 import { BiliUploadButton } from "../bilibili/BiliUploadButton";
+import { CloneJobPanel } from "./CloneJobPanel";
+import type { CloneJobOverrides } from "../shared/api";
 import { EMPTY_JOB_FILTER, filterJobs, JOB_STATUS_FILTERS } from "./jobFilter";
 import type { JobStatusFilter } from "./jobFilter";
 import { batchRestartHint, itemRestartHint, jobRestartHint, resolutionRestartHint } from "./restartSemantics";
@@ -29,6 +31,7 @@ export function JobQueue({
   jobs,
   selectedJobIds,
   onBatchAction,
+  onCloneJob,
   onBiliRetrySeason,
   onBiliRetryUpload,
   onBiliRetryMany,
@@ -53,6 +56,8 @@ export function JobQueue({
   jobs: Job[];
   selectedJobIds: Set<string>;
   onBatchAction: (action: JobBatchAction, deleteFiles?: boolean) => void;
+  /** 克隆任务：返回 `null` = 成功，否则是可照做的错误文案（面板就近显示）。 */
+  onCloneJob: (jobId: string, overrides: CloneJobOverrides) => Promise<string | null>;
   /**
    * 归集重试。**必须把 Promise 传出去**：卡片上的「归集中…」与「上次重试 HH:MM:SS」
    * 都靠它知道这一下什么时候跑完。这里写成 `void` 的话，`await` 会立刻返回 undefined ——
@@ -94,6 +99,8 @@ export function JobQueue({
   // 哪个本地动作还在路上。打开字幕要先试两种系统入口再退回自带对话框，可能要 1~2 秒 ——
   // 这期间界面必须有反馈，否则又回到「点了没反应」。
   const [pendingLocalActionKey, setPendingLocalActionKey] = useState<string | null>(null);
+  // 克隆面板一次只在一个任务行里展开；切换任务时旧面板自然收起。
+  const [cloningJobId, setCloningJobId] = useState<string | null>(null);
   // E-02：筛选是**展示层**的。`App` 的全量 `jobs` 仍要留给完成提醒的状态跃迁比对、
   // B站 徽标和选中集合清理，因此这里只派生一份可见列表，绝不回写 props。
   const [statusFilter, setStatusFilter] = useState<JobStatusFilter>("all");
@@ -418,6 +425,16 @@ export function JobQueue({
                   </button>
                 )}
                 <button
+                  className="icon-button"
+                  type="button"
+                  title="克隆任务：用同一链接和改过的选项建一个新任务"
+                  aria-label={`克隆任务 ${title}`}
+                  aria-expanded={cloningJobId === job.id}
+                  onClick={() => setCloningJobId((current) => (current === job.id ? null : job.id))}
+                >
+                  <CopyPlus size={18} />
+                </button>
+                <button
                   className="icon-button danger"
                   type="button"
                   title="仅删除任务"
@@ -446,6 +463,13 @@ export function JobQueue({
               <div className="local-action-error" role="alert">
                 {localActionError.message}
               </div>
+            )}
+            {cloningJobId === job.id && (
+              <CloneJobPanel
+                jobTitle={title}
+                onSubmit={(overrides) => onCloneJob(job.id, overrides)}
+                onClose={() => setCloningJobId(null)}
+              />
             )}
             <div className="job-metrics">
               <span>{formatPercent(job.progress)}</span>

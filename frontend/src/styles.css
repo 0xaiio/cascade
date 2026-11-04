@@ -217,6 +217,62 @@ button {
   color: #8a4b0f;
 }
 
+/* E-04 克隆面板：挂在任务行内，不是弹窗。说明文字很长，必须能断行；
+   两个下拉都给非零 flex-basis，窄屏换行而不是被压成 0px（ui/011）。 */
+.clone-job-panel {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid #cfe0f5;
+  border-radius: 10px;
+  background: #f4f8ff;
+}
+
+.clone-job-note {
+  margin: 0 0 10px;
+  color: #334155;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.clone-job-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.clone-job-fields label {
+  display: flex;
+  flex: 1 1 180px;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  color: #657187;
+  font-size: 12px;
+}
+
+.clone-job-fields select {
+  width: 100%;
+}
+
+.clone-job-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.clone-job-error {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border: 1px solid #f2c894;
+  border-radius: 8px;
+  background: #fff7ed;
+  color: #8a4b0f;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
 .panel-title svg {
   color: #1f6feb;
 }

@@ -63,6 +63,12 @@
 
 条目重新入队后会重新走 [`prepare_download`](#下载前预检测)，因此计划分辨率、格式、大小与字幕计划都会重算。`item_restart` 只重置那一条并用 `_refresh_job_counts` 重算任务计数，其它条目的状态与 `output_path` 保持原样。行为判据逐条钉在 `backend/tests/test_restart_semantics.py`，界面文案由 [`restartSemantics.ts`](../frontend/src/task-center/restartSemantics.ts) 一处生成。
 
+### 建任务与克隆共用一条写库路径（E-04）
+
+`POST /api/jobs` 与 `POST /api/jobs/{id}/clone` 都调用 [`create_job_records`](../backend/app/api/api_support.py)：选条目 → 磁盘预算预检（E-01）→ 写 `Job` + N 个 `JobItem` → 由路由 `enqueue`。把这段抽出来不是为了复用代码本身，而是为了**让两条路径不可能各自漏掉一道预检** —— 克隆若自己写一遍 INSERT，就绕过了 409。
+
+克隆的选项合并写成 `DownloadOptions.model_validate({**original.model_dump(), **overrides})`：**026 的归一化/拒绝发生在请求体 `CloneJobRequest.resolution` 上**，覆盖项到业务层时已是合法值；这里的整份重建是防御性判据，保证交给写库路径的一定是完整有效对象，不依赖「调用方已经校验过」这个隐含前提。变异验证过：把这一行换成 `model_copy(update=overrides)`，当时的 14 条克隆用例仍全绿 —— 所以不能把「整份重建」写成「唯一能挡住 026 的地方」（见 [E-04](../ai/feature/E-04-clone-job.md) 的「变异验证」一节）。`CloneJobRequest` 只暴露 `resolution` / `mode`，`None` 表示沿用；前端只送改过的字段。源任务的 `options_json`、`JobEvent` 与 B站 投稿记录都不动，新任务额外写一条 `job_cloned`（含 `source_job_id`）。
+
 ## 字幕来源与格式
 
 默认 `DownloadOptions` 使用 `resolution="1440p"`、`subtitle_source="both"`、`subtitle_format="best"`。当用户选择“两者都要”时，yt-dlp 会同时启用人工字幕和自动字幕；若其中一种不存在，只会写出另一种可用字幕。前端在已解析元数据中发现用户指定的人工/自动字幕来源不可用时，会把提交给后端的 `subtitle_source` fallback 到另一种可用来源，并在下载选项面板显示“来源”和“格式”；若两类字幕都没有，则显示“无字幕”。

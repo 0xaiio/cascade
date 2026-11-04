@@ -104,7 +104,6 @@ Routers --> BiliReadModel
 Routers --> BiliUpload
 Routers --> Models
 Routers --> Outputs
-Routers --> DiskBudget
 Routers --> Logging
 ApiCtx --> Manager
 ApiCtx --> Service
@@ -120,6 +119,7 @@ ApiSupport --> Paths
 ApiSupport --> Config
 ApiSupport --> Advice
 ApiSupport --> DiskBudget
+ApiSupport --> Manager
 Artifacts --> Models
 Artifacts --> Outputs
 Artifacts --> Opener

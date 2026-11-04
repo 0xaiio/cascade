@@ -59,6 +59,10 @@ export const mockState = {
   jobActionFailure: null as string | null,
   /** `POST /api/jobs` 的阻断文案；非 `null` 时返回 409（E-01 磁盘空间不足）。 */
   jobCreateFailure: null as string | null,
+  /** `POST /api/jobs/{id}/clone` 的失败文案；非 `null` 时返回 409（E-04）。 */
+  cloneJobFailure: null as string | null,
+  /** 克隆请求的人为延迟（毫秒），用来观察「创建中…」这一态。 */
+  cloneJobDelayMs: 0,
   /** 本地文件动作的人为延迟（毫秒），用来观察「正在打开…」这一态。 */
   localFileDelayMs: 0,
   /** `PUT /api/settings` 的人为延迟（毫秒），用来观察「保存中...」这一态。 */
@@ -162,6 +166,8 @@ function resetMockState(): void {
   mockState.localFileActionFailure = null;
   mockState.jobActionFailure = null;
   mockState.jobCreateFailure = null;
+  mockState.cloneJobFailure = null;
+  mockState.cloneJobDelayMs = 0;
   mockState.localFileDelayMs = 0;
   mockState.settingsUpdateDelayMs = 0;
   mockState.settingsUpdateShouldFail = false;
@@ -278,6 +284,15 @@ export function installAppHarness(): void {
             return Response.json({ id: "job-1", status: "queued", total_items: 1, items: [] }, { status: 201 });
           }
           return Response.json(mockState.jobs);
+        }
+        if (url.endsWith("/clone") && init?.method === "POST") {
+          if (mockState.cloneJobDelayMs > 0) {
+            await new Promise((resolve) => window.setTimeout(resolve, mockState.cloneJobDelayMs));
+          }
+          if (mockState.cloneJobFailure) {
+            return Response.json({ detail: mockState.cloneJobFailure }, { status: 409 });
+          }
+          return Response.json({ ...jobPayload, id: "job-clone", status: "queued" }, { status: 201 });
         }
         if (url.endsWith("/api/jobs/batch")) {
           if (mockState.jobActionFailure) {

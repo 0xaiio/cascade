@@ -172,4 +172,16 @@ describe("styles.css · 源文不变式", () => {
     const empty = (bodies.get(".job-filter-empty") ?? []).join("\n");
     expect(empty).toMatch(/overflow-wrap:\s*anywhere/);
   });
+
+  // E-04 克隆面板挂在任务行内：说明文字长、两个下拉并排，同一套窄屏判据。
+  test("keeps the E-04 clone panel readable on a narrow screen", () => {
+    const bodies = cssRuleBodies(stylesCss);
+    const note = (bodies.get(".clone-job-note") ?? []).join("\n");
+    expect(note).toMatch(/overflow-wrap:\s*anywhere/);
+
+    const fields = (bodies.get(".clone-job-fields") ?? []).join("\n");
+    expect(fields).toMatch(/flex-wrap:\s*wrap/);
+    const label = (bodies.get(".clone-job-fields label") ?? []).join("\n");
+    expect(label).toMatch(/flex:\s*1\s+1\s+[1-9]\d*px/);
+  });
 });

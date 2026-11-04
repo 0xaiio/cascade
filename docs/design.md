@@ -49,7 +49,7 @@
 | [main.py](../backend/app/main.py#L40) | L0 入口 | **只做装配**：建 `ApiContext`、挂载 `api/routers/` 下的 `APIRouter`、静态资源托管、lifespan 启停。 | 不声明路由（路由在 `api/routers/`），不写业务规则，不做状态转换，不构造 yt-dlp 参数。 |
 | [routers/](../backend/app/api/routers/__init__.py#L21) | L0 入口 | 按资源分模块声明 HTTP 路由（`diagnostics` / `cookies` / `analyze` / `jobs` / `job_files` / `settings` / `events` / `bilibili`）：取参、调辅助、定状态码。 | 不做状态转换，不直接调用 yt-dlp，不写领域规则（产物定位见 `job_artifacts`，设置与错误映射见 `api_support`）。 |
 | [api_context.py](../backend/app/api/api_context.py#L28) | L0 入口 | 请求级依赖容器 `ApiContext`（`frozen` dataclass）+ `get_context` / `get_session` 依赖别名。 | 不装配依赖（装配在 `main.py`），不写业务规则。 |
-| [api_support.py](../backend/app/api/api_support.py#L26) | L0 入口 | 路由支撑：任务/条目定位与 404、设置读写与响应构造、cookies 元数据提取、目录选择。 | 不声明路由，不做状态转换。 |
+| [api_support.py](../backend/app/api/api_support.py#L26) | L0 入口 | 路由支撑：任务/条目定位与 404、设置读写与响应构造、cookies 元数据提取、目录选择、**建任务与克隆共用的写库路径（含磁盘预算预检）**。 | 不声明路由，不做状态转换。 |
 | [job_artifacts.py](../backend/app/download/job_artifacts.py#L31) | L0 入口 | 产物**定位**（一条候选链）与本机**打开**（播放 / 打开所在目录 / 打开字幕）。 | 不删文件（删除带白名单校验，属 `job_manager`），不决定用什么播放器或查看器（属 `system_open`）。 |
 | [__main__.py](../backend/app/__main__.py#L64) | L0 入口 | 本地启动入口：解析命令行、启动前做端口预检并识别占用者、交给 uvicorn。 | 不装配应用（那是 `main.py`），不写业务规则。 |
 | [config.py](../backend/app/contracts/config.py#L19) | L1 契约 | 声明全部设置字段、默认值与约束、目录准备。 | 不读数据库（`Setting` 覆盖在 `api_support.py` 里做）。 |
@@ -108,7 +108,7 @@
 | [shared/](../frontend/src/shared/) | 跨功能复用：`api`（HTTP 边界 + 超时看门狗）、`errors` / `formatting` / `quality` / `subtitles`；[ui/](../frontend/src/shared/ui/) 放**无业务判断**的基础件（`HelpPopover` / `Toggle` / `StatusPill`） | 不依赖任何功能目录 |
 | [download-request/](../frontend/src/download-request/) | 发起下载：解析链接（`UrlAnalyzer`）、解析结果（`AnalysisPanel`）、下载选项（`DownloadOptionsPanel` / `SearchableLanguageSelect`） | 依赖 `shared` / `cookies` |
 | [cookies/](../frontend/src/cookies/) | cookies 的**体检**与上传入口（`CookieSection` / `CookieHowToPopover`）。不提供浏览器导入 —— 应用只读用户导出的文件（[038](../ai/bug-fix/038-browser-cookie-import-is-gone.md)）。 | 依赖 `shared` |
-| [task-center/](../frontend/src/task-center/) | 任务中心：控制 / 删除 / 展开、进度与明细、本地文件操作、清晰度降级的重启（`JobQueue` / `SubtitleOpenButton`），以及筛选与搜索的**纯判定**（`jobFilter`，E-02） | 依赖 `shared` / `bilibili` |
+| [task-center/](../frontend/src/task-center/) | 任务中心：控制 / 删除 / 展开、进度与明细、本地文件操作、清晰度降级的重启（`JobQueue` / `SubtitleOpenButton`）、筛选与搜索的**纯判定**（`jobFilter`，E-02）、重启语义文案（`restartSemantics`，E-03）与克隆面板（`CloneJobPanel`，E-04） | 依赖 `shared` / `bilibili` |
 | [settings/](../frontend/src/settings/) | 设置、代理检测与运行环境自检（`SettingsPanel` / `SettingsGroup` / `ProxySection` / `RuntimeSection`） | 依赖 `shared` / `bilibili`（登录区） |
 | [bilibili/](../frontend/src/bilibili/) | B站 上传：入口、表单、进度、状态明细、登录区，以及 `biliForm` / `biliStatus` / `biliProgress` / `biliHealth` 四块判定与文案 | 依赖 `shared` / `contracts` |
 | [notifications/](../frontend/src/notifications/) | 任务完成提醒：终态判定与浮层队列（`notifications`）、右下角浮层（`CompletionToasts`） | 依赖 `contracts` |
@@ -214,9 +214,11 @@ PlantUML 源文件：[download-data-flow.puml](diagrams/download-data-flow.puml)
 
 ### 建任务与入队
 
-`POST /api/jobs` → 解析 → 选条目（单视频合成 1 条 `VideoEntry`）→ **磁盘预算复核**（按本次实际所选清晰度重算；两边数字都读到了且不够就回 409，库里一行都不写）→ 写 `Job` + N 个 `JobItem` → `enqueue()` 把 queued item id 放进队列。playlist 任务会额外在下载根目录下按安全化标题创建子目录，见 [job_download_dir](../backend/app/api/api_support.py#L89)。
+`POST /api/jobs` → 解析 → 选条目（单视频合成 1 条 `VideoEntry`）→ **磁盘预算复核**（按本次实际所选清晰度重算；两边数字都读到了且不够就回 409，库里一行都不写）→ 写 `Job` + N 个 `JobItem` → `enqueue()` 把 queued item id 放进队列。playlist 任务会额外在下载根目录下按安全化标题创建子目录，见 [job_download_dir](../backend/app/api/api_support.py#L90)。
 
 每条视频真正开始前，`_guard_item_disk_budget` 会用 `prepare_download` 给这一条的**真实** `filesize` 再核一次可用空间：不足则该条直接判失败并给带数字的下一步，一个字节都不写；`skip_existing` 命中已有成品时不核（那一轮不会写入大文件）。这一步是 flat playlist 没有 `filesize` 时唯一的兜底。
+
+`POST /api/jobs/{job_id}/clone` **复用同一条 `create_job_records`**：重新解析源任务的 URL，把覆盖项与源 `options_json` 整份重建并重新校验后写新任务；源任务、它的事件与 B站 记录都不改，新任务额外写一条 `job_cloned` 事件。两条入口共用预检，克隆绕不过 409（见 [E-04](../ai/feature/E-04-clone-job.md)）。
 
 ### 下载与进度
 

@@ -15,6 +15,7 @@ from sqlmodel import Session, select
 
 from ..contracts.config import AppSettings
 from ..download.disk_budget import assess_for_job
+from ..download.job_manager import new_id
 from ..download.job_read_model import read_job
 from ..contracts.models import Job, JobItem, Setting
 from ..common.paths import safe_path_name
@@ -116,6 +117,55 @@ def attach_analysis_disk_budget(analysis: AnalyzeResponse, settings: AppSettings
         message=budget.message,
     )
     return analysis
+
+
+def create_job_records(
+    session: Session,
+    root_dir: Path,
+    analysis: AnalyzeResponse,
+    url: str,
+    options: DownloadOptions,
+    job_id: str,
+) -> int:
+    """建任务与克隆共用的写库路径：选条目 → 磁盘预算 → 写 `Job` + N 个 `JobItem`。
+
+    **不能只在一个入口做预检**：克隆也是建任务，绕过 `assess_for_job` 就等于给
+    E-01 的 409 开了一道后门；`options` 由调用方整份重建好再传进来，
+    清晰度归一化（026）因此也只发生在入口一处。返回条目数。
+    """
+    entries = selected_entries(url, analysis, options.playlist_items)
+    if not entries:
+        raise HTTPException(status_code=400, detail="No downloadable playlist entries were selected.")
+
+    download_dir = job_download_dir(root_dir, analysis, job_id)
+    budget = assess_for_job(analysis, options, len(entries), download_dir)
+    if budget.blocks:
+        raise HTTPException(status_code=409, detail=budget.message)
+
+    session.add(
+        Job(
+            id=job_id,
+            url=url,
+            title=analysis.title,
+            options_json=options.model_dump_json(),
+            total_items=len(entries),
+            download_dir=str(download_dir),
+        )
+    )
+    session.commit()
+    for entry in entries:
+        session.add(
+            JobItem(
+                id=new_id(),
+                job_id=job_id,
+                source_url=entry.url,
+                title=entry.title,
+                index=entry.index,
+                duration=entry.duration,
+            )
+        )
+    session.commit()
+    return len(entries)
 
 
 def extract_metadata_with_cookies(

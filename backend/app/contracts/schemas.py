@@ -154,6 +154,21 @@ class CreateJobRequest(BaseModel):
     options: DownloadOptions = Field(default_factory=DownloadOptions)
 
 
+class CloneJobRequest(BaseModel):
+    """克隆任务时**只允许改的两项**；`None` 一律表示「沿用原任务的选项」。
+
+    不做 `PATCH /api/jobs/{id}/options`：改原任务要处理 `queued` 之外的状态、
+    预检时序与历史留痕，而克隆不动原任务，改动面小得多（见 E-04）。
+
+    清晰度取值在这里就由 `Resolution` 归一化 / 拒绝（026），**请求体这一层是入口**；
+    业务层随后把覆盖项交回 `DownloadOptions.model_validate` 整份重建，保证写库时
+    拿到的是完整有效对象，而不是依赖「调用方已经校验过」的隐含前提。
+    """
+
+    resolution: Resolution | None = None
+    mode: DownloadMode | None = None
+
+
 class RestartJobRequest(BaseModel):
     resolution: Resolution | None = None
 

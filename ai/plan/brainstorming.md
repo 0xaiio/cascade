@@ -272,7 +272,11 @@
 - 判据：与 C-03 同类，「承诺与实现对齐」。
 
 #### E-04　建完任务才发现选错：允许改选项，或克隆一个新任务
-- [ ] **未完成** · 状态：候选　优先级：P2　（本轮新增）
+- [x] **已完成**（2026-11-04 · [`ai/feature/E-04-clone-job.md`](../feature/E-04-clone-job.md)）　优先级：~~P2~~
+- 结论：取**克隆**（方案 ②）。`POST /api/jobs/{job_id}/clone` 用同一链接 + 覆盖项建新任务，只开放 `resolution` / `mode`，缺字段沿用原 `options_json`；026 的归一化/拒绝由请求体 `CloneJobRequest.resolution` 承担，业务层再**整份 `model_validate`** 重建作防御性判据。变异验证发现 `model_copy(update=…)` 下 14 条用例仍全绿 —— 初稿「不用它否则 026 会漏」的说法已证伪并改写（见记录）。原任务、事件与 B站 记录一字不动；新任务写 `job_cloned` 事件。
+- 关键判据：建任务与克隆共用 `create_job_records` 一条写库路径，E-01 的磁盘预算 409 绕不过去。前端面板挂在任务行内、只送改过的项、回执就近显示、加载态可观察。
+- 验证：后端 15 条（含六种源状态、026 的三种非法值与「校验发生在请求模型」、坏 `options_json`、解析失败、409 预算、事件留痕）+ 前端 7 条 + 样式不变式 1 条；后端 1384 passed、前端 33 文件 / 399 passed、tsc 0；契约 76 条目一致、依赖图两条边更新。
+- 遗留：只开放清晰度与下载模式；克隆会重新解析 URL（合集条目变化按当前结果）；新任务沿用原 `skip_existing`，关着时会真的重下；不复制 B站 投稿记录。
 - 现状：`backend/app/api/routers/jobs.py` 只有 `POST /api/jobs`、`GET`、`POST /cancel|pause|restart`、`DELETE`、条目 `restart/delete` —— **没有任何改选项的入口**（无 `PATCH`，无 `update_job`）。想换清晰度只能删任务重建。
 - 痛点：预检会告诉你「降到 1080p」，但此时选项已经固化；重建任务虽然能靠 `skip_existing` 续传，却丢任务历史与已有的 B站 记录。
 - 建议：二选一 —— ① `PATCH /api/jobs/{id}/options`，仅允许在 `queued` 状态改，改完重跑预检；② 更简单的「克隆」：用同一 URL + 改过的选项建新任务，并在界面上说明「旧任务的文件会被跳过已下载命中」。
