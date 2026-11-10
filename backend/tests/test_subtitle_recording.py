@@ -74,9 +74,9 @@ def _make_manager(tmp_path: Path, plan: SubtitlePlan, files: list[str]):
     return JobManager(engine, settings, service, EventBroker()), engine, service
 
 
-def _run(tmp_path: Path, plan: SubtitlePlan, files: list[str]):
+def _run(tmp_path: Path, plan: SubtitlePlan, files: list[str], options: DownloadOptions | None = None):
     manager, engine, service = _make_manager(tmp_path, plan, files)
-    options = DownloadOptions(resolution="720p", mode="video_subtitles")
+    options = options or DownloadOptions(resolution="720p", mode="video_subtitles")
     job = Job(
         id=new_id(),
         url="https://youtu.be/abc123",
@@ -119,6 +119,27 @@ def test_auto_mode_requests_only_the_planned_track(tmp_path: Path) -> None:
     plan = SubtitlePlan(language="zh", code="zh-Hans", origin=SubtitleOrigin.auto, reason="")
     _stored, service = _run(tmp_path, plan, ["作品 [abc123].zh-Hans.vtt"])
     assert service.requested_languages == ["zh-Hans"]
+
+
+def test_explicit_language_bypasses_the_plan_even_when_the_video_lacks_it(tmp_path: Path) -> None:
+    """取证（ai/bug-fix/039）：用户显式给了 `en`，而视频只有中文轨 —— 计划被绕过，
+    yt-dlp 真的收到 `["en"]`，匹配不到任何轨 ⇒ **静默不下字幕、也不报错**，任务照样成功。
+
+    这正是前端必须先把「默认语言」收敛到该视频真有的语言的原因：空列表才会让后端的
+    字幕计划按主语言挑一条；非空列表是「显式选择优先」，后端不会替用户改。
+    """
+    plan = SubtitlePlan(language="zh", code="zh-Hans", origin=SubtitleOrigin.auto, reason="")
+    stored, service = _run(
+        tmp_path,
+        plan,
+        [],
+        options=DownloadOptions(resolution="720p", mode="video_subtitles", subtitle_languages=["en"]),
+    )
+
+    assert service.requested_languages == ["en"]
+    assert stored.status == JobStatus.succeeded.value
+    assert stored.subtitle_source == SubtitleOrigin.none.value
+    assert stored.subtitle_path is None
 
 
 def test_plan_without_a_track_still_asks_for_that_family(tmp_path: Path) -> None:

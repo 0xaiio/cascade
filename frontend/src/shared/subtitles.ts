@@ -8,6 +8,24 @@ import type { AnalyzeResponse, DownloadOptions, SubtitleFormat, SubtitleSource }
  * 不是展示名 —— 写断言时不要用 `English` 这类名字。
  */
 
+/**
+ * 把设置里的「默认字幕语言」收敛到**这个视频真的有的**语言。
+ *
+ * 为什么必须收敛：解析时把默认值（出厂 `["en"]`）原样放进选项，而这个选项一旦非空，
+ * 后端就**不再**按视频主语言挑轨（`_options_with_subtitle_plan` 里「显式选择优先」）。
+ * 于是一个只有中文字幕的视频会拿到 `subtitleslangs=["en"]` —— yt-dlp 匹配不到任何轨，
+ * **静默不下字幕、也不报错**，界面上却写着「已选 1 项：en」。收敛之后：
+ * 命中的语言照旧生效；一个都不命中就留空，把选择权交回后端的字幕计划（按主语言挑一条）。
+ *
+ * 保序去重：设置里的顺序就是偏好顺序，`filter` 不会打乱它。
+ */
+export function effectiveSubtitleLanguages(analysis: AnalyzeResponse, preferred: string[]): string[] {
+  const available = new Set(
+    [...analysis.subtitles, ...analysis.automatic_subtitles].map((item) => item.language)
+  );
+  return Array.from(new Set(preferred)).filter((code) => available.has(code));
+}
+
 /** 下载选项面板里那行「字幕：来源 X · 格式 Y」的说明文案。 */
 export function formatSubtitleInfo(analysis: AnalyzeResponse | null, options: DownloadOptions): string {
   if (!analysis) {

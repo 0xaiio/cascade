@@ -1,7 +1,7 @@
 import { cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, vi } from "vitest";
-import type { BiliJobUploads, Job } from "../contracts/types";
+import type { AnalyzeResponse, BiliJobUploads, Job } from "../contracts/types";
 import {
   analyzePayload,
   biliJobUploadsPayload,
@@ -40,8 +40,8 @@ import {
  * 各文件之间也互不干扰（Vitest 默认按文件隔离模块注册表）。
  */
 export const mockState = {
-  /** `GET /api/analyze` 返回的解析结果。 */
-  analyze: analyzePayload,
+  /** `GET /api/analyze` 返回的解析结果。类型标成契约类型，用例才能整个换掉它（A-03）。 */
+  analyze: analyzePayload as AnalyzeResponse,
   /** `GET /api/jobs` 返回的任务列表。 */
   jobs: [jobPayload, pausedJobPayload, playlistJobPayload] as Job[],
   /** `/api/settings` 的当前值（GET 读它，PUT 写它）。 */

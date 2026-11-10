@@ -44,7 +44,7 @@ import { groupNotice, noticeTarget } from "./bilibili/biliForm";
 import { BILI_CALL_TIMEOUT_MS } from "./bilibili/biliHealth";
 import { errorMessage } from "./shared/errors";
 import { chooseAvailableResolution } from "./shared/quality";
-import { effectiveSubtitleSourceForAnalysis } from "./shared/subtitles";
+import { effectiveSubtitleLanguages, effectiveSubtitleSourceForAnalysis } from "./shared/subtitles";
 import {
   ChimePlayer,
   TERMINAL_JOB_STATUSES,
@@ -279,7 +279,10 @@ export default function App() {
       ...current,
       resolution: chooseAvailableResolution(result, settings?.default_resolution ?? current.resolution),
       format_id: null,
-      subtitle_languages: settings?.default_subtitle_languages ?? current.subtitle_languages
+      subtitle_languages: effectiveSubtitleLanguages(
+        result,
+        settings?.default_subtitle_languages ?? current.subtitle_languages
+      )
     }));
   }
 

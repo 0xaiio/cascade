@@ -10,8 +10,11 @@ import { ChevronDown, Search } from "lucide-react";
  *    **不允许**给 `.select-trigger span` 加 `white-space: nowrap`：nowrap 之下没有断行机会，
  *    `overflow-wrap` 与 `min-width: 0` 都救不回来，标签的 min-content 会等于整段文字，
  *    一路把右栏轨道和整页顶宽（12 种语言实测 84px）。
- * 2. 下拉列表只列**该视频真的有的**语言，而选择值可能来自设置里的默认值 —— 于是存在
- *    「标签里有一个下拉里没有复选框、界面上摘不掉」的语言（已知未处理，见 ai/ui/README.md）。
+ * 2. 下拉列表只列**该视频真的有的**语言。设置里的默认值在解析结果落地时就已经收敛到
+ *    该视频真有的语言（`effectiveSubtitleLanguages`），所以标签里不会再出现一个「下拉里
+ *    没有复选框、界面上摘不掉」的语言（见 ai/bug-fix/039）。
+ * 3. **空选择 = 自动**：后端空列表时会按视频主语言挑一条（人工优先、无则 ASR），
+ *    所以空态标签写「自动（按视频语言）」，不能写「未选择」—— 那会读成「不下字幕」。
  */
 export function SearchableLanguageSelect({
   languages,
@@ -26,7 +29,9 @@ export function SearchableLanguageSelect({
   const [query, setQuery] = useState("");
   const filteredLanguages = languages.filter((language) => language.toLowerCase().includes(query.trim().toLowerCase()));
   const selectedSet = new Set(selectedLanguages);
-  const summary = selectedLanguages.length ? `已选 ${selectedLanguages.length} 项：${selectedLanguages.join(", ")}` : "选择字幕语言";
+  const summary = selectedLanguages.length
+    ? `已选 ${selectedLanguages.length} 项：${selectedLanguages.join(", ")}`
+    : "自动（按视频语言）";
 
   function toggleLanguage(language: string) {
     const next = new Set(selectedLanguages);
@@ -78,6 +83,11 @@ export function SearchableLanguageSelect({
         </div>
       )}
       {!languages.length && <span className="hint">解析后显示可用字幕</span>}
+      {languages.length > 0 && !selectedLanguages.length && (
+        <span className="hint">
+          未选择时按视频主语言自动挑一条（中 / 英），人工字幕优先；显式选中就只下选中的语言。
+        </span>
+      )}
     </div>
   );
 }

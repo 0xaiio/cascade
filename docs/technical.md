@@ -110,6 +110,8 @@
 yt-dlp 对「请求的语言不存在」是静默跳过（不报错），所以「计划说有」与「写出来了」是两件事。
 存一个不存在的文件路径，等于让一次上传在最后一刻才发现没有字幕。
 
+这条静默路过还有一个更靠前的入口：`subtitle_languages` **非空**时 `_options_with_subtitle_plan` 不改写选项（显式选择优先），于是前端若把设置默认值原样塞进来，一个没有该语言轨的视频就会「一条字幕都不下、也不报错」。因此前端在解析落地时先收敛到该视频真有的语言（空 = 自动，见 [039](../ai/bug-fix/039-subtitle-default-silences-the-plan.md)），后端这一层保持「显式优先」不变。
+
 `subtitle_source` 的 `NULL` 与 `none` 也必须分开：`NULL` = 这一轮**没有结论**（`video_only`、
 或不需要降级的早退路径），`none` = 有结论（这个视频确实没有可用中英字幕）。混成一句会让用户
 刚提交任务就看到「无字幕」。
@@ -390,7 +392,7 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 `timeout`，于是 `timeout=20` 实测走了 **160 秒**。修法在 [bili_http.py](../backend/app/bilibili/bili_http.py)：
 只解析 IPv4，并让整段地址共享一个截止时刻（见 [ai/bug-fix/031](../ai/bug-fix/031-bili-requests-fall-into-an-ipv6-black-hole.md)）。
 
-现在的两道保险都在前端 [App.tsx](../frontend/src/App.tsx#L476)：
+现在的两道保险都在前端 [App.tsx](../frontend/src/App.tsx#L466)：
 `seasonsRequested` 去重（弹窗每收到一条 SSE 事件就重渲染一次，没有去重会反复发请求），
 以及 `SEASON_LIST_TIMEOUT_MS = BILI_CALL_TIMEOUT_MS`（25 s，与体检共用）到点写下一个**读完了、但读不到**的结论
 （`SEASON_LIST_UNREADABLE`，带可操作的建议）。迟到的真结果会**覆盖**这条兜底 ——

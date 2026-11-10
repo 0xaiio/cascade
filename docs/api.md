@@ -120,7 +120,7 @@
 | `mode` | `video_subtitles`、`video_only`、`subtitles_only`。 |
 | `resolution` | 目标清晰度，只接受 `best` 或 `<高度>p`（例如 `1440p`、`1080p`），默认 `1440p`。取值会先**归一化**（去空白、转小写，`1080P` → `1080p`），其余写法一律 422 —— 它们没有唯一解释，猜一个就等于静默换画质（见 [026](../ai/bug-fix/026-a-resolution-that-silently-means-best.md)）。同一个校验也用在 `POST /api/jobs/{job_id}/restart`、`POST /api/jobs/{job_id}/clone` 的 `resolution` 与设置里的 `default_resolution` 上。 |
 | `format_id` | 兼容旧请求保留，新 UI 不提供具体格式选择入口；有值时后端会强制该格式并要求 ffmpeg。 |
-| `subtitle_languages` | 字幕语言列表。**只处理中文与英文**，其余语种在后端被忽略（粤语 `yue` 不算中文）。留空时由后端按字幕计划收敛成一条（按主语言挑、人工优先、无则降级 ASR、都没有则跳过），**不会**退化成 `["all"]`；用户显式给了值时以用户值为准，计划不改它。 |
+| `subtitle_languages` | 字幕语言列表。**只处理中文与英文**，其余语种在后端被忽略（粤语 `yue` 不算中文）。留空时由后端按字幕计划收敛成一条（按主语言挑、人工优先、无则降级 ASR、都没有则跳过），**不会**退化成 `["all"]`；用户显式给了值时以用户值为准，**计划整段不改它** —— 所以给一个该视频没有的语言等于「不要字幕」（yt-dlp 匹配不到轨，不报错）。前端因此在解析落地时把设置里的默认值收敛到该视频真有的语言，一个都不命中就传空列表（见 [039](../ai/bug-fix/039-subtitle-default-silences-the-plan.md)）。 |
 | `subtitle_source` | `human`、`auto`、`both`；默认 `both`。前端会在已解析元数据缺少某类字幕时提交可用来源作为 fallback。 |
 | `subtitle_format` | `best`、`srt`、`vtt`；默认 `best`；`best` 不写入 `subtitlesformat`。 |
 | `playlist_items` | playlist 中选择的条目索引；单视频为 `null`。 |

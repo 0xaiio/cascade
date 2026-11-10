@@ -75,7 +75,7 @@ hash 只能在下一次触碰本目录时回填；查某条改动用
 
 ## 已知但**未处理**的界面问题（下一轮候选）
 
-1. **解析后，标签里可能出现一个在界面上摘不掉的语言。**
+1. ~~**解析后，标签里可能出现一个在界面上摘不掉的语言。**~~ **已修（2026-11-11，[039](../bug-fix/039-subtitle-default-silences-the-plan.md)）**：默认语言在解析落地时收敛到该视频真有的语言；一个都不命中就留空（= 自动，由后端的按主语言计划接管）。残留的原文如下，作为问题形态的记录：
 
    `applyAnalysisResult()` 每次解析都把选择重置成 settings 的默认值
    （`App.tsx` 的 `applyAnalysisResult()`：`subtitle_languages: settings?.default_subtitle_languages ?? …`，
