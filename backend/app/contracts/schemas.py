@@ -99,6 +99,9 @@ class VideoEntry(BaseModel):
     url: str
     duration: float | None = None
     thumbnail: str | None = None
+    # 本地已存在成品（解析时按「合集同名子目录 / 根目录」探测）。只是**提示**：
+    # 要不要重下由建任务时的 `skip_existing` 决定，这里不替用户做决定（A-04）。
+    local: bool = False
 
 
 class DiskBudgetRead(BaseModel):
@@ -128,6 +131,8 @@ class AnalyzeResponse(BaseModel):
     automatic_subtitles: list[SubtitleOption] = Field(default_factory=list)
     ffmpeg: dict[str, bool] = Field(default_factory=dict)
     disk_budget: DiskBudgetRead | None = None
+    # 单视频：本地已有同名成品（与 `VideoEntry.local` 同义，合集时为 False）。
+    local: bool = False
 
 
 class DownloadOptions(BaseModel):

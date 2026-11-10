@@ -72,6 +72,8 @@ YouTube Downloader 是本机单用户工具。前端提供链接解析、下载�
 
 范围写法：`5` 单条、`2-4` 闭区间、`8-` 到末尾、`-3` 从第 1 条到第 3 条；逗号（半角 / 全角）与空格都能分隔。写错时**整次不生效**，并在控件下方说明原因（例如「看不懂「abc」」「「5-3」的起点大于终点」）。
 
+条目表还有一列**「本地」**：标「已有」表示下载目录里已经有这个视频的成品（同一个视频 id、媒体后缀；`.part` 这类没下完的中间文件不算）。表上方会汇总成一句「本地已有 N 条」。它只是提示 —— 建任务时默认开启的「跳过已下载」才是不重下的原因，想重下就在下载选项里把那个开关关掉。单视频解析后如果本地已有同名产物，也会单独提示一句。
+
 ## 只支持 YouTube 链接
 
 解析与建任务两个入口都只接受 YouTube 链接。判定分两层：
@@ -83,7 +85,7 @@ YouTube Downloader 是本机单用户工具。前端提供链接解析、下载�
 
 ## 下载选项
 
-下载选项的数据结构由 [DownloadOptions](../backend/app/contracts/schemas.py#L133) 定义，前端对应类型见 [types.ts](../frontend/src/contracts/types.ts#L43)。
+下载选项的数据结构由 [DownloadOptions](../backend/app/contracts/schemas.py#L138) 定义，前端对应类型见 [types.ts](../frontend/src/contracts/types.ts#L43)。
 
 | 选项 | 行为 |
 | --- | --- |
@@ -141,7 +143,7 @@ YouTube Downloader 是本机单用户工具。前端提供链接解析、下载�
 
 ## 任务中心
 
-任务中心展示任务级和子视频级状态。后端 API 返回的字段见 [JobRead](../backend/app/contracts/schemas.py#L234) 和 [JobItemRead](../backend/app/contracts/schemas.py#L195)，前端展示组件见 [JobQueue](../frontend/src/task-center/JobQueue.tsx#L30)。
+任务中心展示任务级和子视频级状态。后端 API 返回的字段见 [JobRead](../backend/app/contracts/schemas.py#L239) 和 [JobItemRead](../backend/app/contracts/schemas.py#L200)，前端展示组件见 [JobQueue](../frontend/src/task-center/JobQueue.tsx#L30)。
 Playlist 展开后会用浅色分组背景承载子视频列表，便于区分合集任务行和单个视频任务。
 
 | 信息 | 说明 |

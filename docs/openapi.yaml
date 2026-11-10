@@ -2092,6 +2092,14 @@ components:
         thumbnail:
           type: [string, "null"]
           example: https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg
+        local:
+          type: boolean
+          description: >-
+            A finished media file for this entry already exists in the job's
+            download directory (same rule as `skip_existing`; `.part` files do
+            not count). Advisory only — whether it is actually re-downloaded is
+            decided by `skip_existing` when the job is created.
+          example: false
 
     DiskBudgetRead:
       type: object
@@ -2157,6 +2165,13 @@ components:
           allOf:
             - $ref: "#/components/schemas/DiskBudgetRead"
           nullable: true
+        local:
+          type: boolean
+          description: >-
+            Single video only: a finished file for this URL already exists in the
+            download directory. Always false for playlists (see per-entry `local`).
+          default: false
+          example: false
           default: null
         ffmpeg:
           type: object

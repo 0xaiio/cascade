@@ -36,6 +36,8 @@ export interface VideoEntry {
   url: string;
   duration: number | null;
   thumbnail: string | null;
+  /** 本地已有成品（服务端解析时探测）。旧后端没有这个字段 ⇒ 按「没有」渲染，不编数字。 */
+  local?: boolean;
 }
 
 /** 解析结果附带的磁盘预算结论（服务端算好，前端不自己拼数字）。 */
@@ -59,6 +61,8 @@ export interface AnalyzeResponse {
   automatic_subtitles: SubtitleOption[];
   ffmpeg: Record<string, boolean>;
   disk_budget: DiskBudget | null;
+  /** 单视频：本地已有同名成品；合集看每个条目的 `local`。 */
+  local?: boolean;
 }
 
 export interface DownloadOptions {

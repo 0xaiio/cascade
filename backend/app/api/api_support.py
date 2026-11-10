@@ -17,6 +17,7 @@ from ..contracts.config import AppSettings
 from ..download.disk_budget import assess_for_job
 from ..download.job_manager import new_id
 from ..download.job_read_model import read_job
+from ..download.output_paths import discover_existing_media_by_id, source_video_id
 from ..contracts.models import Job, JobItem, Setting
 from ..common.paths import safe_path_name
 from ..host.proxy import redact_proxy_credentials
@@ -93,6 +94,36 @@ def job_download_dir(root_dir: Path, analysis: AnalyzeResponse, job_id: str) -> 
         return root_dir
     folder = safe_path_name(analysis.title, fallback=f"playlist-{job_id[:8]}")
     return root_dir / folder
+
+
+def attach_local_availability(analysis: AnalyzeResponse, settings: AppSettings) -> AnalyzeResponse:
+    """给解析结果标上「本地已有成品」（A-04）。
+
+    目录规则与建任务时**同一套**（`job_download_dir`）：合集落同名子目录、单视频落根目录；
+    「已有」的判据与 `skip_existing` 用的是同一个（媒体后缀、排除 `.part`）。
+
+    唯一的例外：这时还没有 `job_id`，标题清洗成空目录名时无法预知建任务会用哪个名字
+    （那时回落到 `playlist-<job_id>`）—— 这种情况一律不标，宁可少提示也不猜错目录。
+
+    只是**提示**：要不要重下由建任务时的 `skip_existing` 决定，这里不替用户做决定。
+    """
+    if analysis.is_playlist:
+        folder = safe_path_name(analysis.title, fallback="")
+        directory = settings.download_dir / folder if folder else None
+        # 传的是**视频 id**，不是 URL：目录里的文件名是 `标题 [id].ext`。
+        found = discover_existing_media_by_id(
+            [video_id for video_id in (source_video_id(entry.url) for entry in analysis.entries) if video_id],
+            directory,
+        )
+        for entry in analysis.entries:
+            video_id = source_video_id(entry.url)
+            entry.local = bool(video_id and video_id in found)
+        return analysis
+
+    video_id = source_video_id(analysis.url)
+    found = discover_existing_media_by_id([video_id] if video_id else [], settings.download_dir)
+    analysis.local = bool(video_id and video_id in found)
+    return analysis
 
 
 def attach_analysis_disk_budget(analysis: AnalyzeResponse, settings: AppSettings) -> AnalyzeResponse:

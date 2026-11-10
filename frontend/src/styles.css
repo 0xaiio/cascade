@@ -608,6 +608,31 @@ select:focus {
   text-align: center;
 }
 
+/* A-04：「本地已有」是**提示**，不是状态色。绿点只在表格里点一下「这条不用再下」，
+   不做成告警色 —— 文件在本地是好事，不是异常。 */
+.local-badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border: 1px solid #bbf7d0;
+  border-radius: 999px;
+  background: #f0fdf4;
+  color: #0e7a56;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.local-none {
+  color: #b6bfcd;
+}
+
+.playlist-local-note {
+  margin: 0;
+  color: #0e7a56;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

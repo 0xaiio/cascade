@@ -286,7 +286,7 @@ B站 上传的界面由四个组件加一个图标组成：[BiliIcon](../fronten
 **弹不出来必须报错**（等 3s 仍没有 `TkTopLevel` 就 400，绝不 204 空转；用户点取消则静默返回）；
 **前台只能等、不能抢**（提前 `SetForegroundWindow` 会被前台锁拒绝，而且被拒后对话框不再自行激活）。
 实测与细节见 [technical.md](technical.md#打开字幕文件) 第二~四节。
-字幕位置由 [existing_subtitle_file](../backend/app/download/output_paths.py#L184) 算：库里的 `subtitle_path` 优先（只验存在），
+字幕位置由 [existing_subtitle_file](../backend/app/download/output_paths.py#L222) 算：库里的 `subtitle_path` 优先（只验存在），
 否则看视频旁边的同名 `.srt`/`.vtt`（补这一列之前下载的历史任务就是这么找到的）。没有字幕时返回 `409`；
 `mode` 取其它值一律 `422`。为什么没有编辑器清单、也没有应用侧「上次用的查看器」，见
 [technical.md](technical.md#打开字幕文件)。

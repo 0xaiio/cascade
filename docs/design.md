@@ -129,7 +129,7 @@
 | 组件 / 模块 | 职责 | 不负责 |
 | --- | --- | --- |
 | [UrlAnalyzer.tsx](../frontend/src/download-request/UrlAnalyzer.tsx#L24) | 解析面板：链接输入、cookies 行（状态 + 上传/清除）、解析按钮。cookies **只能来自文件**，所以面板不持有任何 cookies 状态。 | 不发请求（回调交 `App`），不决定用哪份 cookies，也不提供「从浏览器导入」入口（已移除，见 [ai/bug-fix/038](../ai/bug-fix/038-browser-cookie-import-is-gone.md)）。 |
-| [AnalysisPanel.tsx](../frontend/src/download-request/AnalysisPanel.tsx#L12) | 解析结果：缩略图/标题/时长、playlist 条目表与**批量选择工具条**（全选 / 反选 / 序号范围 / 标题筛选），单视频汇总行；判定在 [playlistSelection.ts](../frontend/src/download-request/playlistSelection.ts)。 | 不持有选中集合（状态归 `App`，提交要用同一份）；范围与筛选只是**这一份列表**的临时视图，换解析结果即清空；批量动作不越过筛选取隐藏行。 |
+| [AnalysisPanel.tsx](../frontend/src/download-request/AnalysisPanel.tsx#L21) | 解析结果：缩略图/标题/时长、playlist 条目表与**批量选择工具条**（全选 / 反选 / 序号范围 / 标题筛选），单视频汇总行；判定在 [playlistSelection.ts](../frontend/src/download-request/playlistSelection.ts)。 | 不持有选中集合（状态归 `App`，提交要用同一份）；范围与筛选只是**这一份列表**的临时视图，换解析结果即清空；批量动作不越过筛选取隐藏行。 |
 | [DownloadOptionsPanel.tsx](../frontend/src/download-request/DownloadOptionsPanel.tsx#L19) | 下载选项：模式、清晰度、字幕语言/来源/格式、开关项、限速与重试、提交按钮。 | 不持有状态：所有值来自 `options`，改动经 `onOptionChange` 回到 `App`。 |
 | [SearchableLanguageSelect.tsx](../frontend/src/download-request/SearchableLanguageSelect.tsx#L16) | 可搜索的字幕语言多选。标签里 join 的是**语言代码**，项数无上界 —— 不许 `nowrap`，见 [ai/ui/003](../ai/ui/003-language-trigger-label-overflows-the-page.md)。 | 不拉取可用语言（由 `App` 从解析结果里汇总）。 |
 | [SettingsPanel.tsx](../frontend/src/settings/SettingsPanel.tsx#L78) | 设置：按功能域分成五区 —— 下载与存储 / 代理与网络 / 完成提醒 / B站 上传 / 运行环境，**顺序 = 用户碰到它们的先后**（见下行的 `SettingsGroup` 与 [ai/ui/010](../ai/ui/010-settings-panel-is-a-flat-list.md)）。持有一份 `draft`，**失焦即保存**；单视频并发下载数旁挂一个说明浮层（`Aria2cHelpPopover`）。 | 不解析代理来源（后端回传 `proxy_source`），不决定代理语义（留空=自动、`direct`=直连由后端定义）；也不判断「aria2c 此刻是否真的在用」——那由后端的 profile 链决定，界面只解释怎么启用。 |
@@ -214,7 +214,7 @@ PlantUML 源文件：[download-data-flow.puml](diagrams/download-data-flow.puml)
 
 ### 建任务与入队
 
-`POST /api/jobs` → 解析 → 选条目（单视频合成 1 条 `VideoEntry`）→ **磁盘预算复核**（按本次实际所选清晰度重算；两边数字都读到了且不够就回 409，库里一行都不写）→ 写 `Job` + N 个 `JobItem` → `enqueue()` 把 queued item id 放进队列。playlist 任务会额外在下载根目录下按安全化标题创建子目录，见 [job_download_dir](../backend/app/api/api_support.py#L90)。
+`POST /api/jobs` → 解析 → 选条目（单视频合成 1 条 `VideoEntry`）→ **磁盘预算复核**（按本次实际所选清晰度重算；两边数字都读到了且不够就回 409，库里一行都不写）→ 写 `Job` + N 个 `JobItem` → `enqueue()` 把 queued item id 放进队列。playlist 任务会额外在下载根目录下按安全化标题创建子目录，见 [job_download_dir](../backend/app/api/api_support.py#L91)。
 
 每条视频真正开始前，`_guard_item_disk_budget` 会用 `prepare_download` 给这一条的**真实** `filesize` 再核一次可用空间：不足则该条直接判失败并给带数字的下一步，一个字节都不写；`skip_existing` 命中已有成品时不核（那一轮不会写入大文件）。这一步是 flat playlist 没有 `filesize` 时唯一的兜底。
 

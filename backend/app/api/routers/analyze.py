@@ -27,4 +27,7 @@ def analyze(request: AnalyzeRequest, ctx: ContextDep) -> AnalyzeResponse:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     # 空间结论是解析结果的一部分：**在建任务之前**就让用户看到「这一批大概要占多少」。
     # 它只是提示；真正的阻断发生在 POST /api/jobs（那里才知道用户选了哪个清晰度）。
-    return api_support.attach_analysis_disk_budget(analysis, ctx.settings)
+    analysis = api_support.attach_analysis_disk_budget(analysis, ctx.settings)
+    # A-04：解析阶段就告诉用户「哪几条第本地已经有了」，否则重复下载一个合集时
+    # 要等建完任务才发现大部分被跳过。
+    return api_support.attach_local_availability(analysis, ctx.settings)

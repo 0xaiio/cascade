@@ -49,6 +49,9 @@ export function AnalysisPanel({
   const visibleIndices = visibleEntries.map((entry) => entry.index);
   const allVisibleSelected = areAllSelected(selectedItems, visibleIndices);
   const hiddenSelected = selectedItems.size - visibleEntries.filter((entry) => selectedItems.has(entry.index)).length;
+  // A-04：本地已有成品的条数。它只是提示 —— 建任务时默认「跳过已下载」，
+  // 但那个开关归下载选项，这里不替用户决定。
+  const localCount = analysis.entries.filter((entry) => entry.local).length;
 
   function toggle(index: number) {
     const next = new Set(selectedItems);
@@ -190,6 +193,11 @@ export function AnalysisPanel({
                 {rangeNote}
               </p>
             )}
+            {localCount > 0 && (
+              <p className="playlist-local-note">
+                本地已有 {localCount} 条：建任务时默认「跳过已下载」，这些条目不会重下（可在下载选项里关掉）。
+              </p>
+            )}
           </div>
           <table>
             <thead>
@@ -197,6 +205,7 @@ export function AnalysisPanel({
                 <th>选择</th>
                 <th>#</th>
                 <th>标题</th>
+                <th>本地</th>
                 <th>时长</th>
               </tr>
             </thead>
@@ -213,12 +222,13 @@ export function AnalysisPanel({
                   </td>
                   <td>{entry.index}</td>
                   <td>{entry.title}</td>
+                  <td>{entry.local ? <span className="local-badge">已有</span> : <span className="local-none">—</span>}</td>
                   <td>{formatDuration(entry.duration)}</td>
                 </tr>
               ))}
               {visibleEntries.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="playlist-empty">
+                  <td colSpan={5} className="playlist-empty">
                     没有标题包含「{filterText.trim()}」的条目；筛选只影响显示，不会改变已选。
                   </td>
                 </tr>
@@ -231,6 +241,11 @@ export function AnalysisPanel({
           <FileText size={18} />
           <span>{formatDuration(analysis.duration)} · {analysis.formats.length} 个格式 · {analysis.subtitles.length} 种字幕</span>
         </div>
+      )}
+      {!analysis.is_playlist && analysis.local && (
+        <p className="playlist-local-note">
+          本地已有同名产物：建任务时默认「跳过已下载」，不会再下一遍（可在下载选项里关掉）。
+        </p>
       )}
     </section>
   );

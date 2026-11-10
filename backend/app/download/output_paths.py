@@ -49,6 +49,44 @@ def discover_existing_output_path(source_url: str, job_download_dir: Path | None
     return None
 
 
+def discover_existing_media_by_id(
+    video_ids: Iterable[str], directory: Path | None
+) -> dict[str, Path]:
+    """一次目录枚举，回答「这些视频 id 里哪些已经有成品」。
+
+    **为什么不是逐个调 `discover_existing_output_path`**：那样每个 id 都把整个目录
+    `iterdir()` 一遍（该函数是按 `[id]` 过滤的）。解析一个 200 条的合集就是 200 次目录遍历，
+    而目录里往往有上千个文件 —— 那是把一次 O(文件数) 的读取放大成 O(条目 × 文件数)。
+    这里只读一次，按文件名里的 `[id]` 建索引。
+
+    判据与 `discover_existing_output_path` 完全一致：只认**媒体后缀**、排除 `.part` 之类的中间产物；
+    同一 id 有多条时按文件名序取第一条（成品名稳定，顺序只为可复现）。
+    """
+    wanted = {video_id for video_id in video_ids if video_id}
+    if not wanted or directory is None:
+        return {}
+    root = directory.expanduser()
+    if not root.is_dir():
+        return {}
+
+    found: dict[str, list[Path]] = {}
+    for path in root.iterdir():
+        if not path.is_file():
+            continue
+        # 文件名形如 `标题 [abc123].mp4`：先取方括号里的 token，再与想要的 id 求交，
+        # 避免对每个文件遍历一遍全部 id。
+        for token in re.findall(r"\[([^\]]+)\]", path.name):
+            if token in wanted:
+                found.setdefault(token, []).append(path)
+
+    result: dict[str, Path] = {}
+    for video_id, paths in found.items():
+        media = [path for path in paths if _is_preferred_media_path(path)]
+        if media:
+            result[video_id] = min(media, key=lambda path: path.name.lower())
+    return result
+
+
 def discover_output_file_candidates(source_url: str, job_download_dir: Path | None) -> list[Path]:
     if job_download_dir is None:
         return []

@@ -18,8 +18,8 @@ export const analyzePayload = {
   duration: null,
   thumbnail: null,
   entries: [
-    { index: 1, id: "one", title: "One", url: "https://youtu.be/one", duration: 60, thumbnail: null },
-    { index: 2, id: "two", title: "Two", url: "https://youtu.be/two", duration: 90, thumbnail: null }
+    { index: 1, id: "one", title: "One", url: "https://youtu.be/one", duration: 60, thumbnail: null, local: false },
+    { index: 2, id: "two", title: "Two", url: "https://youtu.be/two", duration: 90, thumbnail: null, local: false }
   ],
   formats: [
     { format_id: "22", label: "720p mp4", height: 720, ext: "mp4", filesize: 10_485_760, fps: null },
@@ -28,7 +28,8 @@ export const analyzePayload = {
   subtitles: [{ language: "en", name: null, formats: ["vtt"] }],
   automatic_subtitles: [{ language: "zh-Hans", name: null, formats: ["vtt"] }],
   ffmpeg: { ffmpeg: true, ffprobe: true },
-  disk_budget: null as DiskBudget | null
+  disk_budget: null as DiskBudget | null,
+  local: false
 };
 
 export const jobPayload: Job = {
