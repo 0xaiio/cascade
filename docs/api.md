@@ -109,6 +109,8 @@
 
 `url` 是待解析链接；`cookies_enabled` 控制解析时是否使用本地 cookies。前端默认传 `true`，见 [analyzeUrl](../frontend/src/shared/api.ts#L129)。
 
+**`url` 只接受 YouTube 链接**（`youtube.com` 及其子域、`youtu.be`、`youtube-nocookie.com`，协议 http/https）。其它站点在**发请求之前**返回 `400`，`detail` 是「本工具只支持 YouTube 链接（youtube.com / youtu.be）。这个链接的站点是 `<host>`，没有向它发起请求 —— 换一个 YouTube 链接再试。」`POST /api/jobs` 与克隆走同一个入口，判定一致。拿到页面后还会以 yt-dlp 的 `extractor_key` 复核一次（短链 / 跳转 / 代理可以让主机名说谎）。见 [A-01](../ai/feature/A-01-youtube-only.md)。
+
 ### DownloadOptions
 
 字段定义见 [DownloadOptions](../backend/app/contracts/schemas.py#L133)。
@@ -188,9 +190,9 @@
 
 ### AnalyzeResponse
 
-包含标题、是否 playlist、条目、格式列表、字幕列表、自动字幕列表和 ffmpeg 状态。格式和字幕映射逻辑见 [extract_metadata](../backend/app/download/ytdlp_service.py#L335)。
+包含标题、是否 playlist、条目、格式列表、字幕列表、自动字幕列表和 ffmpeg 状态。格式和字幕映射逻辑见 [extract_metadata](../backend/app/download/ytdlp_service.py#L413)。
 
-`entries` 只在 playlist 场景非空；`formats` 已过滤掉纯 storyboard/图片格式，见 [_map_formats](../backend/app/download/ytdlp_service.py#L1133)。
+`entries` 只在 playlist 场景非空；`formats` 已过滤掉纯 storyboard/图片格式，见 [_map_formats](../backend/app/download/ytdlp_service.py#L1215)。
 
 `disk_budget`（`DiskBudgetRead | null`）是**只读提示**：`status` 取 `ok` / `insufficient` / `unknown`，`estimated_bytes` / `free_bytes` / `required_bytes` 单位是字节，`required_bytes` 已含 512 MiB 余量，`message` 由后端拼好（带数字、单位与下一步），前端原样显示、不重算。解析请求里没有下载选项，因此它按设置里的**默认清晰度**估；`unknown` 表示平台没给 `filesize`（flat playlist 的常态）、分区读不出来或 `subtitles_only`，**只提示不阻断**。真正是否阻断由 `POST /api/jobs` 用那一次请求里的选项重算后决定（409）。判定实现见 [`disk_budget.py`](../backend/app/download/disk_budget.py)。
 

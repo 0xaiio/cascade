@@ -61,7 +61,7 @@
 | [events.py](../backend/app/infra/events.py#L7) | L2 编排 | 进程内 SSE 扇出（每个订阅者一个队列）。 | 不持久化事件（持久化在 `job_manager`）。 |
 | [bili_manager.py](../backend/app/bilibili/bili_manager.py#L328) | L2 编排 | B站 上传的队列与编排：单 worker 串行、投稿间隔（抗账号级频控）、状态写库与收敛、重启后把中断记录折成可重试失败、环境体检、事件发布。 | 不直接调 `biliup`（经 `bili_upload`），不解析 B站 内部结构（经 `bili_api`），不算界面徽标（经 `bili_read_model`）。 |
 | [bili_read_model.py](../backend/app/bilibili/bili_read_model.py#L60) | L2 编排 | 把 `bili_upload` / `bili_season` 投影成 API 读模型；**「多条记录 → 一档徽标」的聚合规则**只在这里定义。 | 不写库、不改状态；`elapsed_seconds` 复用 `job_read_model`（见下方「同层横向依赖」）。 |
-| [ytdlp_service.py](../backend/app/download/ytdlp_service.py#L88) | L3 领域 | yt-dlp 边界：元数据、预检测、参数构建、profile 重试链、错误分类、依赖诊断。 | 不碰数据库，不决定任务状态。 |
+| [ytdlp_service.py](../backend/app/download/ytdlp_service.py#L261) | L3 领域 | yt-dlp 边界：元数据、预检测、参数构建、profile 重试链、错误分类、依赖诊断，以及**站点范围判定**（`ensure_youtube_url` 的主机名白名单 + `is_youtube_extractor` 对 `extractor_key` 的复核，见 [A-01](../ai/feature/A-01-youtube-only.md)）。 | 不碰数据库，不决定任务状态。 |
 | [subtitle_plan.py](../backend/app/download/subtitle_plan.py#L200) | L3 领域 | 字幕下载**计划**：主语言判定（`-orig` 原声轨）、同族轨偏好、人工→ASR→跳过的收敛、来源标签与摘要文案。**纯逻辑**：不联网、不读库、不 import yt-dlp。 | 不写库、不发请求；不知道 `JobItem` 的存在（结论由 `job_manager` 取走）。 |
 | [bili_subtitle.py](../backend/app/bilibili/bili_subtitle.py#L277) | L3 领域 | B站 CC 字幕：SRT/VTT → BCC 转换、语言标识映射、一次字幕上传（`posted` / `skipped` / `failed`）。 | **不参与稿件状态判定**、不写库、不重试；不知道端点长什么样（端点在 `bili_api`）。 |
 | [ytdlp_formats.py](../backend/app/download/ytdlp_formats.py#L9) | L3 领域 | 格式选择器、分辨率/大小/codec 提取、降级候选计算。 | 不导入 yt-dlp。 |
@@ -350,12 +350,12 @@ B站 上传有**自己的两套状态**，与 `JobStatus` 无关：
 
 | 分类 | 判定依据 | 处理 |
 | --- | --- | --- |
-| cookies 缺失/需登录 | 错误链中出现 cookies 提示词 + 登录/bot 关键词，见 [is_cookie_required_error](../backend/app/download/ytdlp_service.py#L808)。 | 刷新浏览器 cookies 后重试一次；仍失败则给出两条可操作建议。 |
-| 媒体流阻断 | 403/`forbidden` 或连接重置族关键词，见 [is_media_stream_blocked_error](../backend/app/download/ytdlp_service.py#L710)。 | 在同清晰度下换 profile 重试；终态文案前置 cookies 状态，并给出降清晰度重启建议。 |
-| 目标格式不可用（**预检阶段**） | 错误文本含 `requested format is not available`，由 [prepare_download](../backend/app/download/ytdlp_service.py#L373) 抛出。 | 归一成 `is_selectable=False`，按原因分类后**真的**用降级清晰度重新预检并下载。 |
+| cookies 缺失/需登录 | 错误链中出现 cookies 提示词 + 登录/bot 关键词，见 [is_cookie_required_error](../backend/app/download/ytdlp_service.py#L890)。 | 刷新浏览器 cookies 后重试一次；仍失败则给出两条可操作建议。 |
+| 媒体流阻断 | 403/`forbidden` 或连接重置族关键词，见 [is_media_stream_blocked_error](../backend/app/download/ytdlp_service.py#L792)。 | 在同清晰度下换 profile 重试；终态文案前置 cookies 状态，并给出降清晰度重启建议。 |
+| 目标格式不可用（**预检阶段**） | 错误文本含 `requested format is not available`，由 [prepare_download](../backend/app/download/ytdlp_service.py#L455) 抛出。 | 归一成 `is_selectable=False`，按原因分类后**真的**用降级清晰度重新预检并下载。 |
 | 目标格式不可用（**下载阶段**） | 同上，但出现在预检通过之后（两次请求之间格式列表变了）。 | 标注 `requested_resolution_unselectable` 并把错误替换成降级说明；按 [架构文档](architecture.md) 的约定，**不**自动重下。 |
 | 停滞 | 看门狗判定字节峰值超时未刷新。 | 直接失败，不换 profile、不重试。 |
-| 其他 | 兜底。 | 透传清洗后的错误文本，见 [readable_error_message](../backend/app/download/ytdlp_service.py#L784)。 |
+| 其他 | 兜底。 | 透传清洗后的错误文本，见 [readable_error_message](../backend/app/download/ytdlp_service.py#L866)。 |
 
 可观测性由三处构成：任务中心读模型（进度/速度/大小/实际分辨率/格式/错误）、`/api/diagnostics`（依赖与稳定性参数，且不回显 token 原文）、以及 `JobEvent` 表（事件审计，可与 SSE 推送交叉核对）。
 

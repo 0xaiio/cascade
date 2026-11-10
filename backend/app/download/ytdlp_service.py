@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 from typing import Any
+from urllib.parse import urlsplit
 
 import yt_dlp
 from yt_dlp.networking.impersonate import ImpersonateTarget
@@ -89,6 +90,83 @@ _POSIX_FALLBACKS = {
 JS_RUNTIME_PROBE_MARKER = "cascade-js-runtime-ok"
 JS_RUNTIME_PROBE_TIMEOUT_SECONDS = 20
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------- 站点范围（A-01）
+# 这条链路上只有 YouTube 是「策略完整」的：anti403 profile 链、PO token、清晰度档位、
+# 字幕转换都按 YouTube 设计（项目边界见 ai/plan/brainstorming.md §5「不做站点泛化」）。
+# 别的站点不是「一定下不了」，而是本工具给不出与那些策略相符的解释 —— 所以拒绝要发生在
+# **发请求之前**：拿 bilibili 链接进来不该先烧掉一次网络请求，再回一句排障手册里查不到的报错。
+YOUTUBE_HOST_SUFFIXES = ("youtube.com", "youtu.be", "youtube-nocookie.com")
+UNSUPPORTED_SITE_TEMPLATE = (
+    "本工具只支持 YouTube 链接（youtube.com / youtu.be）。"
+    "这个链接的站点是 {host}，没有向它发起请求 —— 换一个 YouTube 链接再试。"
+)
+UNSUPPORTED_URL_TEMPLATE = (
+    "这个链接不是 http/https 地址，看不出站点。本工具只支持 YouTube 链接（youtube.com / youtu.be），"
+    "没有向它发起请求 —— 请粘贴完整的视频或合集链接。"
+)
+
+
+def _split_url(url: str):
+    """`urlsplit` 对畸形输入（例如半个 IPv6）会抛 `ValueError`；这里统一收敛成 `None`。"""
+    try:
+        return urlsplit(url)
+    except ValueError:
+        return None
+
+
+def url_host(url: str) -> str:
+    """取小写主机名（去掉端口与用户信息）；取不出来返回空串。"""
+    parts = _split_url(url)
+    return (parts.hostname or "").lower() if parts else ""
+
+
+def is_youtube_url(url: str) -> bool:
+    """主机名是否属于 YouTube。
+
+    用**主机名后缀**而不是「URL 里含 youtube」：后者会把
+    `https://example.com/?redirect=youtube.com` 之类放进来。`youtube.com` 的所有子域
+    （`m.` / `music.` / `www.`）都收，`youtu.be` 与 `youtube-nocookie.com` 单列。
+    """
+    parts = _split_url(url)
+    if parts is None or parts.scheme not in ("http", "https"):
+        # 协议也必须在白名单里：`ftp://youtube.com/x` 的主机名对，但它不是网页地址。
+        return False
+    host = (parts.hostname or "").lower()
+    if not host:
+        return False
+    return any(host == suffix or host.endswith("." + suffix) for suffix in YOUTUBE_HOST_SUFFIXES)
+
+
+def unsupported_site_message(url: str) -> str:
+    """给非 YouTube 链接的那句话。**说明「没有发请求」**，用户才知道不是网络问题。"""
+    parts = _split_url(url)
+    host = (parts.hostname or "").lower() if parts else ""
+    # 不是 http/https 时不能报「站点是 youtube.com」—— 那句自相矛盾（`ftp://youtube.com/x`）。
+    if parts is None or parts.scheme not in ("http", "https") or not host:
+        return UNSUPPORTED_URL_TEMPLATE
+    # 回显的 host 只允许主机名字符：它来自用户输入，不能原样拼进界面文案。
+    safe_host = re.sub(r"[^a-z0-9.\-]", "", host) or "（无法识别）"
+    return UNSUPPORTED_SITE_TEMPLATE.format(host=safe_host)
+
+
+def ensure_youtube_url(url: str) -> None:
+    """解析/建任务入口的前置判定。不合规直接抛 `ValueError`（HTTP 层转 400）。"""
+    if not is_youtube_url(url):
+        raise ValueError(unsupported_site_message(url))
+
+
+def is_youtube_extractor(info: dict[str, Any]) -> bool:
+    """yt-dlp 给的权威判定。
+
+    主机名可以通过短链、跳转、代理骗过去，`extractor_key` 不会 —— 它由 yt-dlp 在拿到
+    页面后决定。缺这个键（测试替身、老版本）时返回 True：入口的 host 判定已经放行过，
+    这里不做二次拒绝，避免把「yt-dlp 没写这个字段」误判成「不是 YouTube」。
+    """
+    key = info.get("extractor_key") or info.get("extractor") or ""
+    if not isinstance(key, str) or not key:
+        return True
+    return key.lower().startswith("youtube")
 
 
 def _detect_executable(
@@ -353,6 +431,10 @@ class YtDlpService:
 
         if not info:
             raise ValueError("Unable to extract metadata for this URL.")
+
+        # 入口按主机名挡过一次；这里是**权威判定**（短链、跳转、代理都可能让主机名说谎）。
+        if not is_youtube_extractor(info):
+            raise ValueError(unsupported_site_message(str(info.get("webpage_url") or url)))
 
         entries = self._map_entries(info)
         is_playlist = bool(entries) or info.get("_type") == "playlist"

@@ -46,12 +46,21 @@ YouTube Downloader 是本机单用户工具。前端提供链接解析、下载�
 
 ## 基本下载流程
 
-1. 在首页输入单视频或 playlist 链接，点击解析。
+1. 在首页输入**YouTube** 单视频或 playlist 链接，点击解析。`youtube.com` 的各级子域（`www.` / `m.` / `music.`）、`youtu.be`、`youtube-nocookie.com` 都收。**其它站点（B站、抖音、播客）会被直接拒绝**，并且**不会向它发起请求** —— 本工具的 profile 链、PO token、清晰度档位与字幕转换都是 YouTube 专属，不做站点泛化；拒绝文案会写明这一点与链接的站点，见 [只支持 YouTube 链接](#只支持-youtube-链接)。
 2. Playlist 会展示条目列表，可选择要下载的子视频；后端会根据选择生成 `JobItem`，见 [创建任务路由](../backend/app/api/routers/jobs.py#L28)。
 3. 在下载选项中选择下载模式、清晰度、字幕语言、字幕来源、字幕格式、metadata、缩略图、限速、重试和通知；默认清晰度为 `1440p`，默认字幕来源为“两者都要”。
 4. 解析结果下方有一行**磁盘预算**提示，写明「这批大概需要多少、目标分区还剩多少」。它按设置里的默认清晰度估算，只是提示；点「加入下载队列」时会用你这一次实际选的清晰度复核，真的不够才拦下来（见 [下载空间不够时会怎样](#下载空间不够时会怎样)）。
 5. 点击加入下载队列，在任务中心观察进度、速度、预计剩余时间、实际分辨率和实际格式。
 6. 对任务执行暂停、重启、仅删除任务，或删除任务并删除已下载文件；前端 API 调用见 [api.ts](../frontend/src/shared/api.ts#L56)。
+
+## 只支持 YouTube 链接
+
+解析与建任务两个入口都只接受 YouTube 链接。判定分两层：
+
+1. **主机名**（发请求之前）：`youtube.com` 及其子域、`youtu.be`、`youtube-nocookie.com`，协议必须是 http/https。不合规时**一次网络请求都不发**，直接返回「本工具只支持 YouTube 链接……没有向它发起请求」。这样你不会拿到一句与 YouTube 策略无关、排障手册里也查不到的报错。
+2. **yt-dlp 的 `extractor_key`**（拿到页面之后）：短链、跳转或代理都可能让主机名说谎，最终以 yt-dlp 判定的提取器为准；只要它说不是 YouTube，同样按上面的方式拒绝。
+
+判定用的是**主机名的点**，不是「链接里含 youtube」：`https://evil-youtube.com/...` 不是 YouTube，而 `https://youtube.com.evil.example/...` 也不是。合法的形态（短链、移动端、音乐、shorts、live、合集）都在白名单里，不会误伤。
 
 ## 下载选项
 
@@ -549,7 +558,7 @@ YouTube 把登录态与出口 IP 绑定。导出 cookies 时走代理 A、下载
 
 默认下载根目录是 `downloads/`，数据库和 cookies 默认在 `data/`，配置默认值见 [AppSettings](../backend/app/contracts/config.py#L19)。Playlist 会在下载根目录下创建同名子文件夹；目录选择和保存逻辑见 [select_download_dir](../backend/app/api/routers/settings.py#L99)。
 
-产物命名模板固定为 `<标题(最多200字节)> [<YouTube id>].<扩展名>`，见 [build_download_options](../backend/app/download/ytdlp_service.py#L474)。因此即使数据库里的 `output_path` 丢失，后端仍能按文件名中的 id 找回同名视频与 sidecar。
+产物命名模板固定为 `<标题(最多200字节)> [<YouTube id>].<扩展名>`，见 [build_download_options](../backend/app/download/ytdlp_service.py#L556)。因此即使数据库里的 `output_path` 丢失，后端仍能按文件名中的 id 找回同名视频与 sidecar。
 
 ### 下载空间不够时会怎样
 

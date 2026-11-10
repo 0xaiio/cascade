@@ -31,7 +31,7 @@ from ..contracts.schemas import (
     VideoEntry,
 )
 from ..download.error_advice import cookie_required_message
-from ..download.ytdlp_service import YtDlpService
+from ..download.ytdlp_service import YtDlpService, ensure_youtube_url
 
 
 def read_job_or_404(session: Session, job_id: str) -> JobRead:
@@ -184,6 +184,9 @@ def extract_metadata_with_cookies(
     所以现在只做一件事：失败时把「下一步怎么做」写进消息，而不是替用户去碰浏览器
     （见 [ai/bug-fix/038](../ai/bug-fix/038-browser-cookie-import-is-gone.md)）。
     """
+    # 站点范围先于网络请求：非 YouTube 链接**一次请求都不发**，直接给出可照做的说明
+    # （见 A-01）。放在这里而不是路由里，是因为 `POST /api/jobs` 与「克隆」也走这条路。
+    ensure_youtube_url(url)
     cookies_path = settings.cookies_path if cookies_enabled and settings.cookies_path.exists() else None
     try:
         return service.extract_metadata(url, cookies_path=cookies_path)

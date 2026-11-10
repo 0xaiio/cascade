@@ -24,7 +24,7 @@
 
 详情：
 
-- `subprocess.run([ffmpeg, ...])` 使用固定参数列表（[system_open.py](../backend/app/host/system_open.py#L100)、[ytdlp_service.py](../backend/app/download/ytdlp_service.py#L628)）
+- `subprocess.run([ffmpeg, ...])` 使用固定参数列表（[system_open.py](../backend/app/host/system_open.py#L100)、[ytdlp_service.py](../backend/app/download/ytdlp_service.py#L743)）
 - `subprocess.Popen([biliup, ...])` 用 list 形式启动投稿进程、不经 shell；`biliup` 的路径来自候选探测或配置，标题/简介/标签等内容作为**独立 argv 元素**传入（[bili_bin.py](../backend/app/bilibili/bili_bin.py#L226)）
 - ~~`subprocess.run([taskkill, ...])` / `subprocess.Popen([edge, --remote-debugging-port=..., ...])`~~：
   这两条随浏览器 cookies 导入入口一起**删除**（2026-11-04，见 [038](../ai/bug-fix/038-browser-cookie-import-is-gone.md)）。
@@ -97,7 +97,7 @@
 
 详情：
 
-- [GET /api/diagnostics](../backend/app/api/routers/diagnostics.py#L29) 仅返回 PO token / visitor data 的"是否已配置"布尔值，不返回原文（[get_dependency_status](../backend/app/download/ytdlp_service.py#L290)）
+- [GET /api/diagnostics](../backend/app/api/routers/diagnostics.py#L29) 仅返回 PO token / visitor data 的"是否已配置"布尔值，不返回原文（[get_dependency_status](../backend/app/download/ytdlp_service.py#L368)）
 - [sanitize_log_message](../backend/app/common/log_safety.py#L20) 在写入日志前通过正则替换移除 URL query string（包含 cookie、token、authorization 等参数）
 - 代理 URL 在日志与 API 响应里都先经 [redact_proxy_credentials](../backend/app/host/proxy.py#L62) 脱敏（`user:pass@` → `***`）
 - cookies 文件（`data/cookies.txt`、B站 的 `data/bili_cookies.json`）和 `.env` 文件均在 `.gitignore` 中排除，不会进入 Git

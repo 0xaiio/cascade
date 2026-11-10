@@ -12,7 +12,7 @@
 python -m compileall backend\app
 ```
 
-后端测试（当前基线：**1325 passed**，51 个 `test_*.py`）：
+后端测试（当前基线：**1428 passed**，57 个 `test_*.py`）：
 
 ```powershell
 python -m pytest backend\tests -q
@@ -39,7 +39,7 @@ python -m pytest backend\tests -q
 >
 > `--basetemp` 指向的目录**必须不存在**，否则 pytest 会先 `rmtree` 它、同样会触发守卫（`tmp_pytest\` 已在 `.gitignore` 里）。
 
-前端测试和构建（当前基线：**342 passed**，27 个文件；`tsc --noEmit` 与 `vite build` 通过）。
+前端测试和构建（当前基线：**415 passed**，35 个文件；`tsc --noEmit` 与 `vite build` 通过）。
 `npm test` **默认串行**（`--no-file-parallelism`），原因见下面的「核数」一段：
 
 ```powershell
@@ -129,7 +129,7 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 
 ## 后端测试范围
 
-后端测试位于 [backend/tests](../backend/tests/)（56 个 `test_*.py` + [fakes.py](../backend/tests/fakes.py) / [bili_fakes.py](../backend/tests/bili_fakes.py)，2026-11-04 E-05 落地后实测 **1393 passed**）：
+后端测试位于 [backend/tests](../backend/tests/)（57 个 `test_*.py` + [fakes.py](../backend/tests/fakes.py) / [bili_fakes.py](../backend/tests/bili_fakes.py)，2026-11-11 A-01 落地后实测 **1428 passed**）：
 
 > **数字必须自己数一遍**，不要只信 `-q` 的汇总行。逐文件规模用
 > `pytest backend/tests/<文件> -q -p no:cacheprovider --co` 取，各文件之和应**恰等于**全集
@@ -307,6 +307,8 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 
 28. **设置面板的分区**：从上到下应是「下载与存储 / 代理与网络 / 完成提醒 / B站 上传 / 运行环境」五个标题，每两个区之间有一条 1px 分隔线；量相邻两项的垂直间距 —— **同区约 16px，跨区明显更大**（1440 宽实测 62.5px）。把窗口拉到 390px：五区仍按同一顺序堆叠、不出现横向滚动条，且分区标题与字段标签要能一眼分开（标题更小、更淡）。用 Tab 走一遍，焦点应按视觉顺序逐项前进（分区只加语义，不改 Tab 顺序）。见 [ai/ui/010](../ai/ui/010-settings-panel-is-a-flat-list.md)。
 
+29. **拿一个非 YouTube 链接**（例如一条 B站 视频）去解析：应立刻得到「本工具只支持 YouTube 链接（youtube.com / youtu.be）。这个链接的站点是 bilibili.com，没有向它发起请求」——**不能**出现任何与 YouTube 策略有关的报错（`Unsupported URL`、`Requested format is not available` 之类），日志里也不该有那次对外请求。再用 `youtu.be/...`、`m.youtube.com/...`、`/shorts/...`、`music.youtube.com/...` 各试一条，都应正常解析（防止判定过窄误伤）。见 [A-01](../ai/feature/A-01-youtube-only.md)。
+
 修改 B站 上传时，另需：
 
 27. 设置面板的「B站 上传」区先看一次体检：**点一下右上角「重新体检」，按钮应变成「体检中…」并暂时不可点，结束后左边出现「上次体检 HH:MM:SS」**（结论没变时那是唯一能证明它跑过的痕迹）。再看：没装投稿工具时，条目必须显示**为什么不行 + 该怎么做**（要么一条 `winget install …` 命令，要么一个按钮），只报「没找到」不算通过。用 `where.exe biliup` 确认本机的那个 `biliup.exe` **不是 0 字节**（`Get-Item … | Select Length`）；若是 0 字节，界面应显示成**不通过**并给出「修复」按钮（`found=true` 不代表能用）。
@@ -325,7 +327,7 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 - 720p 自动降级底线失效。
 - 单视频失败原因被任务级聚合错误覆盖。
 - `throttledratelimit` 被重新默认打开，导致「每约 5 秒中断并重新 extract」的性能回退，见 [PLAN.md](../ai/perf/PLAN.md) §3.1。
-- 停滞看门狗的文案被改动后误命中 [is_media_stream_blocked_error](../backend/app/download/ytdlp_service.py#L710)，把停滞误分类成媒体流阻塞。
+- 停滞看门狗的文案被改动后误命中 [is_media_stream_blocked_error](../backend/app/download/ytdlp_service.py#L792)，把停滞误分类成媒体流阻塞。
 - aria2c 多连接在默认配置下被启用，推高 403 率。
 - Cookies 导入暴露敏感信息或擅自关闭浏览器。
 - JS 运行时探测退化成「只看文件是否存在」：那样「检测到 node 却解不出 n challenge」会重新变成不可诊断的状态。

@@ -18,11 +18,11 @@
 4. 同高度 HLS 单文件。
 5. 同高度单文件。
 
-`safari_hls` profile 会把同高度 HLS 单文件放到最前，见 [format_selector](../backend/app/download/ytdlp_formats.py#L9)。如果 ffmpeg 可用，后端允许 video+audio 合并并设置 `merge_output_format=mp4`；ffmpeg 不可用时会退化为单文件选择器，而需要合并的清晰度直接报错，见 [build_download_options](../backend/app/download/ytdlp_service.py#L474)。
+`safari_hls` profile 会把同高度 HLS 单文件放到最前，见 [format_selector](../backend/app/download/ytdlp_formats.py#L9)。如果 ffmpeg 可用，后端允许 video+audio 合并并设置 `merge_output_format=mp4`；ffmpeg 不可用时会退化为单文件选择器，而需要合并的清晰度直接报错，见 [build_download_options](../backend/app/download/ytdlp_service.py#L556)。
 
 ## 下载前预检测
 
-在实际下载前，`JobManager` 先调用 [prepare_download](../backend/app/download/ytdlp_service.py#L373) 让 yt-dlp 按当前 selector 选择计划下载格式。源视频清晰度匹配时不再额外 `extract_metadata`——这是上一轮性能修复的成果，见 [PLAN.md](../ai/perf/PLAN.md)。只有计划格式不可选时，才会再解析元数据并按降级原因分类。结果通过 [_apply_download_preparation](../backend/app/download/job_manager.py#L1025) 写入：
+在实际下载前，`JobManager` 先调用 [prepare_download](../backend/app/download/ytdlp_service.py#L455) 让 yt-dlp 按当前 selector 选择计划下载格式。源视频清晰度匹配时不再额外 `extract_metadata`——这是上一轮性能修复的成果，见 [PLAN.md](../ai/perf/PLAN.md)。只有计划格式不可选时，才会再解析元数据并按降级原因分类。结果通过 [_apply_download_preparation](../backend/app/download/job_manager.py#L1025) 写入：
 
 - `actual_width`
 - `actual_height`
@@ -129,7 +129,7 @@ yt-dlp 对「请求的语言不存在」是静默跳过（不报错），所以�
 
 ## 稳定下载策略
 
-默认策略是稳定优先，而不是并发优先。核心参数在 [ytdlp_service.py](../backend/app/download/ytdlp_service.py#L42) 和 [build_download_options](../backend/app/download/ytdlp_service.py#L474)：
+默认策略是稳定优先，而不是并发优先。核心参数在 [ytdlp_service.py](../backend/app/download/ytdlp_service.py#L42) 和 [build_download_options](../backend/app/download/ytdlp_service.py#L556)：
 
 - `continuedl=True`，保留 `.part` 断点续传。
 - `fragment_retries=20`、`file_access_retries=5`、`extractor_retries=5`。
@@ -139,7 +139,7 @@ yt-dlp 对「请求的语言不存在」是静默跳过（不报错），所以�
 - `http_chunk_size=16 MiB` 默认值。进度百分比不能用单个 chunk 的 `total_bytes` 当成分母；聚合器会结合计划文件大小计算，见 [实现文档](implementation.md#进度与平均速度)。
 - `throttledratelimit` **默认关闭**（`throttled_rate_kbps=0`）。它只按**单条流**的速度判定，低于阈值时 yt-dlp 会抛 `ThrottledDownload`（`ReExtractInfo` 子类），被其无计数重提取循环接住，表现为每约 5 秒中断并重新 extract 一次；并发越高，单流速度越低，越容易误触发。仅在并发 = 1 且确实需要「慢就换 fresh URL」时，用 `YTDL_THROTTLED_RATE_KBPS=32` 开启（不建议回到 64）。
 - 停滞看门狗：默认 90 秒内没有任何新增字节就抛出 `DownloadStalled`，让任务**可见地失败**而不是永久 `running`，见 [stall_guard.py](../backend/app/download/stall_guard.py)。判据是「历史最大字节是否被刷新」而不是「本轮是否增长」，因此能区分节流振荡（峰值从不刷新）与正常断点续传（恢复后会超过旧峰值）。`finished` 会重置基线，避免合并格式的视频流→音频流切换被误判。`DownloadStalled` 不会进入下一个 profile 重试，直接冒泡为失败。用 `YTDL_STALL_TIMEOUT_SECONDS=0` 可关闭。注意它依赖 yt-dlp 的 progress 回调：若完全阻塞在 socket 读而无回调，兜底仍是 `socket_timeout=30`。
-- aria2c（可选，默认关闭）：yt-dlp 内建 http 下载器是**单连接**，单条 URL 无法并行，因此 aria2c 是单视频任务唯一真实的提速手段。安装后仍需 `YTDL_ARIA2C_ENABLED=true` 才会启用，连接数由设置面板（界面上叫「单视频并发下载数（1–4）」）或 `YTDL_ARIA2C_CONNECTIONS` 控制（默认 2，上限 4）。**「启用」不等于「每次下载都走」**：`default_aria2c` 是 profile 链里的**第二个**，只有 `default` 因媒体流被挡（403 / 连接重置）、要求登录校验、或 JS 挑战解不出来而被放弃时才会轮到它（见 [_download_profiles](../backend/app/download/ytdlp_service.py#L819) 与 `should_try_next_profile`）；因此调大段数对本来就能成功的下载没有影响。另外 `--min-split-size` 是 16 MiB，**小于这个体积的单流不会被真正拆分**，此时调大段数同样没有效果。多连接是 YouTube 侧最敏感的触发条件，403/限速概率显著上升，出问题时应先把连接数降到 1 或关闭 aria2c。
+- aria2c（可选，默认关闭）：yt-dlp 内建 http 下载器是**单连接**，单条 URL 无法并行，因此 aria2c 是单视频任务唯一真实的提速手段。安装后仍需 `YTDL_ARIA2C_ENABLED=true` 才会启用，连接数由设置面板（界面上叫「单视频并发下载数（1–4）」）或 `YTDL_ARIA2C_CONNECTIONS` 控制（默认 2，上限 4）。**「启用」不等于「每次下载都走」**：`default_aria2c` 是 profile 链里的**第二个**，只有 `default` 因媒体流被挡（403 / 连接重置）、要求登录校验、或 JS 挑战解不出来而被放弃时才会轮到它（见 [_download_profiles](../backend/app/download/ytdlp_service.py#L901) 与 `should_try_next_profile`）；因此调大段数对本来就能成功的下载没有影响。另外 `--min-split-size` 是 16 MiB，**小于这个体积的单流不会被真正拆分**，此时调大段数同样没有效果。多连接是 YouTube 侧最敏感的触发条件，403/限速概率显著上升，出问题时应先把连接数降到 1 或关闭 aria2c。
 - 默认 worker 并发为 5，按**同时下载的视频数**计算（跨单视频任务和合集子项）；若追求稳定，可在设置面板或 `YTDL_YOUTUBE_MAX_PARALLEL_DOWNLOADS=1` 中降为 1。并发是视频级而不是流级：单视频任务只有 1 个 `JobItem`，因此**并发设置对单视频任务无效**。
 - 单个视频内部的视频流、音频流、字幕和缩略图之间不再插入 2–5 秒 `sleep_interval`；视频级节流由 worker 并发承担。解析和下载阶段的 player API 请求仍使用 `sleep_interval_requests=1.0`。
 
@@ -153,7 +153,7 @@ python scripts\bench_throttle_guard.py <临时目录> 64    # 节流守卫开启
 python scripts\bench_throttle_guard.py <临时目录> 0     # 关闭后的连续下载
 ```
 
-YouTube 媒体流 403 或连接中断时，`YtDlpService.download()` 会在同一清晰度下依次尝试 profile，见 [download](../backend/app/download/ytdlp_service.py#L554)：
+YouTube 媒体流 403 或连接中断时，`YtDlpService.download()` 会在同一清晰度下依次尝试 profile，见 [download](../backend/app/download/ytdlp_service.py#L636)：
 
 1. `default`
 2. `default_aria2c`，仅当显式启用 aria2c 且可执行文件存在
@@ -161,7 +161,7 @@ YouTube 媒体流 403 或连接中断时，`YtDlpService.download()` 会在同�
 4. `safari_hls`
 5. `chrome_default`
 
-媒体流阻断判断见 [is_media_stream_blocked_error](../backend/app/download/ytdlp_service.py#L710)。这类失败不会在下载中途自动降清晰度重下，任务中心会给出中文原因和可重启建议。
+媒体流阻断判断见 [is_media_stream_blocked_error](../backend/app/download/ytdlp_service.py#L792)。这类失败不会在下载中途自动降清晰度重下，任务中心会给出中文原因和可重启建议。
 
 ## 代理与网络出口
 
@@ -191,7 +191,7 @@ YouTube 媒体流 403 或连接中断时，`YtDlpService.download()` 会在同�
 
 ## JS 运行时与 n challenge
 
-YouTube 的 `n` 参数（nsig）需要跑 JS 才能解出来，这是**登录态取数路径的必需项**。相关实现在 [ytdlp_service.py](../backend/app/download/ytdlp_service.py#L187) 的运行时探测，以及 [runtime_env.py](../backend/app/host/runtime_env.py#L58) 的环境净化。
+YouTube 的 `n` 参数（nsig）需要跑 JS 才能解出来，这是**登录态取数路径的必需项**。相关实现在 [ytdlp_service.py](../backend/app/download/ytdlp_service.py#L1036) 的运行时探测，以及 [runtime_env.py](../backend/app/host/runtime_env.py#L58) 的环境净化。
 
 探测顺序是「显式 `js_runtime_path` → Deno → Node」，其中 `js_runtime_path` 来自设置面板或环境变量 **`YTDL_JS_RUNTIME_PATH`**（历史上文档把它写成 `YTDL_JS_RUNTIME`，实测那个名字设了不生效，见 [006](../ai/bug-fix/006-proxy-is-not-configurable.md) 的遗留项）。探测**不只判断文件存在，而是真的用与 yt-dlp 相同的权限模型跑一次**：
 
@@ -236,7 +236,7 @@ Cookies 用于合法账号态、年龄确认或 bot 校验场景。**只有一�
 - `YTDL_YOUTUBE_VISITOR_DATA`
 - `YTDL_YOUTUBE_PO_BROWSER_PATH`
 
-这些值只传给 yt-dlp extractor 或 provider，不在诊断接口中回显原文。诊断只返回是否已配置，以及可用的 impersonation client 列表，见 [get_dependency_status](../backend/app/download/ytdlp_service.py#L290)。
+这些值只传给 yt-dlp extractor 或 provider，不在诊断接口中回显原文。诊断只返回是否已配置，以及可用的 impersonation client 列表，见 [get_dependency_status](../backend/app/download/ytdlp_service.py#L368)。
 
 ## aria2c fallback
 
@@ -245,7 +245,7 @@ Cookies 用于合法账号态、年龄确认或 bot 校验场景。**只有一�
 - `YTDL_ARIA2C_ENABLED=true`
 - 系统 PATH 或 `YTDL_ARIA2C_PATH` 能找到 aria2c
 
-连接数参数来自 `aria2c_connections`（默认 2，上限 4，可在设置面板修改），参数拼装见 [_aria2c_args](../backend/app/download/ytdlp_service.py#L832)。该能力给单视频提供多连接下载，但多连接会显著提高 YouTube 风控面，因此默认关闭；诊断接口返回 `aria2c_available`、`aria2c_enabled`、`aria2c_path`、`aria2c_connections` 便于判断当前是否真的生效。
+连接数参数来自 `aria2c_connections`（默认 2，上限 4，可在设置面板修改），参数拼装见 [_aria2c_args](../backend/app/download/ytdlp_service.py#L914)。该能力给单视频提供多连接下载，但多连接会显著提高 YouTube 风控面，因此默认关闭；诊断接口返回 `aria2c_available`、`aria2c_enabled`、`aria2c_path`、`aria2c_connections` 便于判断当前是否真的生效。
 
 ## 失败排查顺序
 

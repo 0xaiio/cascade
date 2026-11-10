@@ -99,12 +99,11 @@
 ### A. 解析与选择（输入侧）
 
 #### A-01　非 YouTube 链接：明确拒绝，而不是给出莫名报错
-- [ ] **未完成** · 状态：候选　优先级：P2
-- 现状：`POST /api/analyze`（`backend/app/api/routers/analyze.py`）不做站点校验，直接交给 yt-dlp；而全部下载策略（anti403 profile 链、PO token、分辨率档位）都是 YouTube 专属（`backend/app/download/ytdlp_service.py` 的 profile 链、`ytdlp_formats.py` 的选择器）。
-- 痛点：拿 bilibili / 抖音 / 播客 RSS 的链接进来，会得到一句与 YouTube 策略无关的报错，排障手册里查不到。
-- 建议：解析入口加站点判定，非 YouTube 域直接返回「本工具只支持 YouTube」。
-- 判据：项目名与全部策略都是 YouTube 专属；**不做站点泛化**（§5），但至少要拒绝得体。
-- 风险：正则漏判会误伤 `youtu.be`、`music.youtube.com`、`youtube.com/shorts`。实施时以 yt-dlp 的 `extractor_key` 判定优先于 URL 正则。
+- [x] **已完成**（2026-11-11 · [A-01](../feature/A-01-youtube-only.md)）　状态：已实现　优先级：P2
+- 结论：判定分两层，**第一层在发请求之前**。主机名白名单（`youtube.com` 及其子域 / `youtu.be` / `youtube-nocookie.com`，协议 http/https）不合规就直接 400，一次网络请求都不发；拿到页面后再用 yt-dlp 的 `extractor_key` 复核（短链、跳转、代理能让主机名说谎）。
+- 文案三段：只支持 YouTube + 链接的站点是什么 + **没有向它发起请求** —— 少了最后一句，用户会去查网络、代理与 cookies。
+- 反向判据同样重要：11 条合法形态（短链 / 移动端 / 音乐 / shorts / live / 合集 / nocookie）一个都不能误伤，否则故障表现为「工具坏了」，比原来的报错更难查。
+- 验证：`test_analyze_scope.py` 35 条（含「替身一次都没被调用」与 `extractor_key` 两层判定）；后端全量 1428 passed。
 
 #### A-02　playlist 条目：支持按序号范围 / 关键词过滤 / 反选
 - [ ] **未完成** · 状态：候选　优先级：P2

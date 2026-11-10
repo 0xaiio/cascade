@@ -21,7 +21,7 @@ PlantUML 源文件：[system-context.puml](diagrams/system-context.puml)。
 | 启动入口 | 解析命令行、启动前做端口预检并识别占用者、把实际监听地址打印出来，再交给 uvicorn。 | [__main__.py](../backend/app/__main__.py#L64)、[dev_server.py](../backend/app/host/dev_server.py#L44) |
 | 任务调度与执行 | 队列、worker、暂停/重启/删除、进度聚合、错误分类与终态收敛。 | [JobManager](../backend/app/download/job_manager.py#L54) |
 | SQLite | 存储任务、子任务、设置和事件。 | [models.py](../backend/app/contracts/models.py#L27)、[db.py](../backend/app/infra/db.py#L27) |
-| yt-dlp 服务 | 元数据解析、下载参数构建、profile 重试、格式选择和依赖诊断。 | [YtDlpService](../backend/app/download/ytdlp_service.py#L183) |
+| yt-dlp 服务 | 元数据解析、下载参数构建、profile 重试、格式选择和依赖诊断。 | [YtDlpService](../backend/app/download/ytdlp_service.py#L261) |
 | 停滞看门狗 | 观测 progress 回调，把静默卡死转为可见失败。 | [StallGuard](../backend/app/download/stall_guard.py#L32) |
 | 代理与连通性自检 | 解析代理来源（显式 > 系统 > 环境变量）并**真的发一次请求**验证连通；cookies 体检则把离线格式检查与 `LOGGED_IN` 探针合成一个结论。 | [proxy.py](../backend/app/host/proxy.py#L169)、[connectivity.py](../backend/app/host/connectivity.py#L73)、[cookie_health.py](../backend/app/host/cookie_health.py#L234) |
 | 错误翻译与自检留痕 | 把异常链翻译成「诊断 / 原因 / 建议」三段可执行结论；启动时摘除会打坏 JS 运行时的宿主环境变量并留痕。 | [error_advice.py](../backend/app/download/error_advice.py#L116)、[runtime_env.py](../backend/app/host/runtime_env.py#L58) |

@@ -2014,7 +2014,11 @@ components:
         url:
           type: string
           minLength: 1
-          description: Video or playlist URL to analyze.
+          description: >-
+            Video or playlist URL to analyze. YouTube only: youtube.com (and its
+            subdomains), youtu.be and youtube-nocookie.com over http/https.
+            Any other site is rejected with 400 before a network request is made,
+            and the response explains which site was refused.
           example: https://www.youtube.com/watch?v=dQw4w9WgXcQ
         cookies_enabled:
           type: boolean
