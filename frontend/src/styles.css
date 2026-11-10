@@ -519,20 +519,93 @@ select:focus {
   color: #657187;
 }
 
+/* 解析结果面板是 grid item，默认 `min-width: auto` 会让它不许被压窄；而表里的
+   `table { min-width: 620px }`（主栏宽表的既定规则）于是把整列撑到 654px ——
+   390px 窗口实测整页横向溢出 **282px**（旧产物同样 282px，不是 A-02 引入的）。
+   把它归零，超出的部分交给 `.table-wrap` 自己横向滚动，页面不再跟着变宽。 */
+.analysis-panel {
+  min-width: 0;
+}
+
 .table-wrap {
   margin-top: 18px;
   overflow-x: auto;
 }
 
-.table-actions {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
+/* playlist 条目的批量选择工具条（A-02）。两行：选择动作（全选 / 反选 / 范围）与
+   筛选 + 计数。每一行都 flex-wrap —— 390px 下这个面板只有 354px，四条控件排不进一行。 */
+.playlist-toolbar {
+  display: grid;
+  gap: 8px;
   margin-bottom: 10px;
+}
+
+.playlist-toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.playlist-toolbar .ghost-button {
+  min-height: 32px;
+  height: auto;
+  padding: 4px 10px;
+  font-size: 13px;
+}
+
+.playlist-range,
+.playlist-filter {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.playlist-field-label {
+  color: #334155;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+/* `input` 的全局规则是 width: 100%，放进 flex 行会各占一整行 —— 这里必须收回固定宽度。 */
+.playlist-range-input {
+  width: 132px;
+}
+
+.playlist-filter-input {
+  width: 176px;
+}
+
+/* 计数贴右：数字要与「显示了几行」分开，否则会被读成第五个控件。 */
+.playlist-count {
+  margin-left: auto;
   color: #657187;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.playlist-error,
+.playlist-note {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.playlist-error {
+  color: #b42318;
+  font-weight: 700;
+}
+
+.playlist-note {
+  color: #0e7a56;
+}
+
+.playlist-empty {
+  padding: 12px;
+  color: #657187;
+  text-align: center;
 }
 
 table {

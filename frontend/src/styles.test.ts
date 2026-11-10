@@ -193,4 +193,19 @@ describe("styles.css · 源文不变式", () => {
     expect(notice).not.toMatch(/white-space:\s*nowrap/);
     expect(notice).not.toMatch(/text-overflow\s*:/);
   });
+
+  // 解析结果面板是 grid item，默认 `min-width: auto` 不许被压窄；而表里有
+  // `table { min-width: 620px }`（主栏宽表的既定规则）。两者叠加会把整列顶到 654px，
+  // `.table-wrap` 的 `overflow-x: auto` 因此永远不触发 —— 390px 下整页横向溢出 282px
+  // （ai/ui/012）。jsdom 量不出布局，所以盯住让容器「可以被压窄」的那条声明本身。
+  test("lets the analysis panel shrink so its table scrolls instead of the page", () => {
+    const bodies = cssRuleBodies(stylesCss);
+    const panel = bodies.get(".analysis-panel") ?? [];
+    expect(panel.length).toBeGreaterThan(0);
+    expect(panel.join("\n")).toMatch(/min-width:\s*0/);
+
+    // 表格容器必须是滚动容器，否则被压窄之后内容会直接溢出到面板外。
+    const wrap = bodies.get(".table-wrap") ?? [];
+    expect(wrap.join("\n")).toMatch(/overflow-x:\s*auto/);
+  });
 });
