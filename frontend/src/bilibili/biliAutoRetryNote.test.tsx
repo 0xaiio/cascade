@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { BiliAutoRetryNote, formatCountdown } from "./BiliAutoRetryNote";
+import { BiliAutoRetryNote, attemptsLabel, formatCountdown } from "./BiliAutoRetryNote";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import type { BiliAutoRetry } from "../contracts/types";
 
@@ -26,7 +26,7 @@ function retry(overrides: Partial<BiliAutoRetry> = {}): BiliAutoRetry {
 }
 
 describe("自动重试的倒计时", () => {
-  test("等待中：只剩精确倒计时与已尝试次数，不再重复上次那句话", () => {
+  test("等待中：只剩精确倒计时与已重试次数，不再重复上次那句话", () => {
     // `last_message` 与上面那一行说的是同一件事（「合集：等待 B 站视频审核后进行归集」），
     // 拼在一起等于把刚精简掉的长句加回来 —— 这一行只回答「还有多久」。
     render(
@@ -41,7 +41,7 @@ describe("自动重试的倒计时", () => {
     );
 
     expect(screen.getByText(/下一次自动重试 [0-9]{2}:[0-9]{2}/)).toBeInTheDocument();
-    expect(screen.getByText(/已尝试 2 次/)).toBeInTheDocument();
+    expect(screen.getByText(/已重试 2 次/)).toBeInTheDocument();
     expect(screen.queryByText(/排队审核/)).not.toBeInTheDocument();
   });
 
@@ -68,14 +68,66 @@ describe("自动重试的倒计时", () => {
     }
   });
 
+  test("到点了但还没轮到它跑：说「即将自动重试」，不写 00:00", () => {
+    // 用户报的现场：`next_attempt_at` 已经过去，界面写着「下一次自动重试 00:00」，
+    // 读起来就是「到点了却不重试」。这一档不是倒计时，是**状态**。
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-03T12:00:10Z"));
+    try {
+      render(
+        <BiliAutoRetryNote
+          retry={retry({ attempts: 0, next_attempt_at: "2026-11-03T12:00:00Z" })}
+        />
+      );
+      expect(screen.getByText(/^即将自动重试/)).toBeInTheDocument();
+      // 一次都没试过这件事必须写出来 —— 否则用户不知道机器到底动没动。
+      expect(screen.getByText(/还没重试过/)).toBeInTheDocument();
+      expect(screen.queryByText(/00:00/)).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("到点了、且已经试过一次：写「已重试 1 次」，同样不写 00:00", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-03T12:00:10Z"));
+    try {
+      render(
+        <BiliAutoRetryNote
+          retry={retry({ attempts: 1, next_attempt_at: "2026-11-03T12:00:00Z" })}
+        />
+      );
+      expect(screen.getByText("即将自动重试 · 已重试 1 次")).toBeInTheDocument();
+      expect(screen.queryByText(/00:00/)).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("还有时间：倒计时后面跟着「已重试 N 次」", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-03T12:00:00Z"));
+    try {
+      render(
+        <BiliAutoRetryNote
+          retry={retry({ attempts: 1, next_attempt_at: "2026-11-03T12:00:59Z" })}
+        />
+      );
+      expect(screen.getByText("下一次自动重试 00:59 · 已重试 1 次")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("没有在等（null）时什么都不显示 —— 不显示比显示成「等待中」更安静", () => {
     const { container } = render(<BiliAutoRetryNote retry={null} />);
     expect(container.textContent).toBe("");
   });
 
-  test("正在问平台时说「自动重试中…」", () => {
-    render(<BiliAutoRetryNote retry={retry({ state: "running" })} />);
-    expect(screen.getByText("自动重试中…")).toBeInTheDocument();
+  test("正在问平台时说「第几次」—— 那个数字是手上这一次，不是已经跑完的次数", () => {
+    render(<BiliAutoRetryNote retry={retry({ state: "running", attempts: 1 })} />);
+    // `attempts` 是**跑完才加**的，所以正在跑的是第 2 次。
+    expect(screen.getByText("正在自动重试（第 2 次）…")).toBeInTheDocument();
   });
 
   test("成了之后说结果，且**不再说倒计时**", () => {
@@ -99,6 +151,19 @@ describe("自动重试的倒计时", () => {
     expect(screen.getByText(/先停在这里/)).toBeInTheDocument();
     expect(screen.getByText(/视频没能加进去/)).toBeInTheDocument();
     expect(screen.queryByText(/下一次自动重试/)).not.toBeInTheDocument();
+  });
+});
+
+describe("「重试过几次」这句话", () => {
+  test("0 次要写出来（「还没重试过」），不能留空", () => {
+    // 原先 `attempts === 0` 时这一段整个不渲染，于是「一次都没试过」在界面上不可见。
+    expect(attemptsLabel(0)).toBe("还没重试过");
+    expect(attemptsLabel(1)).toBe("已重试 1 次");
+    expect(attemptsLabel(12)).toBe("已重试 12 次");
+  });
+
+  test("负数按 0 处理（防御：服务端不该给负数，但读模型是跨进程的）", () => {
+    expect(attemptsLabel(-3)).toBe("还没重试过");
   });
 });
 

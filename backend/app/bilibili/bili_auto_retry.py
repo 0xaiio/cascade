@@ -48,10 +48,18 @@ logger = logging.getLogger(__name__)
 #: 审核超过十几分钟还没放行，等下一次和现在没有区别。
 MAX_BACKOFF_FACTOR = 16
 
-#: 调度循环一次睡眠的**最大**时长（秒）。睡一整轮（最长 300 秒）就听不到设置的变化：
-#: 用户把间隔从 300 秒改成 10 秒、或者干脆关掉开关，机器仍会按旧值睡完这一轮。
+#: 调度循环一次睡眠的**最大**时长（秒）。睡一整轮就听不到设置的变化：
+#: 用户把间隔改小、或者干脆关掉开关，机器仍会按旧值睡完这一轮。
 #: 分段睡让改动在 1 秒内生效，代价只是每秒醒一次（可忽略）。
 POLL_SLICE_SECONDS = 1.0
+
+#: 扫库的节奏（秒）。**它与 `interval_seconds` 是两件事**：
+#: 后者决定「同一个目标多久被问一次」（退避的基数），这里决定「多久看一眼有没有到期的」。
+#:
+#: 原先两者共用同一次 sleep —— 而登记时 `next_attempt_at` 填的就是「现在」，循环却要睡满
+#: 一个 interval（默认 60 秒）才扫，于是界面上整整一分钟挂着 **「下一次自动重试 00:00」**：
+#: 用户读到的是「到点了为什么不重试」。扫库只查本地那张小表、不发任何请求，5 秒一次可以忽略。
+SWEEP_SECONDS = 5.0
 
 
 @dataclass(frozen=True)
@@ -352,20 +360,29 @@ class BiliAutoRetryScheduler:
             except Exception:  # noqa: BLE001 - 一轮失败不能带走整个调度器
                 logger.exception("bili 自动重试这一轮失败了")
 
-    async def _sleep_one_round(self) -> None:
-        """睡到下一轮，**分段**睡并每段重读间隔。
+    def _round_seconds(self) -> float:
+        """这一轮睡多久：**扫库节奏**，且不超过用户设的轮询间隔。
 
-        为什么要分段：`interval_seconds` 最长 300 秒，而设置面板可以随时把它改小
-        （或者把开关关掉）。一觉睡满 300 秒就意味着「改完立刻生效」是句空话 ——
-        用户改完盯着界面，机器还要再等五分钟才按新值跑。分段到 1 秒后，
+        `interval_seconds` 现在只决定「同一个目标多久被问一次」（退避的基数），
+        不再决定睡多久 —— 否则间隔设成 300 秒时，一个刚登记的目标要等五分钟才被看见。
+        间隔比扫库节奏还短时按间隔睡：没有理由比「每问一次平台」醒得更勤。
+        """
+        return max(POLL_SLICE_SECONDS, min(float(self.policy.interval_seconds), SWEEP_SECONDS))
+
+    async def _sleep_one_round(self) -> None:
+        """睡到下一轮扫库，**分段**睡并每段重读。
+
+        为什么要分段：三个旋钮（开关 / 间隔 / 上限）都能在设置面板里随时改，
+        而扫库节奏跟着间隔走（取 min）。一觉睡满就意味着「改完立刻生效」是句空话 ——
+        用户改完盯着界面，机器还要再等一整轮才按新值跑。分段到 1 秒后，
         改动在下一段就被读到；每秒醒一次的代价可以忽略。
         """
         slept = 0.0
         while not self._stopping:
-            interval = max(float(self.policy.interval_seconds), POLL_SLICE_SECONDS)
-            if slept >= interval:
+            round_seconds = self._round_seconds()
+            if slept >= round_seconds:
                 return
-            piece = min(POLL_SLICE_SECONDS, interval - slept)
+            piece = min(POLL_SLICE_SECONDS, round_seconds - slept)
             await self._sleep(piece)
             slept += piece
 

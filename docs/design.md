@@ -93,7 +93,7 @@
 | [bili_http.py](../backend/app/bilibili/bili_http.py#L66) | L4 基础设施 | B站 请求的 HTTP 接缝：标准库 `urllib` 实现、**强制直连（清空 ProxyHandler）**、4xx/5xx 也带回正文与 `Set-Cookie`。 | 不知道任何端点的语义（端点与参数在 `bili_api` / `bili_auth`）。 |
 | [paths.py](../backend/app/common/paths.py#L7) / [log_safety.py](../backend/app/common/log_safety.py#L20) | L5 纯工具 | 文件名安全化、日志敏感信息清洗。 | 无项目内依赖，可单独测试。 |
 | [time.py](../backend/app/common/time.py#L17) | L5 纯工具 | 时间的两种形态（aware / naive）互相收敛。SQLite 不存时区，读回来的一律是 naive 的 UTC —— 与 `utc_now()`（aware）直接比较会抛「can't compare offset-naive and offset-aware datetimes」。 | 无项目内依赖。**一个实现三处共用**（`contracts/schemas.py` 序列化、`download/job_read_model.py` 算已用时、`bilibili/bili_auto_retry.py` 排下一次），各自抄一份就会在某一处漏掉。 |
-| [bili_auto_retry.py](../backend/app/bilibili/bili_auto_retry.py#L47) | L2 编排 | 「等平台放行」的**判据与调度**：退避计算、尝试上限、限流加倍、待办落库（`bili_auto_retry` 表），以及那个到点问一次平台的调度循环。调度器**每轮现取策略**（开关 / 间隔 / 上限改了立刻生效，睡眠按 1 秒分段），不要求重启。 | **只做调度**：问平台这件事交给 `BiliManager.retry_season` / `retry_upload`（手动按钮用的就是它），所以自动与手动走同一套业务逻辑；不自己发任何平台请求、不判定「审核过没过」（那是平台回读说的）。 |
+| [bili_auto_retry.py](../backend/app/bilibili/bili_auto_retry.py#L47) | L2 编排 | 「等平台放行」的**判据与调度**：退避计算、尝试上限、限流加倍、待办落库（`bili_auto_retry` 表），以及那个到点问一次平台的调度循环。调度器**每轮现取策略**（开关 / 间隔 / 上限改了立刻生效，睡眠按 1 秒分段），不要求重启。**扫库节奏（`SWEEP_SECONDS` = 5 s）与「问平台的间隔」是两件事**：后者由退避基数决定同一个目标多久被问一次，前者只决定多久看一眼有没有到期的 —— 两者共用一次 sleep 时，登记后要睡满一个 interval 才扫，界面就会挂着「下一次自动重试 00:00」（见 [ai/ui/013](../ai/ui/013-the-countdown-says-zero-and-nothing-happens.md)）。 | **只做调度**：问平台这件事交给 `BiliManager.retry_season` / `retry_upload`（手动按钮用的就是它），所以自动与手动走同一套业务逻辑；不自己发任何平台请求、不判定「审核过没过」（那是平台回读说的）。 |
 
 ## 前端组件边界
 

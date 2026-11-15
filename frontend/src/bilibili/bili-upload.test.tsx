@@ -1470,7 +1470,7 @@ describe("App · B站 稿件明细与重试", () => {
 
     await screen.findByRole("button", { name: "重试归集" });
     expect(screen.getByText(/下一次自动重试/)).toBeInTheDocument();
-    expect(screen.getByText(/已尝试 2 次/)).toBeInTheDocument();
+    expect(screen.getByText(/已重试 2 次/)).toBeInTheDocument();
     // 手动按钮**照旧在**：自动重试是加法，不是替换。
     expect(screen.getByRole("button", { name: "重试归集" })).toBeEnabled();
   });

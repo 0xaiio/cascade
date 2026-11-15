@@ -14,6 +14,7 @@ import pytest
 from sqlmodel import Session
 
 from app.bilibili.bili_auto_retry import (
+    SWEEP_SECONDS,
     AutoRetryPolicy,
     BiliAutoRetryScheduler,
     apply_decision,
@@ -452,10 +453,39 @@ async def test_the_scheduler_reads_the_policy_on_every_tick(engine):
     assert row.attempts == 3
 
 
-async def test_a_shortened_interval_takes_effect_mid_sleep(engine):
-    """间隔从 300 秒改成 5 秒时，**这一觉就该只睡 5 秒**，不用等旧的 300 秒走完。
+async def test_the_sweep_cadence_does_not_follow_the_poll_interval(engine):
+    """**扫库节奏与「问平台的间隔」是两件事。**
 
-    否则「改完立刻生效」是句空话：用户改小间隔后还要再等五分钟。
+    用户报的现象：刚投稿完，界面写着「下一次自动重试 00:00」并持续一分钟。
+    根因是两者共用同一次 sleep —— 登记时 `next_attempt_at` 就是「现在」，
+    而循环要睡满一整个 interval（默认 60 秒）才扫一次，于是「到点了却不重试」。
+    间隔设成 300 秒时，这个空窗会变成五分钟。
+    """
+    calls: list[float] = []
+
+    async def sleeper(seconds: float) -> None:
+        calls.append(seconds)
+
+    scheduler = BiliAutoRetryScheduler(
+        engine,
+        lambda: AutoRetryPolicy(interval_seconds=300),
+        retry_season=lambda target_id: _Outcome(season=_Season("pending")),
+        retry_upload=lambda target_id: _Outcome(upload=_Upload("failed")),
+        sleeper=sleeper,
+    )
+    await scheduler._sleep_one_round()
+
+    # 一轮 **5 秒**（SWEEP_SECONDS），而不是 300。
+    assert sum(calls) == pytest.approx(SWEEP_SECONDS)
+    # 仍然分段：睡满一整轮就听不到设置的变化。
+    assert max(calls) <= 1.0
+
+
+async def test_a_shortened_interval_takes_effect_mid_sleep(engine):
+    """间隔改小之后，**这一觉就该按新值收**，不用把旧的走完。
+
+    扫库节奏取 `min(间隔, 5 秒)`，所以只有间隔短于 5 秒时才看得出这个机制 ——
+    这里用 300 → 2 来验：改完在下一段（1 秒）就被读到，整轮 2 秒收尾。
     """
     holder = {"policy": AutoRetryPolicy(interval_seconds=300)}
     calls: list[float] = []
@@ -463,7 +493,7 @@ async def test_a_shortened_interval_takes_effect_mid_sleep(engine):
     async def sleeper(seconds: float) -> None:
         calls.append(seconds)
         if len(calls) == 1:
-            holder["policy"] = AutoRetryPolicy(interval_seconds=5)
+            holder["policy"] = AutoRetryPolicy(interval_seconds=2)
 
     scheduler = BiliAutoRetryScheduler(
         engine,
@@ -474,8 +504,7 @@ async def test_a_shortened_interval_takes_effect_mid_sleep(engine):
     )
     await scheduler._sleep_one_round()
 
-    assert sum(calls) == pytest.approx(5.0)
-    # 每一段都不超过 1 秒：睡满一整轮就听不到设置了。
+    assert sum(calls) == pytest.approx(2.0)
     assert max(calls) <= 1.0
 
 

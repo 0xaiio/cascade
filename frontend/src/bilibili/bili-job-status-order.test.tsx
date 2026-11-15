@@ -218,16 +218,16 @@ describe("视频状态提示区 · 倒计时", () => {
       );
 
       // 合集那一处：还剩 2 分钟；字幕那一处：还剩 35 秒。**两处都精确到秒**。
-      expect(screen.getByText("下一次自动重试 02:00")).toBeInTheDocument();
-      expect(screen.getByText("下一次自动重试 00:35")).toBeInTheDocument();
+      expect(screen.getByText("下一次自动重试 02:00 · 还没重试过")).toBeInTheDocument();
+      expect(screen.getByText("下一次自动重试 00:35 · 还没重试过")).toBeInTheDocument();
       // 原来那句含糊话不该再出现。
       expect(screen.queryByText(/不到 1 分钟/)).not.toBeInTheDocument();
 
       act(() => {
         vi.advanceTimersByTime(1000);
       });
-      expect(screen.getByText("下一次自动重试 01:59")).toBeInTheDocument();
-      expect(screen.getByText("下一次自动重试 00:34")).toBeInTheDocument();
+      expect(screen.getByText(/下一次自动重试 01:59/)).toBeInTheDocument();
+      expect(screen.getByText(/下一次自动重试 00:34/)).toBeInTheDocument();
       expect(container.querySelectorAll(".bili-auto-retry")).toHaveLength(2);
     } finally {
       vi.useRealTimers();
