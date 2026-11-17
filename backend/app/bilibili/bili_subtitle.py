@@ -22,6 +22,7 @@ import html
 import json
 import logging
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -231,11 +232,12 @@ def drop_transition_cues(cues: list[Cue]) -> list[Cue]:
     return kept
 
 
-def to_bcc(cues: list[Cue]) -> str:
-    """把 cue 列表序列化成 B站 的 BCC（JSON 字符串）。
+def to_bcc_entries(entries: Sequence[tuple[float, float, str]]) -> str:
+    """把 `(start, end, content)` 序列序列化成 B站 的 BCC。
 
-    `from` / `to` 是**秒**（浮点），这是 BCC 与 SRT 最大的差别 —— 传错单位会让
-    整条字幕挤在开头几秒。
+    BCC 的**唯一结构**在这里：`from` / `to` 是秒（不是毫秒），`location=2` 表示底部，
+    样式常量取自播放器默认值。双语字幕只是把两行放进同一个 `content`，
+    因此复用本函数而不是另写一份 JSON 结构 —— 两处结构迟早会漂移。
     """
     payload = {
         "font_size": BCC_FONT_SIZE,
@@ -244,11 +246,16 @@ def to_bcc(cues: list[Cue]) -> str:
         "background_color": BCC_BACKGROUND_COLOR,
         "Stroke": BCC_STROKE,
         "body": [
-            {"from": round(cue.start, 3), "to": round(cue.end, 3), "location": BCC_LOCATION, "content": cue.content}
-            for cue in cues
+            {"from": round(start, 3), "to": round(end, 3), "location": BCC_LOCATION, "content": content}
+            for start, end, content in entries
         ],
     }
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+def to_bcc(cues: list[Cue]) -> str:
+    """把 cue 列表序列化成 B站 的 BCC（JSON 字符串）。见 `to_bcc_entries`。"""
+    return to_bcc_entries([(cue.start, cue.end, cue.content) for cue in cues])
 
 
 def load_bcc(path: Path) -> tuple[str, int]:
