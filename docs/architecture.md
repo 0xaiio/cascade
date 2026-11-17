@@ -17,7 +17,7 @@ PlantUML 源文件：[system-context.puml](diagrams/system-context.puml)。
 | 容器 | 职责 | 主要入口 |
 | --- | --- | --- |
 | React/Vite 前端 | 解析表单、下载选项、任务中心、cookies 操作和设置面板。 | [App.tsx](../frontend/src/App.tsx)、[api.ts](../frontend/src/shared/api.ts#L40) |
-| FastAPI 后端 | HTTP API、SSE、任务调度、SQLite 持久化、调用 yt-dlp。 | [create_app](../backend/app/main.py#L40) |
+| FastAPI 后端 | HTTP API、SSE、任务调度、SQLite 持久化、调用 yt-dlp。 | [create_app](../backend/app/main.py#L43) |
 | 启动入口 | 解析命令行、启动前做端口预检并识别占用者、把实际监听地址打印出来，再交给 uvicorn。 | [__main__.py](../backend/app/__main__.py#L64)、[dev_server.py](../backend/app/host/dev_server.py#L44) |
 | 任务调度与执行 | 队列、worker、暂停/重启/删除、进度聚合、错误分类与终态收敛。 | [JobManager](../backend/app/download/job_manager.py#L54) |
 | SQLite | 存储任务、子任务、设置和事件。 | [models.py](../backend/app/contracts/models.py#L27)、[db.py](../backend/app/infra/db.py#L27) |

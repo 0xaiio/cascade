@@ -12,7 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 # 两处各写一遍字面量，改了一处就会出现「界面显示的地址和实际请求的地址不一样」。
 DEFAULT_TRANSLATION_BASE_URL = "http://127.0.0.1:8080/v1"
 DEFAULT_TRANSLATION_MODEL = "local"
-DEFAULT_TRANSLATION_TIMEOUT_SECONDS = 120.0
+DEFAULT_TRANSLATION_TIMEOUT_SECONDS = 300.0
 
 
 def default_download_concurrency() -> int:
@@ -109,7 +109,7 @@ class AppSettings(BaseSettings):
     # 把凭据写进契约或界面只会让人误以为可以调外部服务。
     translation_base_url: str = DEFAULT_TRANSLATION_BASE_URL
     translation_model: str = DEFAULT_TRANSLATION_MODEL
-    # 单次请求的等待上限。长字幕分块后单块只有几十条，120 秒足够本地模型跑完。
+    # 单次请求的等待上限。本机 8B 模型实测约 3.8 token/s，单块需要几十秒；300 秒是「不会误判超时」与「不会永久挂住」之间的折中。
     translation_timeout_seconds: float = Field(default=DEFAULT_TRANSLATION_TIMEOUT_SECONDS, ge=1)
 
     @property

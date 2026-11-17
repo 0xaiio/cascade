@@ -44,6 +44,7 @@ export function JobQueue({
   onOpenItemFolder,
   onOpenSourcePage,
   onOpenSubtitle,
+  onTranslateSubtitle,
   onOpenVideoPage,
   onPause,
   onPlay,
@@ -84,6 +85,8 @@ export function JobQueue({
    * 动作只有一个 —— 弹系统的「打开方式」，见 `SubtitleOpenButton`。
    */
   onOpenSubtitle: (jobId: string, itemId: string | null) => MaybePromise;
+  /** 把这一条的非中文字幕译为中文。入口紧贴「打开字幕」，不另设工具栏按钮。 */
+  onTranslateSubtitle: (jobId: string, itemId: string) => void;
   onOpenVideoPage: (url: string) => void;
   onPause: (jobId: string) => void;
   onPlay: (jobId: string) => MaybePromise;
@@ -407,6 +410,17 @@ export function JobQueue({
                     onOpen={() => runLocalFileAction(jobLocalActionKey, () => onOpenSubtitle(job.id, null))}
                   />
                 )}
+                {!isPlaylist && primaryItem?.subtitle_path && (
+                  <button
+                    type="button"
+                    className="ghost-button subtitle-translate-button"
+                    title="把这条字幕译为中文"
+                    aria-label={`译为中文 ${title}`}
+                    onClick={() => primaryItem.id && onTranslateSubtitle(job.id, primaryItem.id)}
+                  >
+                    译为中文
+                  </button>
+                )}
                 <button
                   className="icon-button"
                   type="button"
@@ -620,6 +634,17 @@ export function JobQueue({
                             runLocalFileAction(itemLocalActionKey, () => onOpenSubtitle(job.id, item.id))
                           }
                         />
+                        {item.subtitle_path && (
+                          <button
+                            type="button"
+                            className="ghost-button subtitle-translate-button"
+                            title="把这条字幕译为中文"
+                            aria-label={`译为中文 ${item.title}`}
+                            onClick={() => onTranslateSubtitle(job.id, item.id)}
+                          >
+                            译为中文
+                          </button>
+                        )}
                         <button
                           className="icon-button item-action-button"
                           type="button"

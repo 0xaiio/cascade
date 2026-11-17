@@ -68,7 +68,8 @@ export function BiliUploadDialog({
   seasons,
   loadSeasons,
   onCancel,
-  onSubmit
+  onSubmit,
+  onTranslateSubtitle
 }: {
   prefill: BiliPrefill;
   isCollection: boolean;
@@ -84,6 +85,8 @@ export function BiliUploadDialog({
    */
   loadSeasons: () => void;
   onCancel: () => void;
+  /** 投稿前在这张表里就能发现「这条还能带中文字幕」。不传则整列不出现入口。 */
+  onTranslateSubtitle?: (jobId: string, itemId: string) => void;
   onSubmit: (values: {
     metadata: BiliMetadata;
     makeCover: boolean;
@@ -529,6 +532,21 @@ export function BiliUploadDialog({
             </span>
           </div>
 
+          {!isCollection && onTranslateSubtitle && prefill.items[0]?.item_id && (
+            <div className="field">
+              <span className="field-label">字幕</span>
+              <span>{prefill.items[0].subtitle || "—"}</span>
+              <button
+                type="button"
+                className="bili-inline-translate"
+                aria-label={`译为中文 ${prefill.items[0].source_title}`}
+                onClick={() => onTranslateSubtitle(prefill.job_id, prefill.items[0].item_id!)}
+              >
+                译为中文
+              </button>
+            </div>
+          )}
+
           {isCollection && (
             <div className="field">
               <span className="field-label">逐条预览（{prefill.items.length} 条）</span>
@@ -553,7 +571,19 @@ export function BiliUploadDialog({
                         <td>{previewTitle(item)}</td>
                         {/* 文案由服务端给（`BiliPrefillItem.subtitle`）：前端拼一遍就会出现
                             「界面说自动生成、后端写 ASR」这种两套说法。空串 = 还没有结论。 */}
-                        <td>{item.subtitle || "—"}</td>
+                        <td>
+                          {item.subtitle || "—"}
+                          {onTranslateSubtitle && item.item_id && !item.subtitle.includes("无字幕") && (
+                            <button
+                              type="button"
+                              className="bili-inline-translate"
+                              aria-label={`译为中文 ${item.source_title}`}
+                              onClick={() => onTranslateSubtitle(prefill.job_id, item.item_id!)}
+                            >
+                              译为中文
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

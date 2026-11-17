@@ -73,7 +73,7 @@ function timeoutError(url: string, timeoutMs: number, label?: string): ApiError 
   );
 }
 
-async function request<T>(
+export async function request<T>(
   url: string,
   init?: RequestInit,
   timeoutMs: number = REQUEST_TIMEOUT_MS,

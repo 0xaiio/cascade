@@ -1,4 +1,5 @@
 ﻿import { CheckCircle2, Info } from "lucide-react";
+import { SubtitleTranslateDialog } from "./translation/SubtitleTranslateDialog";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   ApiError,
@@ -172,6 +173,12 @@ export default function App() {
    * 一个绿对勾配「这次没有发起归集：视频还在审核」是自相矛盾的（见 ai/ui/007）。
    */
   const [biliNotice, setBiliNotice] = useState<{ text: string; tone: "ok" | "info" } | null>(null);
+  const [translationTarget, setTranslationTarget] = useState<{
+    jobId: string;
+    itemId: string | null;
+    title: string;
+  } | null>(null);
+  const [translationRefresh, setTranslationRefresh] = useState(0);
 
   function showBiliNotice(text: string | null, tone: "ok" | "info" = "ok") {
     setBiliNotice(text ? { text, tone } : null);
@@ -192,9 +199,17 @@ export default function App() {
 
   useEffect(() => {
     const source = new EventSource("/api/events");
-    source.onmessage = () => {
+    source.onmessage = (event) => {
       void listJobs().then(setJobs).catch(() => undefined);
       void refreshBiliUploads();
+      try {
+        const payload = JSON.parse(event.data) as { type?: string };
+        if (payload.type?.startsWith("subtitle_translation_")) {
+          setTranslationRefresh((value) => value + 1);
+        }
+      } catch {
+        // 非 JSON 事件忽略；进度还有轮询兜底，不值得为它报错。
+      }
     };
     return () => source.close();
   }, []);
@@ -782,6 +797,15 @@ export default function App() {
               onOpenSubtitle={(jobId, itemId) =>
                 itemId ? openJobItemSubtitle(jobId, itemId) : openJobSubtitle(jobId)
               }
+              onTranslateSubtitle={(jobId, itemId) => {
+                const job = jobs.find((entry) => entry.id === jobId);
+                const item = job?.items.find((entry) => entry.id === itemId);
+                setTranslationTarget({
+                  jobId,
+                  itemId,
+                  title: item?.title || job?.title || "视频"
+                });
+              }}
               onOpenVideoPage={openExternalPage}
               onPlay={(jobId) => playJobVideo(jobId)}
               onPlayItem={(jobId, itemId) => playJobItemVideo(jobId, itemId)}
@@ -829,6 +853,19 @@ export default function App() {
             resetSeasonList();
           }}
           onSubmit={handleBiliSubmit}
+          onTranslateSubtitle={(jobId, itemId) => {
+            const item = biliDialog.prefill.items.find((entry) => entry.item_id === itemId);
+            setTranslationTarget({ jobId, itemId, title: item?.source_title || biliDialog.prefill.job_title });
+          }}
+        />
+      )}
+      {translationTarget && (
+        <SubtitleTranslateDialog
+          jobId={translationTarget.jobId}
+          itemId={translationTarget.itemId}
+          title={translationTarget.title}
+          refreshToken={translationRefresh}
+          onClose={() => setTranslationTarget(null)}
         />
       )}
       <CompletionToasts toasts={toasts} onDismiss={dismiss} onPause={pause} onResume={resume} />

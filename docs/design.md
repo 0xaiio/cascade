@@ -67,6 +67,9 @@
 | [align.py](../backend/app/translation/align.py) | L3 领域 | 字幕翻译的分块、序号回填、**逐条对齐校验**与中文断行；解析复用 `bili_subtitle.parse_subtitle_text`（翻译态不合并重复条）。 | 不写时间轴（时间只从源 cue 复制）、不发请求、不读库、不拼文件路径。 |
 | [provider.py](../backend/app/translation/provider.py) | L3 领域 | 翻译服务的最小契约（`TranslationProvider` / `TranslationItem` / `TranslationReply`）与原始回复的类型化转换。 | 不做 HTTP、不知道本地模型服务地址；具体后端在步骤 2 的 `translation/local` 里。 |
 | [local.py](../backend/app/translation/local.py) | L3 领域 | 本机模型后端：OpenAI 兼容 `/v1/chat/completions`，标准库 `urllib`；401/429/5xx/超时/坏 JSON 各有可读结论；**只接受 loopback 地址**。 | 不重试、不读库、不管分块；不调外部服务（当前阶段的硬边界）。 |
+| [store.py](../backend/app/translation/store.py) | L3 领域 | 逐条译文 JSON 的原子读写（临时文件 + `os.replace`）。 | 不知道 DB、不渲染字幕、不发请求。 |
+| [render.py](../backend/app/translation/render.py) | L3 领域 | 把对齐结果渲染成 SRT / 原上译下对照 SRT；导出前强制过 `validate_alignment`。 | 不翻译、不改时间、不决定写在哪（路径由调用方给）。 |
+| [service.py](../backend/app/translation/service.py) | L2 编排 | 字幕翻译编排：建任务、后台分块执行、人工修订锁定、只补失败块、取消、导出、SSE 进度。 | 不写 HTTP 状态码；provider 由工厂现场构造，改设置下条请求生效。 |
 | [ytdlp_formats.py](../backend/app/download/ytdlp_formats.py#L9) | L3 领域 | 格式选择器、分辨率/大小/codec 提取、降级候选计算。 | 不导入 yt-dlp。 |
 | [disk_budget.py](../backend/app/download/disk_budget.py#L1) | L3 领域 | **磁盘预算判定**：按目标清晰度估单条 / 整批大小、量目标分区可用空间（向上找存在的祖先）、给出 `ok` / `insufficient` / `unknown` 三档结论与带数字的下一步。读不到只提示、绝不阻断；磁盘量取只在这一处。 | 不写库、不改任务状态、不删文件；不猜码率（flat playlist 没给 `filesize` 就如实返回 `unknown`），阻断与否由调用方按 `blocks` 决定。 |
 | [stall_guard.py](../backend/app/download/stall_guard.py#L32) | L3 领域 | 纯函数式停滞判定与 `DownloadStalled`。 | 不写库、不发布事件。 |

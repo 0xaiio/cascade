@@ -4,7 +4,7 @@
 
 ## 后端入口
 
-FastAPI 应用由 [create_app](../backend/app/main.py#L40) 创建，启动时：
+FastAPI 应用由 [create_app](../backend/app/main.py#L43) 创建，启动时：
 
 - 创建配置和目录。
 - 初始化 SQLite engine 和表结构。
@@ -12,7 +12,7 @@ FastAPI 应用由 [create_app](../backend/app/main.py#L40) 创建，启动时：
 - 创建 `YtDlpService` 并注入 PO token、chunk、throttled rate、aria2c 等配置。
 - 创建 `JobManager` 并在 lifespan 中启动/停止 worker。
 - 创建 [BiliManager](../backend/app/bilibili/bili_manager.py#L432)（B站 投稿队列，单 worker）并同样在 lifespan 中启停；启动时会先把上次退出时停在 `uploading` 的记录折成可重试的失败。
-- 把这些依赖装进 [ApiContext](../backend/app/api/api_context.py#L28) 并挂到 `app.state`。
+- 把这些依赖装进 [ApiContext](../backend/app/api/api_context.py#L29) 并挂到 `app.state`。
 
 `create_app` 只做装配：HTTP 路由按资源拆到 [routers/](../backend/app/api/routers/__init__.py#L21) 下（`diagnostics` / `cookies` / `analyze` / `jobs` / `job_files` / `settings` / `events` / `bilibili`），由 `API_ROUTERS` 统一挂载。路由只做「取参 → 调辅助 → 定状态码」：请求级依赖经 [api_context.py](../backend/app/api/api_context.py#L45) 的 `ContextDep` / `SessionDep` 取，跨路由复用的任务/条目定位、设置读写与 cookies 处理在 [api_support.py](../backend/app/api/api_support.py#L26)，产物定位与本机打开在 [job_artifacts.py](../backend/app/download/job_artifacts.py#L31)。任务序列化逻辑委托给 [job_read_model.py](../backend/app/download/job_read_model.py#L12)，状态转换一律委托 `JobManager`；B站 那一组同理由 [bili_manager.py](../backend/app/bilibili/bili_manager.py) 承担，读模型投影在 [bili_read_model.py](../backend/app/bilibili/bili_read_model.py#L60)。
 
@@ -142,7 +142,7 @@ yt-dlp 对字幕、缩略图、HTTP chunk 和分离视频/音频流会多次发�
 
 视频大小复用 `JobItem.total_bytes`：下载前由 `prepare_download()` 从所选格式的 `filesize/filesize_approx` 写入，下载中由 progress payload 校准，下载完成后继续保留，前端在任务行和 playlist 子视频行展示。
 
-视频时长走的是另一条路，因为它**不需要等选出格式**：`POST /api/jobs` 建任务时就把解析结果里每个条目的 `duration` 写进 `JobItem.duration`（[routers/jobs.py](../backend/app/api/routers/jobs.py#L57)），任务一进队列就能显示。`duration` 这一列是后补的，补列之前建的旧任务重启时由 [_apply_download_preparation](../backend/app/download/job_manager.py#L1025) 从预检的同一份 `info` 里补上（预检反正要取一次元数据，不为时长多发一次请求）。前端格式化见 [formatMediaDuration](../frontend/src/shared/formatting.ts#L15)：固定 `时:分:秒`，与「已用/剩余」用的 `formatClock` 刻意不同 —— 后者不到一小时时省掉时位，而时长是视频的固有属性，三段位数固定更好扫读。任务行的时长由 [formatJobDuration](../frontend/src/task-center/JobQueue.tsx#L735) 按子视频求和，与「大小」同一套折法（有子视频未知时前缀「已知」）。
+视频时长走的是另一条路，因为它**不需要等选出格式**：`POST /api/jobs` 建任务时就把解析结果里每个条目的 `duration` 写进 `JobItem.duration`（[routers/jobs.py](../backend/app/api/routers/jobs.py#L57)），任务一进队列就能显示。`duration` 这一列是后补的，补列之前建的旧任务重启时由 [_apply_download_preparation](../backend/app/download/job_manager.py#L1025) 从预检的同一份 `info` 里补上（预检反正要取一次元数据，不为时长多发一次请求）。前端格式化见 [formatMediaDuration](../frontend/src/shared/formatting.ts#L15)：固定 `时:分:秒`，与「已用/剩余」用的 `formatClock` 刻意不同 —— 后者不到一小时时省掉时位，而时长是视频的固有属性，三段位数固定更好扫读。任务行的时长由 [formatJobDuration](../frontend/src/task-center/JobQueue.tsx#L760) 按子视频求和，与「大小」同一套折法（有子视频未知时前缀「已知」）。
 
 平均速度由 [TransferStats](../backend/app/download/transfer_stats.py#L5) 根据聚合下载字节和时间计算。运行中 `speed` 是 yt-dlp 当前瞬时速度，终态 `speed` 是平均速度，终态聚合见 [_terminal_job_speed](../backend/app/download/job_manager.py#L918)。
 

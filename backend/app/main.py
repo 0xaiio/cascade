@@ -33,6 +33,9 @@ from .api.routers import API_ROUTERS
 from .host.runtime_env import sanitize_environment
 from .host.system_open import open_path_with_chooser, open_path_with_default_app, open_video_with_best_player
 from .download.ytdlp_service import YtDlpService
+from .translation.local import LocalTranslationProvider
+from .translation.provider import TranslationProvider
+from .translation.service import TranslationService
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +49,7 @@ def create_app(
     chooser_opener: Callable[[Path], None] | None = None,
     sanitize_environment_variables: bool = True,
     bili_manager: BiliManager | None = None,
+    translation_provider_factory: Callable[[], TranslationProvider] | None = None,
 ) -> FastAPI:
     app_settings = settings or get_settings()
     app_settings.ensure_directories()
@@ -89,6 +93,18 @@ def create_app(
     # 注入了 `system_opener` 的调用方（几乎都是测试）等于声明「本机打开这件事由我接管」，
     # 那么选择器也不该真去起 rundll32 —— 否则一个单测就会在你的桌面上弹窗。
     open_with_chooser = chooser_opener or system_opener or open_path_with_chooser
+
+    def default_translation_provider() -> TranslationProvider:
+        # 现场读 settings（它是可变的，设置路由会改它）—— 改完地址下一条请求就生效。
+        return LocalTranslationProvider(
+            base_url=app_settings.translation_base_url,
+            model=app_settings.translation_model,
+            timeout=app_settings.translation_timeout_seconds,
+        )
+
+    translations = TranslationService(
+        engine, app_settings, translation_provider_factory or default_translation_provider, broker
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -135,6 +151,7 @@ def create_app(
         open_local_path=open_local_path,
         open_video_path=open_video_path,
         open_with_chooser=open_with_chooser,
+        translations=translations,
     )
     for route_module in API_ROUTERS:
         app.include_router(route_module)

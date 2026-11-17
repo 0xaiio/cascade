@@ -48,7 +48,7 @@ def make_settings(tmp_path: Path) -> AppSettings:
     )
 
 
-def make_client(tmp_path: Path, service=None, directory_picker=None, system_opener=None, chooser_opener=None):
+def make_client(tmp_path: Path, service=None, directory_picker=None, system_opener=None, chooser_opener=None, translation_provider_factory=None):
     settings = make_settings(tmp_path)
     return TestClient(
         create_app(
@@ -57,6 +57,7 @@ def make_client(tmp_path: Path, service=None, directory_picker=None, system_open
             directory_picker=directory_picker,
             system_opener=system_opener,
             chooser_opener=chooser_opener,
+            translation_provider_factory=translation_provider_factory,
         )
     )
 

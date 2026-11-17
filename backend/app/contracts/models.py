@@ -269,3 +269,32 @@ class BiliAutoRetry(SQLModel, table=True):
     last_message: str = ""
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
+
+
+class SubtitleTranslation(SQLModel, table=True):
+    """一次「非中文字幕 → 中文字幕」的翻译任务。
+
+    **逐条译文不进这张表**，只存 `data/translations/<id>.json`：编辑是逐条发生的高频动作，
+    写 JSON 可以用临时文件 + 原子替换，DB 这边只留索引与进度。一处真相才不会在
+    「刷新后看到旧译文」这种问题上打架。
+    """
+
+    __tablename__ = "subtitle_translation"
+
+    id: str = Field(primary_key=True)
+    job_id: str = Field(index=True)
+    #: 合集里是哪一条；单视频任务也有条目 id（由调用方传进来），界面只认 `(job_id, item_id)`。
+    item_id: str | None = Field(default=None, index=True)
+    source_path: str
+    source_language: str | None = None
+    #: queued / running / succeeded / failed / cancelled
+    state: str = Field(default="queued", index=True)
+    total: int = 0
+    translated: int = 0
+    failed: int = 0
+    source_sha256: str = ""
+    output_path: str | None = None
+    bilingual_path: str | None = None
+    error: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)

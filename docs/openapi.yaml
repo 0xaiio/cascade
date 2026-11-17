@@ -1114,6 +1114,154 @@ paths:
                   value: |
                     data: {"type": "job_finished", "job_id": "6f1a3d2c-9f4b-4a1e-8c2d-0b7e5a91c3aa", "status": "succeeded", "error": null}
 
+  /api/translation/jobs:
+    post:
+      tags: [translation]
+      operationId: createTranslation
+      summary: Start translating a downloaded non-Chinese subtitle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TranslationCreateRequest"
+      responses:
+        "202":
+          description: Task accepted; it runs in a background thread and publishes SSE progress.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranslationRead"
+        "409":
+          description: No downloaded subtitle, file missing, empty subtitle, or already Chinese.
+
+  /api/translation/jobs/{translation_id}:
+    get:
+      tags: [translation]
+      operationId: getTranslation
+      summary: Read one translation task, including every aligned cue
+      parameters:
+        - name: translation_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Current task.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranslationRead"
+        "404":
+          description: Unknown task id.
+    delete:
+      tags: [translation]
+      operationId: deleteTranslation
+      summary: Delete the task and its cue JSON; never deletes the source subtitle
+      parameters:
+        - name: translation_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted.
+        "409":
+          description: The task is still running.
+
+  /api/translation/jobs/{translation_id}/cues/{index}:
+    patch:
+      tags: [translation]
+      operationId: editTranslationCue
+      summary: Human-edit one translated cue; the edit is locked against later retries
+      parameters:
+        - name: translation_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: index
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TranslationEditRequest"
+      responses:
+        "200":
+          description: Updated task.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranslationRead"
+
+  /api/translation/jobs/{translation_id}/retry:
+    post:
+      tags: [translation]
+      operationId: retryTranslation
+      summary: Retry only the failed cues; edited cues are never sent again
+      parameters:
+        - name: translation_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "202":
+          description: Retry accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranslationRead"
+        "409":
+          description: Still running, or nothing failed.
+
+  /api/translation/jobs/{translation_id}/cancel:
+    post:
+      tags: [translation]
+      operationId: cancelTranslation
+      summary: Cancel at the next chunk boundary; already translated cues are kept
+      parameters:
+        - name: translation_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Current task.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranslationRead"
+
+  /api/translation/jobs/{translation_id}/export:
+    post:
+      tags: [translation]
+      operationId: exportTranslation
+      summary: Validate alignment and write .zh.srt plus .bilingual.srt
+      parameters:
+        - name: translation_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Exported file paths.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranslationExportRead"
+        "409":
+          description: Alignment failed or some cues have no translation.
+
   /api/translation/probe:
     post:
       tags: [translation]
@@ -2634,6 +2782,90 @@ components:
           oneOf:
             - $ref: "#/components/schemas/JobRead"
             - type: "null"
+
+    TranslationCreateRequest:
+      type: object
+      required: [job_id]
+      properties:
+        job_id:
+          type: string
+        item_id:
+          type: [string, "null"]
+          description: Omitted means the job's first item. The server resolves the subtitle path.
+    TranslationEditRequest:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+    TranslationCueRead:
+      type: object
+      required: [index, start, end, source, translation]
+      properties:
+        index:
+          type: integer
+        start:
+          type: number
+          description: Seconds, copied verbatim from the source cue.
+        end:
+          type: number
+        source:
+          type: string
+        translation:
+          type: string
+        edited:
+          type: boolean
+          default: false
+        state:
+          type: string
+          enum: [pending, translated, failed]
+        error:
+          type: [string, "null"]
+    TranslationRead:
+      type: object
+      required: [id, job_id, source_path, state, total, translated, failed]
+      properties:
+        id:
+          type: string
+        job_id:
+          type: string
+        item_id:
+          type: [string, "null"]
+        source_path:
+          type: string
+        source_language:
+          type: [string, "null"]
+        state:
+          type: string
+          enum: [queued, running, succeeded, failed, cancelled]
+        total:
+          type: integer
+        translated:
+          type: integer
+        failed:
+          type: integer
+        source_sha256:
+          type: string
+        output_path:
+          type: [string, "null"]
+        bilingual_path:
+          type: [string, "null"]
+        error:
+          type: [string, "null"]
+        cues:
+          type: array
+          items:
+            $ref: "#/components/schemas/TranslationCueRead"
+    TranslationExportRead:
+      type: object
+      required: [srt_path, bilingual_path, cue_count]
+      properties:
+        srt_path:
+          type: string
+        bilingual_path:
+          type: string
+        cue_count:
+          type: integer
 
     TranslationProbeRead:
       type: object

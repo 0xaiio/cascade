@@ -22,6 +22,7 @@ from ..contracts.config import AppSettings
 from ..infra.db import session_dependency
 from ..download.job_manager import JobManager
 from ..download.ytdlp_service import YtDlpService
+from ..translation.service import TranslationService
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,8 @@ class ApiContext:
     # 「让系统弹『打开方式』」——与 `open_local_path` 的区别只是**由谁挑程序**：
     # 前者用已记住的关联，这个让用户当场选。两个都在 `system_open` 里定义。
     open_with_chooser: Callable[[Path], None]
+    #: 字幕翻译编排器。provider 由它现场构造，运行时改设置立刻生效。
+    translations: TranslationService
 
 
 def get_context(request: Request) -> ApiContext:

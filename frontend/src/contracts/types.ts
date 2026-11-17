@@ -590,3 +590,52 @@ export interface BiliSeasonRetry {
   message: string;
   season: BiliSeason;
 }
+
+/** 编辑一条译文的请求体。 */
+export interface TranslationEditRequest {
+  text: string;
+}
+
+/** 字幕翻译：逐条原文与译文（时间由后端从原字幕复制）。 */
+export interface TranslationCue {
+  index: number;
+  start: number;
+  end: number;
+  source: string;
+  translation: string;
+  edited: boolean;
+  state: "pending" | "translated" | "failed";
+  error: string | null;
+}
+
+/** 一次翻译任务；进度数字由后端算，前端不自己数。 */
+export interface TranslationJob {
+  id: string;
+  job_id: string;
+  item_id: string | null;
+  source_path: string;
+  source_language: string | null;
+  state: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+  total: number;
+  translated: number;
+  failed: number;
+  source_sha256: string;
+  output_path: string | null;
+  bilingual_path: string | null;
+  error: string | null;
+  cues: TranslationCue[];
+}
+
+/** 导出后的两个文件：纯中文轨 + 原上译下的对照轨。 */
+export interface TranslationExport {
+  srt_path: string;
+  bilingual_path: string;
+  cue_count: number;
+}
+
+/** 本机模型连通性结论；不可用是正常结果，不是 HTTP 错误。 */
+export interface TranslationProbe {
+  ok: boolean;
+  message: string;
+  model: string;
+}

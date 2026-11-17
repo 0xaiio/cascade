@@ -768,3 +768,53 @@ class BiliSeasonRetryRead(BaseModel):
     action: Literal["grouped", "failed", "waiting"]
     message: str
     season: BiliSeasonRead
+
+
+# ---------------------------------------------------------------- 字幕翻译
+class TranslationCreateRequest(BaseModel):
+    """按 `(job_id, item_id)` 定位**已下载的那一条字幕**；不接收字幕路径。
+
+    `item_id` 为空表示取任务的第一个条目（单视频任务）。前端拼路径会出现两套真相，
+    所以路径一律由后端从 `JobItem` 上算。
+    """
+
+    job_id: str
+    item_id: str | None = None
+
+
+class TranslationCueRead(BaseModel):
+    index: int
+    start: float
+    end: float
+    source: str
+    translation: str
+    edited: bool = False
+    state: str = "pending"  # pending / translated / failed
+    error: str | None = None
+
+
+class TranslationRead(BaseModel):
+    id: str
+    job_id: str
+    item_id: str | None = None
+    source_path: str
+    source_language: str | None = None
+    state: str
+    total: int
+    translated: int
+    failed: int
+    source_sha256: str = ""
+    output_path: str | None = None
+    bilingual_path: str | None = None
+    error: str | None = None
+    cues: list[TranslationCueRead] = Field(default_factory=list)
+
+
+class TranslationEditRequest(BaseModel):
+    text: str
+
+
+class TranslationExportRead(BaseModel):
+    srt_path: str
+    bilingual_path: str
+    cue_count: int
