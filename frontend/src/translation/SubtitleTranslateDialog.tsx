@@ -263,9 +263,16 @@ export function SubtitleTranslateDialog({
           <button
             type="button"
             className="primary-button"
-            disabled={!job || active || busy !== "" || !job.output_path || modeDirty}
+            title={modeDirty ? "排版已变更，上传前会自动重新导出" : "把中文字幕作为 CC 轨传到 B站"}
+            disabled={!job || active || busy !== ""}
             onClick={() =>
               void run("上传中文字幕", async () => {
+                // 「导出」是本地留存的 optional 动作，不该成为上传的前置门槛。
+                // 但模式切换后磁盘上还是旧排版，必须在上传前重导一次。
+                if (modeDirty || !job!.output_path) {
+                  await exportTranslation(job!.id);
+                  setModeDirty(false);
+                }
                 const result = await uploadBiliTranslation(job!.id);
                 setUploadNote(
                   result.translated_subtitle_state === "posted"
