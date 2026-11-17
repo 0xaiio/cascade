@@ -39,3 +39,13 @@
 | `SubtitleTranslation.display_mode` + `PATCH .../mode` | 模式落库，切换不重译 |
 | `translation.ts` / `SubtitleTranslateDialog` | 分段控件、B站 两行预览、切模式后禁用上传直到重新导出 |
 | `upload-bili` 回执 | 明说「中英双语」与「同 lan 覆盖」 |
+
+### 增量实现
+
+| 落点 | 做什么 |
+| --- | --- |
+| `translation/model_server.py` | 健康探测、模型发现、Vulkan/CPU 两段启动、失败分类文案 |
+| `translation/service._run` | 分块之前确保服务就绪；失败时所有 cue + 任务同一句结论 |
+| `local._http_error_message` | 连接被拒从 `WinError` 翻成可操作提示 |
+| `create_app(model_server_ensurer=...)` | 注入点；测试传 no-op，避免真起服务 |
+| `SubtitleTranslateDialog` | 0/N 且 running 时显示"正在准备本机模型服务" |

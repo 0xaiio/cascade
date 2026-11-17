@@ -124,8 +124,19 @@ def test_http_statuses_get_distinct_readable_messages(status: int, needle: str) 
 def test_connection_failure_is_not_reported_as_a_model_error() -> None:
     fake = FakeJsonTransport()
     fake.queue(error=TranslationHttpError("Connection refused"))
-    with pytest.raises(TranslationError, match="连不上本机模型服务"):
+    with pytest.raises(TranslationError, match="本机模型服务没有运行"):
         provider(fake).translate(ITEMS)
+
+
+def test_winerror_10061_is_translated_into_an_actionable_hint() -> None:
+    """连接被拒是「服务没起」，原始 WinError 对用户没有任何可操作性。"""
+    fake = FakeJsonTransport()
+    fake.queue(error=TranslationHttpError("<urlopen error [WinError 10061] 由于目标计算机积极拒绝，无法连接。>"))
+    with pytest.raises(TranslationError) as caught:
+        provider(fake).translate(ITEMS)
+    assert "10061" not in str(caught.value)
+    assert "model-server.log" in str(caught.value)
+    assert "自动拉起" in str(caught.value)
 
 
 def test_non_json_response_is_reported_as_such() -> None:
@@ -165,7 +176,7 @@ def test_probe_really_sends_a_minimal_request() -> None:
 def test_probe_reports_failure_without_throwing_at_the_router() -> None:
     fake = FakeJsonTransport()
     fake.queue(error=TranslationHttpError("Connection refused"))
-    with pytest.raises(TranslationError, match="连不上"):
+    with pytest.raises(TranslationError, match="本机模型服务没有运行"):
         probe_local_provider(provider(fake))
 
 

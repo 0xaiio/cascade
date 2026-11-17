@@ -96,6 +96,26 @@ describe("字幕翻译抽屉", () => {
     expect(screen.getByLabelText("第 1 条译文")).toHaveValue("你好世界");
   });
 
+  test("首次翻译时说明在准备本机模型服务，而不是让用户对着 0/N 猜", async () => {
+    vi.mocked(startTranslation).mockResolvedValue({
+      ...JOB,
+      state: "running",
+      translated: 0,
+      failed: 0,
+      error: null
+    });
+    render(
+      <SubtitleTranslateDialog
+        jobId="job-running"
+        itemId={null}
+        title="视频"
+        refreshToken={0}
+        onClose={() => {}}
+      />
+    );
+    expect(await screen.findByText(/正在准备本机模型服务/)).toBeInTheDocument();
+  });
+
   test("筛选只显示失败项，空白译文确实没有拿原文顶上", async () => {
     vi.mocked(startTranslation).mockResolvedValue(JOB);
     const user = userEvent.setup();

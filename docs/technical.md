@@ -582,6 +582,13 @@ notepad / VS Code / Sublime 只能是它的子集：用户装了别的我们不�
 运行时不引入任何新依赖：HTTP 走标准库 `urllib.request`。Qwen3 的默认思考模式会输出
 `<think>` 段落，请求里显式带 `chat_template_kwargs={"enable_thinking": false}` 关掉它。
 
+**服务按需拉起**：翻译在调用模型之前先探 `/health`；不通就用 PATH 中的 `llama-server`
+与本机已有 GGUF 启动（先 Vulkan0，进程退出则回退 CPU），轮询到 `/health` 返回 200 才发请求。
+服务已健康时直接复用，不重复起。失败时**不发任何翻译请求**，把所有条目标成同一个可操作结论
+（缺模型 / 缺可执行文件 / 日志路径），不会把 `WinError 10061` 原文丢给用户。
+进程 detached，不随应用退出；日志 `data/logs/model-server.log`。详见
+[model_server.py](../backend/app/translation/model_server.py)、缺陷 [041](../ai/bug-fix/041-the-model-server-was-never-started.md)。
+
 四条判据：
 
 1. **时间轴不属于翻译**。译文只是原文每条的属性，`AlignedCue` 的 `start`/`end`

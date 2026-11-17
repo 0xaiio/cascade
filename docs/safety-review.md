@@ -291,7 +291,7 @@
 | --- | --- |
 | 网络 | 只允许 loopback 地址（`127.0.0.1` / `localhost` / `::1`）。设置接口对外部 URL 直接 400；provider 构造时也复核一次。字幕文本不会发到第三方 |
 | 凭据 | 契约、设置接口与界面**都没有 API Key 字段**；本机服务如果设了 key，需在服务侧自行配置 |
-| 命令执行 | 应用**不启动** `llama-server`，只读用户已启动的服务；模型下载与启动是人工步骤 |
+| 命令执行 | 翻译前可按需拉起 `llama-server`：只执行 PATH 中的 `llama-server`（或 `YTDL_TRANSLATION_SERVER` 指定的绝对路径），不用 `shell=True`，只绑 `127.0.0.1`，端口取自已校验为 loopback 的设置；Vulkan 失败退回 CPU。模型文件从本机已有 GGUF 中发现，不联网下载、不执行命令字符串。服务进程 detached，日志写 `data/logs/model-server.log` |
 | 路径 | 译文 JSON 写在 `data/translations/<uuid>.json`，导出写 `<源字幕名>.zh.srt` / `.bilingual.srt`；源字幕只读，删除翻译任务不删源文件 |
 | 原子写 | 临时文件 + `os.replace`；进程中断只可能留下旧版或新版，不会留下半截 JSON |
 | 契约 | `mode`/路径由服务端推导；`translation_base_url` 与 `model` 三处同步，`check_api_contract.py` 拦漂移 |

@@ -68,6 +68,7 @@
 | [038](038-browser-cookie-import-is-gone.md) | 浏览器 cookies 导入：一个必然失败的入口，外加一条会杀掉所有 Edge 窗口的失败分支 | `—` | 本机 Edge 的 cookies 是 v20 app-bound 加密，离线**必然解不开**；失败分支 `taskkill /IM msedge.exe /F /T` 会关掉用户所有 Edge 窗口，更早的 CDP 回退还清空过真实 cookie 库（53 → 0）。入口之外还有两处**用户看不见**的自动导入（解析失败一次、下载失败一次）。修法：整条链路删除（UI / 路由 / 模块 / 两处自动重试），只留「扩展导出 + 上传」；失败消息给出导出步骤，不再提已删按钮 |
 | [039](039-subtitle-default-silences-the-plan.md) | 默认字幕语言把「按主语言挑字幕」整条路堵死了 | `—` | 出厂默认 `["en"]` 每次解析都被原样塞进选项，而非空列表会让后端**绕过**字幕计划（显式选择优先）；yt-dlp 拿一个视频里不存在的语言 → 匹配不到任何轨 → **静默不下字幕、任务照样成功**，界面还写着「已选 1 项：en」且摘不掉。影响面：所有非英文视频在默认设置下都没有字幕。修法：前端把默认值收敛到该视频真有的语言，一个都不命中就留空（= 自动，交回后端的按主语言计划）；空态标签由「选择字幕语言」改为「自动（按视频语言）」并写明规则 |
 | [040](040-a-column-that-tests-never-added.md) | 新列没登记迁移：地址打印得出来，服务却在 lifespan 里崩了 | `—` | `BiliUpload` 的译轨三列与 `SubtitleTranslation.display_mode` 是表建好之后才加的，只改了模型没登记到 `_ensure_columns`；`create_all` 不给已存在的表加列 ⇒ 孤儿恢复的 SELECT 报 `no such column`，`Application startup failed`。测试全绿是因为全部从零建库。修法：登记四列（默认值对齐历史事实）+ **先建旧表再 init_db** 的升级测试 + 一键脚本开浏览器前查进程存活 |
+| [041](041-the-model-server-was-never-started.md) | 点「译为中文」报 WinError 10061：模型服务根本没起，错误还不可操作 | `—` | 翻译只会连本机 `llama-server`，但应用从不拉起它（机器重启/收尾停进程后就必然失败），且把 `str(URLError)` 原文当成结论、每条 cue 各报一次。修法：`translation/model_server` 在发请求前按需拉起（健康复用、Vulkan 失败回退 CPU、只绑 loopback、不 `shell=True`），失败时零请求并给一句可操作结论；`create_app` 注入 ensurer 保证单测不真起服务 |
 
 ## 本轮（2026-10-01）背景
 

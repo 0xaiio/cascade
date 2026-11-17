@@ -48,7 +48,7 @@ def make_settings(tmp_path: Path) -> AppSettings:
     )
 
 
-def make_client(tmp_path: Path, service=None, directory_picker=None, system_opener=None, chooser_opener=None, translation_provider_factory=None):
+def make_client(tmp_path: Path, service=None, directory_picker=None, system_opener=None, chooser_opener=None, translation_provider_factory=None, model_server_ensurer=None):
     settings = make_settings(tmp_path)
     return TestClient(
         create_app(
@@ -58,6 +58,8 @@ def make_client(tmp_path: Path, service=None, directory_picker=None, system_open
             system_opener=system_opener,
             chooser_opener=chooser_opener,
             translation_provider_factory=translation_provider_factory,
+            # 单测不拉起真实的 llama-server；要测这条路径的用例显式传自己的实现。
+            model_server_ensurer=model_server_ensurer or (lambda: None),
         )
     )
 

@@ -48,3 +48,13 @@ Qwen3-8B-Q5_K_M（本机 `llama-server` + Vulkan）→ 8/8 翻译成功 → 导�
 - `translation-ui.test.tsx` +1：分段控件、双行预览、切模式后必须重新导出、覆盖提示。
 - 变异测试：双语内容改成只返回译文 → 4 条当场红。
 - 最终全量：后端 **1519 passed / 62 文件**，前端 **41 文件 / 460 passed**，`tsc` 0，六道闸门全绿。
+
+### 增量验收：按需启动
+
+- `test_model_server.py` 6 条：复用/缺模型/缺二进制/Vulkan 优先/CPU 回退/命令安全。
+- `test_translation_local.py` +1：10061 不出现在用户文案里。
+- `test_translation_api.py` +2：失败时零模型请求、结论统一；翻译前确实 ensure。
+- `translation-ui.test.tsx` +1：准备中的提示。
+- 变异测试：去掉 ensure 调用 → 两条端到端用例当场红。
+- 真机：17.6 秒拉起 + `/health` 200 + 真实翻译 11.2 秒成功。
+- 最终全量：后端 **1529 passed / 63 文件**，前端 **41 文件 / 461 passed**，`tsc` 0。

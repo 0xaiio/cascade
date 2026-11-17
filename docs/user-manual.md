@@ -622,7 +622,12 @@ YouTube 把登录态与出口 IP 绑定。导出 cookies 时走代理 A、下载
 
 ## 把非中文字幕译为中文
 
-**准备一次**：本机需要先跑一个模型服务（推荐 `Qwen3-8B-Q5_K_M` 的 GGUF）：
+**不用先手动启动服务**：点「译为中文」后，应用会先确认本机模型服务是否可用；没起就用
+本机已有的 GGUF 自动拉起 `llama-server`（首次约十几秒，界面会提示「正在准备本机模型服务」）。
+显卡后端不可用时会自动退回 CPU，只是更慢。日志在 `data/logs/model-server.log`。
+
+如果自动拉起失败（没装 llama.cpp，或模型不在常见位置），按错误提示把 Qwen3-8B 的 GGUF
+放进 `D:/models`、或设置环境变量 `YTDL_TRANSLATION_MODEL_PATH`；也可以自己先跑一个：
 
 ```
 llama-server -m D:/models/Qwen3-8B-Q5_K_M.gguf --host 127.0.0.1 --port 8080 ^

@@ -33,12 +33,14 @@ from .provider import (
     TranslationProvider,
     TranslationReply,
 )
+from .model_server import ModelServerError, ensure_model_server
 from .render import export_bilingual_files, export_files
 from .store import cues_path, cue_records, load_cues, new_translation_id, save_cues
 
 logger = logging.getLogger(__name__)
 
 ProviderFactory = Callable[[], TranslationProvider]
+EnsureServer = Callable[[], str | None]
 ACTIVE_STATES = {"queued", "running"}
 
 # 本机 8B 模型实测约 3.8 token/s：32 条一块会超过单请求超时，8 条一块约 1 分钟内完成。
@@ -54,11 +56,17 @@ class TranslationService:
         settings: AppSettings,
         provider_factory: ProviderFactory,
         broker: EventBroker,
+        ensure_server: EnsureServer | None = None,
     ) -> None:
         self.engine = engine
         self.settings = settings
         self.provider_factory = provider_factory
         self.broker = broker
+        # 默认会按需拉起本机模型服务；测试注入 lambda: None 即声明「模型由我接管」，
+        # 与 provider 的注入纪律一致，避免单测在你的机器上真起一个 llama-server。
+        self.ensure_server: EnsureServer = ensure_server or (
+            lambda: ensure_model_server(settings)
+        )
         self._lock = threading.Lock()
         self._running: set[str] = set()
         self._cancelled: set[str] = set()
@@ -333,6 +341,45 @@ class TranslationService:
             session.commit()
 
         data = load_cues(self.settings.data_dir, translation_id)
+
+        # 服务没起是「这一步没法做」，不是「某一条没译出来」。在发任何请求之前先
+        # 确认，失败就一次性给结论，避免 8 条 cue 各背一句 WinError 10061。
+        try:
+            startup_note = self.ensure_server()
+        except Exception as exc:  # noqa: BLE001 - 任何启动失败都要落成用户看得懂的结论
+            message = (
+                str(exc)
+                if isinstance(exc, ModelServerError)
+                else f"本机模型服务没能就绪：{exc}。详情见 data/logs/model-server.log"
+            )
+            logger.warning("字幕翻译：本机模型服务未就绪 id=%s error=%s", translation_id, message)
+            for record in data["cues"]:
+                if record.get("edited"):
+                    continue
+                record["state"] = "failed"
+                record["error"] = message
+            save_cues(self.settings.data_dir, translation_id, data)
+            with Session(self.engine) as session:
+                row = session.get(SubtitleTranslation, translation_id)
+                if row is not None:
+                    self._recount(row, data)
+                    row.state = "failed"
+                    row.error = message
+                    row.updated_at = utc_now()
+                    session.add(row)
+                    session.commit()
+                    job_id, item_id = row.job_id, row.item_id
+                else:
+                    job_id, item_id = "", None
+            self._publish(
+                loop,
+                "subtitle_translation_finished",
+                {"id": translation_id, "job_id": job_id, "item_id": item_id, "state": "failed"},
+            )
+            return
+        if startup_note:
+            logger.info("字幕翻译：%s id=%s", startup_note, translation_id)
+
         source = [
             Cue(start=float(item["start"]), end=float(item["end"]), content=str(item["source"]))
             for item in data["cues"]

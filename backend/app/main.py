@@ -50,6 +50,7 @@ def create_app(
     sanitize_environment_variables: bool = True,
     bili_manager: BiliManager | None = None,
     translation_provider_factory: Callable[[], TranslationProvider] | None = None,
+    model_server_ensurer: Callable[[], str | None] | None = None,
 ) -> FastAPI:
     app_settings = settings or get_settings()
     app_settings.ensure_directories()
@@ -103,7 +104,11 @@ def create_app(
         )
 
     translations = TranslationService(
-        engine, app_settings, translation_provider_factory or default_translation_provider, broker
+        engine,
+        app_settings,
+        translation_provider_factory or default_translation_provider,
+        broker,
+        ensure_server=model_server_ensurer,
     )
 
     @asynccontextmanager

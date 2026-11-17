@@ -179,6 +179,9 @@ export function SubtitleTranslateDialog({
                 </span>
               </div>
               {job.error && <p className="translation-error">{job.error}</p>}
+              {active && !job.error && job.translated === 0 && job.failed === 0 && (
+                <p className="translation-hint">正在准备本机模型服务，首次启动约需十几秒…</p>
+              )}
 
               <div className="translation-tools">
                 <button

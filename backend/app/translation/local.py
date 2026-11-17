@@ -117,6 +117,14 @@ def _http_error_message(exc: TranslationHttpError) -> str:
         return f"本机模型服务出错了（HTTP {status}）"
     if status is not None:
         return f"本机模型服务返回 HTTP {status}：{exc}"
+    text = str(exc)
+    # 连接被拒 = 「服务没在跑」，不是「翻译失败」。原始 WinError 对用户没有任何
+    # 可操作性，必须换成下一步该做什么；翻译编排会先尝试自动拉起服务。
+    if "10061" in text or "refused" in text.lower() or "拒绝" in text:
+        return (
+            "本机模型服务没有运行（连接被拒绝）。应用会尝试自动拉起它；"
+            "若仍失败，请看 data/logs/model-server.log，或手动启动 llama-server。"
+        )
     return f"连不上本机模型服务：{exc}"
 
 

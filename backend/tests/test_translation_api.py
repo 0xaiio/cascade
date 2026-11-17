@@ -46,8 +46,12 @@ class ScriptedProvider:
         return [TranslationReply(index=item.index, text=f"译文{item.index + 1}") for item in items]
 
 
-def setup_job(tmp_path: Path, provider: ScriptedProvider):
-    client = make_client(tmp_path, translation_provider_factory=lambda: provider)
+def setup_job(tmp_path: Path, provider: ScriptedProvider, model_server_ensurer=None):
+    client = make_client(
+        tmp_path,
+        translation_provider_factory=lambda: provider,
+        model_server_ensurer=model_server_ensurer,
+    )
     seed_job(tmp_path, "job-1", "任务", 1)
     saved = client.get("/api/jobs").json()[0]["items"][0]
     subtitle = Path(saved["output_path"]).with_suffix(".en.srt")
@@ -455,3 +459,39 @@ def test_bilingual_upload_reply_names_the_mode_and_overwrite(tmp_path: Path) -> 
     body = client.post(f"/api/translation/jobs/{created['id']}/upload-bili").json()
     assert "中英双语" in body["translated_subtitle_message"]
     assert "覆盖" in body["translated_subtitle_message"]
+
+
+# ---------------------------------------------------------------- 本机模型服务
+def test_unavailable_model_server_gives_one_actionable_conclusion(tmp_path: Path) -> None:
+    """服务没起时**一条模型请求都不发**，每条 cue 拿到同一句可操作结论，而不是 WinError。"""
+    import json
+
+    from app.translation.model_server import ModelServerError
+
+    def cannot_start() -> str | None:
+        raise ModelServerError("本机找不到可用的 GGUF 模型文件。请把模型放进 D:/models")
+
+    provider = ScriptedProvider()
+    client, _ = setup_job(tmp_path, provider, model_server_ensurer=cannot_start)
+    created = client.post("/api/translation/jobs", json={"job_id": "job-1"}).json()
+    done = wait_state(client, created["id"], {"failed"})
+
+    assert provider.calls == []
+    assert "GGUF" in done["error"]
+    assert all(cue["state"] == "failed" and "GGUF" in cue["error"] for cue in done["cues"])
+    assert "10061" not in json.dumps(done, ensure_ascii=False)
+
+
+def test_model_server_is_ensured_before_any_translation_request(tmp_path: Path) -> None:
+    events: list[str] = []
+
+    def ensure() -> str | None:
+        events.append("ensure")
+        return "已启动本机模型服务（PID 4242）"
+
+    provider = ScriptedProvider()
+    client, _ = setup_job(tmp_path, provider, model_server_ensurer=ensure)
+    created = client.post("/api/translation/jobs", json={"job_id": "job-1"}).json()
+    done = wait_state(client, created["id"], {"succeeded"})
+    assert events == ["ensure"]
+    assert done["translated"] == 3 and provider.calls
