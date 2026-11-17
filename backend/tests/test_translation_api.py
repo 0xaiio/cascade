@@ -238,3 +238,99 @@ def test_progress_events_are_published(tmp_path: Path) -> None:
         assert "subtitle_translation_finished" in types
     finally:
         broker.publish = original  # type: ignore[method-assign]
+
+
+# ---------------------------------------------------------------- B站 双轨
+def test_single_upload_can_attach_both_original_and_translated_tracks(tmp_path: Path) -> None:
+    """原轨 en 与译轨 zh 是两条 CC 字幕：同一稿件并存，观众可在播放器切换/关闭。"""
+    from app.bilibili.bili_meta import default_single
+    from app.bilibili.bili_upload import UploadContext, UploadTarget, run_single
+    from bili_fakes import FakeBiliTransport, RecordingSleeper, command_runner, write_video
+
+    transport = FakeBiliTransport(
+        archives=[{"aid": 111, "bvid": "BV1xx", "title": "演示标题", "state": 0}]
+    )
+    translated = tmp_path / "a.zh.srt"
+    translated.write_text("1\n00:00:01,000 --> 00:00:02,000\n你好\n", encoding="utf-8")
+    target = UploadTarget(
+        1,
+        "演示标题",
+        write_video(tmp_path / "a.mp4"),
+        subtitle_path=tmp_path / "a.en.srt",
+        subtitle_language="en",
+        translated_subtitle_path=translated,
+    )
+    (tmp_path / "a.en.srt").write_text(
+        "1\n00:00:01,000 --> 00:00:02,000\nHello\n", encoding="utf-8"
+    )
+    context = UploadContext(
+        biliup_exe="biliup.exe",
+        cookie_path=tmp_path / "cookies.json",
+        jar={"SESSDATA": "s", "bili_jct": "jct", "DedeUserID": "42"},
+        transport=transport,
+        runner=command_runner(),
+        sleeper=RecordingSleeper(),
+        verify_delay=0.0,
+    )
+    result = run_single(context, target, default_single(job_title="任务", item_title="演示标题", source_url="https://youtu.be/x"))
+
+    assert result.status == "published"
+    assert {entry["lan"] for entry in transport.subtitles} == {"en", "zh"}
+    assert all(entry["oid"] == 7001 for entry in transport.subtitles)  # 都挂分P，不是 aid
+    assert result.subtitle_lan == "en" and result.subtitle_state == "posted"
+    assert result.translated_subtitle_lan == "zh" and result.translated_subtitle_state == "posted"
+
+
+def test_upload_bili_endpoint_adds_only_the_zh_track(tmp_path: Path) -> None:
+    """翻译完成后点「上传中文字幕」：只补 zh 轨，绝不重跑投稿命令。"""
+    from sqlmodel import Session
+
+    from app.bilibili.bili_read_model import read_upload
+    from app.contracts.models import BiliUpload, BiliUploadStatus, utc_now
+
+    client, _ = setup_job(tmp_path, ScriptedProvider())
+    created = client.post("/api/translation/jobs", json={"job_id": "job-1"}).json()
+    wait_state(client, created["id"], {"succeeded"})
+    assert client.post(f"/api/translation/jobs/{created['id']}/export").status_code == 200
+
+    engine = client.app.state.db_engine
+    with Session(engine) as session:
+        row = BiliUpload(
+            id="upload-1",
+            job_id="job-1",
+            item_id=created["item_id"],
+            title="演示",
+            status=BiliUploadStatus.published.value,
+            aid=111,
+            bvid="BV1xx",
+            cid=7001,
+            created_at=utc_now(),
+            updated_at=utc_now(),
+        )
+        session.add(row)
+        session.commit()
+
+    manager = client.app.state.api_context.bili
+    calls: list[tuple[str, object]] = []
+
+    def fake_attach(upload_id: str, path: Path):
+        calls.append((upload_id, path))
+        with Session(engine) as session:
+            return read_upload(session.get(BiliUpload, upload_id), index=1)
+
+    manager.attach_translation = fake_attach  # type: ignore[method-assign]
+    response = client.post(f"/api/translation/jobs/{created['id']}/upload-bili")
+    assert response.status_code == 200
+    exported = client.get(f"/api/translation/jobs/{created['id']}").json()
+    assert calls == [("upload-1", Path(exported["output_path"]))]
+    assert response.json()["aid"] == 111 and response.json()["bvid"] == "BV1xx"
+
+
+def test_upload_bili_endpoint_refuses_before_the_video_is_published(tmp_path: Path) -> None:
+    client, _ = setup_job(tmp_path, ScriptedProvider())
+    created = client.post("/api/translation/jobs", json={"job_id": "job-1"}).json()
+    wait_state(client, created["id"], {"succeeded"})
+    assert client.post(f"/api/translation/jobs/{created['id']}/export").status_code == 200
+    response = client.post(f"/api/translation/jobs/{created['id']}/upload-bili")
+    assert response.status_code == 409
+    assert "找不到已投稿成功" in response.json()["detail"]

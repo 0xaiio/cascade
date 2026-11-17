@@ -172,6 +172,11 @@ class BiliUpload(SQLModel, table=True):
     subtitle_state: str = "skipped"
     subtitle_lan: str = ""
     subtitle_message: str = ""
+    # 翻译后的中文字幕是**另一条轨**：`lan=en` 与 `lan=zh` 在平台上并存，
+    # 结论必须分开记，否则 en 成功会把 zh 的失败盖掉。
+    translated_subtitle_state: str = "skipped"
+    translated_subtitle_lan: str = ""
+    translated_subtitle_message: str = ""
     error: Optional[str] = None
     advice: Optional[str] = None
     log_tail: Optional[str] = None

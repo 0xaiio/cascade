@@ -6,7 +6,8 @@ import {
   exportTranslation,
   getTranslation,
   retryTranslation,
-  startTranslation
+  startTranslation,
+  uploadBiliTranslation
 } from "./translation";
 
 /**
@@ -39,6 +40,7 @@ export function SubtitleTranslateDialog({
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState("");
+  const [uploadNote, setUploadNote] = useState("");
   const jobIdRef = useRef("");
 
   useEffect(() => {
@@ -190,6 +192,7 @@ export function SubtitleTranslateDialog({
 
         <footer className="modal-footer">
           <button type="button" className="ghost-button" onClick={onClose}>关闭</button>
+          {uploadNote && <span className="translation-upload-note">{uploadNote}</span>}
           <button
             type="button"
             className="ghost-button"
@@ -197,6 +200,23 @@ export function SubtitleTranslateDialog({
             onClick={() => void run("导出", () => exportTranslation(job!.id))}
           >
             导出中文 + 对照 SRT
+          </button>
+          <button
+            type="button"
+            className="primary-button"
+            disabled={!job || active || busy !== "" || !job.output_path}
+            onClick={() =>
+              void run("上传中文字幕", async () => {
+                const result = await uploadBiliTranslation(job!.id);
+                setUploadNote(
+                  result.translated_subtitle_state === "posted"
+                    ? "中文字幕已挂到 B站（zh 轨，与原字幕并存）"
+                    : result.translated_subtitle_message
+                );
+              })
+            }
+          >
+            上传中文字幕到 B站
           </button>
         </footer>
       </section>

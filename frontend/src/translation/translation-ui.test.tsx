@@ -12,7 +12,8 @@ import {
   exportTranslation,
   getTranslation,
   retryTranslation,
-  startTranslation
+  startTranslation,
+  uploadBiliTranslation
 } from "./translation";
 
 vi.mock("./translation", () => ({
@@ -23,7 +24,8 @@ vi.mock("./translation", () => ({
   cancelTranslation: vi.fn(),
   exportTranslation: vi.fn(),
   deleteTranslation: vi.fn(),
-  probeTranslation: vi.fn()
+  probeTranslation: vi.fn(),
+  uploadBiliTranslation: vi.fn()
 }));
 
 // vitest 没开 globals ⇒ RTL 不会自动清理 DOM。
@@ -43,8 +45,8 @@ const JOB: TranslationJob = {
   translated: 1,
   failed: 1,
   source_sha256: "abc",
-  output_path: null,
-  bilingual_path: null,
+  output_path: "D://Videos//a.zh.srt",
+  bilingual_path: "D://Videos//a.bilingual.srt",
   error: "1 条没译出来，点重试只补这些条目",
   cues: [
     {
@@ -175,6 +177,29 @@ describe("字幕翻译抽屉", () => {
     );
     expect(await screen.findByText("1 / 2 条 · 1 条失败")).toBeInTheDocument();
     expect(getTranslation).toHaveBeenCalledWith("tr-1");
+  });
+
+  test("导出后可把 zh 轨挂到 B站，并如实显示结论", async () => {
+    vi.mocked(startTranslation).mockResolvedValue(JOB);
+    vi.mocked(uploadBiliTranslation).mockResolvedValue({
+      ...(await import("../test/appFixtures")).biliUploadPayload,
+      translated_subtitle_state: "posted",
+      translated_subtitle_message: "CC 字幕已上传（8 条，zh）"
+    });
+    const user = userEvent.setup();
+    render(
+      <SubtitleTranslateDialog
+        jobId="job-running"
+        itemId={null}
+        title="视频"
+        refreshToken={0}
+        onClose={() => {}}
+      />
+    );
+    await screen.findByText("字幕翻译");
+    await user.click(screen.getByRole("button", { name: "上传中文字幕到 B站" }));
+    expect(uploadBiliTranslation).toHaveBeenCalledWith("tr-1");
+    expect(await screen.findByText(/zh 轨，与原字幕并存/)).toBeInTheDocument();
   });
 });
 

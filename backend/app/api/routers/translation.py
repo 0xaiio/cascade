@@ -9,9 +9,15 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, Response, status
+from pathlib import Path
+
+from fastapi import APIRouter, HTTPException, Response, status
+from sqlmodel import Session, select
 
 from ..api_context import ContextDep
+from ...bilibili.bili_manager import BiliPreconditionError
+from ...contracts.models import BiliUpload, BiliUploadStatus
+from ...contracts.schemas import BiliUploadRead
 from ...contracts.schemas import (
     TranslationCreateRequest,
     TranslationEditRequest,
@@ -89,6 +95,39 @@ def cancel_translation(translation_id: str, ctx: ContextDep) -> TranslationRead:
 @router.post("/api/translation/jobs/{translation_id}/export", response_model=TranslationExportRead)
 def export_translation(translation_id: str, ctx: ContextDep) -> TranslationExportRead:
     return ctx.translations.export(translation_id)
+
+
+@router.post(
+    "/api/translation/jobs/{translation_id}/upload-bili",
+    response_model=BiliUploadRead,
+)
+def upload_translated_subtitle(translation_id: str, ctx: ContextDep) -> BiliUploadRead:
+    """把这条译文作为 `zh` CC 轨补挂到**已经投稿成功**的稿件上。
+
+    **绝不重投视频**：服务端只走「只补字幕」那条路，稿件状态与 `aid` / `bvid` 不变。
+    """
+    job = ctx.translations.get(translation_id)
+    if job.state != "succeeded" or not job.output_path:
+        raise HTTPException(status_code=409, detail="这条字幕还没翻译导出完成，不能上传")
+    path = Path(job.output_path)
+    if not path.is_file():
+        raise HTTPException(status_code=409, detail="译文字幕文件已不在磁盘上")
+
+    engine = ctx.translations.engine
+    with Session(engine) as session:
+        accepted = {BiliUploadStatus.published.value, BiliUploadStatus.reviewing.value}
+        query = select(BiliUpload).where(BiliUpload.status.in_(accepted))
+        query = query.where(BiliUpload.job_id == job.job_id)
+        if job.item_id:
+            query = query.where(BiliUpload.item_id == job.item_id)
+        upload = session.exec(query.order_by(BiliUpload.created_at.desc())).first()
+        if upload is None:
+            raise HTTPException(status_code=409, detail="找不到已投稿成功的对应稿件")
+        upload_id = upload.id
+    try:
+        return ctx.bili.attach_translation(upload_id, path)
+    except BiliPreconditionError as exc:
+        raise HTTPException(status_code=409, detail=exc.message) from exc
 
 
 @router.delete("/api/translation/jobs/{translation_id}", status_code=status.HTTP_204_NO_CONTENT)

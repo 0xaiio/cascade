@@ -113,6 +113,10 @@ class UploadTarget:
     # **它与 `subtitle_path` 必须成对给**：B站 的语言标识由它映射而来
     # （`bili_subtitle.bilibili_language`），缺了就只能靠文件名猜。
     subtitle_language: str | None = None
+    # 已翻译好的中文字幕轨。**与 `subtitle_path` 是两条独立轨**：B站 按 `lan` 区分，
+    # 不同语言并存；同一语言再传才是覆盖。这里没有就是「这次不带译轨」。
+    translated_subtitle_path: Path | None = None
+    translated_subtitle_lan: str = "zh"
 
 
 @dataclass
@@ -168,6 +172,11 @@ class UploadResult:
     subtitle_state: str = SUBTITLE_SKIPPED
     subtitle_lan: str = ""
     subtitle_message: str = ""
+    # 译文字幕轨（zh）自己的结论。与上面三条分开：一条稿件可以同时有 en 成功、zh 失败，
+    # 混在一起就分不清哪条轨出了问题。
+    translated_subtitle_state: str = SUBTITLE_SKIPPED
+    translated_subtitle_lan: str = ""
+    translated_subtitle_message: str = ""
 
     @property
     def episode_ready(self) -> bool:
@@ -412,6 +421,59 @@ def refresh_episode(
 
 
 
+def attach_translated_subtitle(
+    context: UploadContext,
+    *,
+    aid: int,
+    bvid: str,
+    cid: int,
+    path: Path,
+    lan: str = "zh",
+) -> tuple[str, str, int]:
+    """把一条**已翻译好的**字幕作为独立 CC 轨挂到已存在的稿件上。
+
+    与 `_attach_subtitle` 用同一个 `upload_subtitle`（同样的端点、BCC 与白名单），
+    但**不接 `UploadTarget` / `UploadResult`** —— 它的调用方可能是「稿件早就发布完了」，
+    根本没有投稿动作可改。任何失败都落成结论，绝不抛，绝不重投视频。
+    """
+    if not path.is_file():
+        return SUBTITLE_SKIPPED, "译文字幕文件不存在，跳过", 0
+    outcome = upload_subtitle(
+        context.transport,
+        context.jar,
+        aid=aid,
+        bvid=bvid,
+        cid=cid,
+        path=path,
+        lan=lan,
+    )
+    return outcome.state, outcome.message, outcome.cue_count
+
+
+def _record_translated_subtitle(result: UploadResult, state: str, message: str, lan: str = "zh") -> None:
+    result.translated_subtitle_state = state
+    result.translated_subtitle_lan = lan
+    result.translated_subtitle_message = message
+
+
+def _attach_translated_track(context: UploadContext, target: UploadTarget, result: UploadResult) -> None:
+    """投稿时顺带挂译轨；前置条件不满足只记结论，不碰稿件状态。"""
+    if not target.translated_subtitle_path:
+        return
+    if not (result.ok and result.aid and result.cid and result.bvid):
+        _record_translated_subtitle(result, SUBTITLE_SKIPPED, "稿件未确认已发布，跳过译文字幕")
+        return
+    state, message, _count = attach_translated_subtitle(
+        context,
+        aid=int(result.aid),
+        bvid=str(result.bvid),
+        cid=int(result.cid),
+        path=target.translated_subtitle_path,
+        lan=target.translated_subtitle_lan,
+    )
+    _record_translated_subtitle(result, state, message, target.translated_subtitle_lan)
+
+
 def _attach_subtitle(context: UploadContext, target: UploadTarget, result: UploadResult) -> None:
     """稿件已在平台上之后，把 CC 字幕挂上去。**这一步不参与稿件状态的判定。**
 
@@ -555,6 +617,8 @@ def run_single(
 
     # 字幕放在**最后**：它是稿件的附加物，且依赖上面刚拿到的 aid/cid。
     _attach_subtitle(context, target, result)
+    # 译轨是第二条 CC 字幕（不同 lan 并存）；它失败也不影响稿件与原轨的结论。
+    _attach_translated_track(context, target, result)
     return result
 
 

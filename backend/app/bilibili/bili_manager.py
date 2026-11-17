@@ -109,6 +109,7 @@ from .bili_read_model import (
 )
 from .bili_upload import (
     SeasonOutcome,
+    attach_translated_subtitle,
     UploadContext,
     UploadResult,
     UploadTarget,
@@ -131,6 +132,7 @@ from ..contracts.models import (
     BiliUpload,
     BiliUploadStatus,
     Job,
+    SubtitleTranslation,
     JobItem,
     utc_now,
 )
@@ -1384,6 +1386,7 @@ class BiliManager:
             assert row is not None
             index = self._index_for(session, row.job_id, row.item_id)
             subtitle_path, subtitle_language = self._subtitle_of(session, row)
+            translated_path = self._translated_subtitle_of(session, row)
             target = UploadTarget(
                 index=index,
                 title=row.title,
@@ -1391,6 +1394,8 @@ class BiliManager:
                 item_id=row.item_id,
                 subtitle_path=subtitle_path,
                 subtitle_language=subtitle_language,
+                # 翻译已完成（且文件还在）才带译轨；没有就安静跳过，不把投稿卡住。
+                translated_subtitle_path=translated_path,
             )
             meta = UploadMetadata(
                 title=row.title,
@@ -1401,6 +1406,71 @@ class BiliManager:
                 source=effective_source(row.copyright, row.source),
             )
             return target, meta, bool(row.make_cover), row.comment or ""
+
+    def _translated_subtitle_of(self, session: Session, row: BiliUpload) -> Path | None:
+        """已翻译完的中文字幕文件。**不存进 `BiliUpload`**：它是翻译任务的产物，
+        复制一份就会出现两份真相（译文重做一遍后旧路径还在）。"""
+        if not row.item_id:
+            return None
+        translation = session.exec(
+            select(SubtitleTranslation)
+            .where(
+                SubtitleTranslation.job_id == row.job_id,
+                SubtitleTranslation.item_id == row.item_id,
+                SubtitleTranslation.state == "succeeded",
+            )
+            .order_by(SubtitleTranslation.created_at.desc())
+        ).first()
+        if translation is None or not translation.output_path:
+            return None
+        path = Path(translation.output_path)
+        return path if path.is_file() else None
+
+    def attach_translation(self, upload_id: str, subtitle_path: Path) -> BiliUploadRead:
+        """把译文字幕补挂到**已经投稿成功**的稿件上。绝不重跑投稿命令。
+
+        前置条件与 `retry_upload` 的「只补字幕」同源：稿件必须已在平台上且拿得到
+        `aid` / `bvid` / `cid`。不满足就返回 `skipped` 结论，不抛异常。
+        """
+        with Session(self.engine) as session:
+            row = session.get(BiliUpload, upload_id)
+            if row is None:
+                raise KeyError(upload_id)
+            status, job_id, item_id = row.status, row.job_id, row.item_id
+            aid, bvid, cid = row.aid, row.bvid, row.cid
+            index = self._index_for(session, job_id, item_id)
+        if status not in {BiliUploadStatus.published.value, BiliUploadStatus.reviewing.value}:
+            raise BiliPreconditionError(
+                "这条稿件还没确认投稿成功，不能补挂中文字幕",
+                "先等稿件上传完成，再点「上传中文字幕」",
+                code="upload_not_ready",
+            )
+        result = UploadResult(
+            index=index,
+            item_id=item_id,
+            status=status,
+            title="",
+            aid=aid,
+            bvid=bvid,
+            cid=cid,
+        )
+        if aid and bvid and cid:
+            state, message, _ = attach_translated_subtitle(
+                self._context(), aid=int(aid), bvid=str(bvid), cid=int(cid), path=subtitle_path, lan="zh"
+            )
+        else:
+            state, message = "skipped", "稿件还没核对到 aid/cid，暂时挂不上中文字幕"
+        result.translated_subtitle_state = state
+        result.translated_subtitle_lan = "zh"
+        result.translated_subtitle_message = message
+        self._store_result(upload_id, result)
+        self._publish_threadsafe(
+            {"type": "bili_upload_finished", "job_id": job_id, "upload_id": upload_id}
+        )
+        with Session(self.engine) as session:
+            updated = session.get(BiliUpload, upload_id)
+            assert updated is not None
+            return read_upload(updated, index=index)
 
     def _subtitle_of(self, session: Session, row: BiliUpload) -> tuple[Path | None, str | None]:
         """这条稿件要一并传的字幕。**从下载结论里读，不在投稿记录里再存一份。**
@@ -1524,6 +1594,9 @@ class BiliManager:
             row.subtitle_state = result.subtitle_state
             row.subtitle_lan = result.subtitle_lan
             row.subtitle_message = result.subtitle_message
+            row.translated_subtitle_state = result.translated_subtitle_state
+            row.translated_subtitle_lan = result.translated_subtitle_lan
+            row.translated_subtitle_message = result.translated_subtitle_message
             row.error = result.error
             row.advice = result.advice
             row.log_tail = result.log_tail

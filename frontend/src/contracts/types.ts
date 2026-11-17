@@ -499,6 +499,10 @@ export interface BiliUpload {
   subtitle_state: BiliSubtitleState;
   subtitle_lan: string;
   subtitle_message: string;
+  /** 翻译后的中文字幕是另一条轨，结论单独记，避免 en 成功掩盖 zh 失败。 */
+  translated_subtitle_state: BiliSubtitleState;
+  translated_subtitle_lan: string;
+  translated_subtitle_message: string;
   error: string | null;
   advice: string | null;
   attempt: number;

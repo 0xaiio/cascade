@@ -94,12 +94,12 @@
 | `DELETE` | `/api/bilibili/cookies` | 清除 B站 登录态；幂等，本来没有也返回体检结论。 | `BiliStatusRead` |
 | `GET` | `/api/bilibili/prefill` | 预填上传表单：单视频给一组值，合集给「模板 + 逐条预览 + 超限定位」。 | [`BiliPrefillRead`](../backend/app/contracts/schemas.py#L556) |
 | `GET` | `/api/bilibili/seasons` | 账号下**已存在**的合集，供投稿界面下拉选择。**未登录也返回 200**（空列表 + `error` 说明原因）。 | [`BiliSeasonListRead`](../backend/app/contracts/schemas.py#L622) |
-| `GET` | `/api/bilibili/uploads` | 按任务读回上传状态（任务级徽标 + 条目级明细 + 合集记录）。 | [`BiliJobUploadsRead`](../backend/app/contracts/schemas.py#L727) |
+| `GET` | `/api/bilibili/uploads` | 按任务读回上传状态（任务级徽标 + 条目级明细 + 合集记录）。 | [`BiliJobUploadsRead`](../backend/app/contracts/schemas.py#L731) |
 | `POST` | `/api/bilibili/uploads` | 启动单视频投稿（可选归入某个合集）；返回**整个任务**的上传状态。 | [`BiliUploadCreate`](../backend/app/contracts/schemas.py#L590)、`BiliJobUploadsRead` |
-| `GET` | `/api/bilibili/uploads/summary` | **所有有 B站 记录的任务**的徽标汇总（任务中心每行一个图标，逐个问就是 N 个请求）。 | [`BiliJobUploadsSummaryRead`](../backend/app/contracts/schemas.py#L742) |
-| `POST` | `/api/bilibili/uploads/{upload_id}/retry` | 重试一条稿件；动作按终态三选一。 | [`BiliRetryRead`](../backend/app/contracts/schemas.py#L753) |
+| `GET` | `/api/bilibili/uploads/summary` | **所有有 B站 记录的任务**的徽标汇总（任务中心每行一个图标，逐个问就是 N 个请求）。 | [`BiliJobUploadsSummaryRead`](../backend/app/contracts/schemas.py#L746) |
+| `POST` | `/api/bilibili/uploads/{upload_id}/retry` | 重试一条稿件；动作按终态三选一。 | [`BiliRetryRead`](../backend/app/contracts/schemas.py#L757) |
 | `POST` | `/api/bilibili/collections` | 启动合集投稿：按模板逐条投稿，全部确认发布后自动归集。 | [`BiliCollectionCreate`](../backend/app/contracts/schemas.py#L631)、`BiliJobUploadsRead` |
-| `POST` | `/api/bilibili/collections/{season_record_id}/group` | 重试合集归集；已有 `season_id` 时只补加视频，不重复建合集。 | [`BiliSeasonRetryRead`](../backend/app/contracts/schemas.py#L760) |
+| `POST` | `/api/bilibili/collections/{season_record_id}/group` | 重试合集归集；已有 `season_id` 时只补加视频，不重复建合集。 | [`BiliSeasonRetryRead`](../backend/app/contracts/schemas.py#L764) |
 
 路由实现集中在 [routers/](../backend/app/api/routers/__init__.py)。`POST /api/jobs` 成功时返回 `201`，其余返回模型或 `204`。B站 那一组统一返回 JSON 读模型（没有 `204`）。
 
@@ -324,7 +324,7 @@ cookies 体检结果。字段分三层：
 
 ### BiliUploadRead 与 BiliJobUploadsRead
 
-前端真正消费的是 [BiliJobUploadsRead](../backend/app/contracts/schemas.py#L727)（任务级读模型）与 [BiliJobUploadsSummaryRead](../backend/app/contracts/schemas.py#L742)（全部任务的徽标汇总）。`uploads` 按条目在任务中的位置排序，对不上任何条目的记录排在最后。
+前端真正消费的是 [BiliJobUploadsRead](../backend/app/contracts/schemas.py#L731)（任务级读模型）与 [BiliJobUploadsSummaryRead](../backend/app/contracts/schemas.py#L746)（全部任务的徽标汇总）。`uploads` 按条目在任务中的位置排序，对不上任何条目的记录排在最后。
 
 条目级 `status` 是后端自己的生命周期，`badge` 是界面用的粗档位：
 

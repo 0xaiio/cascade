@@ -558,6 +558,10 @@ export const biliUploadPayload: BiliUpload = {
   subtitle_state: "skipped",
   subtitle_lan: "",
   subtitle_message: "没有已下载的字幕，跳过字幕上传",
+  // 译文字幕是另一条轨；出厂态两者都没有。
+  translated_subtitle_state: "skipped",
+  translated_subtitle_lan: "",
+  translated_subtitle_message: "",
   // 默认**没有**在等自动重试（要等的那一条由用例单独造）。
   auto_retry: null
 };

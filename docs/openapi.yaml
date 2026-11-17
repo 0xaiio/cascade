@@ -1262,6 +1262,30 @@ paths:
         "409":
           description: Alignment failed or some cues have no translation.
 
+  /api/translation/jobs/{translation_id}/upload-bili:
+    post:
+      tags: [translation]
+      operationId: uploadBiliTranslation
+      summary: Attach the translated zh CC track to an already published video
+      description: >-
+        Only adds a second CC subtitle track. It never re-runs the upload command,
+        so the video cannot be posted twice.
+      parameters:
+        - name: translation_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Updated upload record; `translated_subtitle_state` says what happened.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BiliUploadRead"
+        "409":
+          description: Translation not exported, file missing, or no accepted upload exists.
+
   /api/translation/probe:
     post:
       tags: [translation]
@@ -3777,6 +3801,17 @@ components:
           type: string
           default: ""
           description: One-line, human-readable explanation of `subtitle_state`.
+        translated_subtitle_state:
+          type: string
+          enum: [posted, skipped, failed]
+          default: skipped
+          description: Result of the translated `zh` CC track, kept separate from the original track.
+        translated_subtitle_lan:
+          type: string
+          default: ""
+        translated_subtitle_message:
+          type: string
+          default: ""
         error:
           type: [string, "null"]
         advice:

@@ -1,5 +1,6 @@
 import { request } from "../shared/api";
 import type {
+  BiliUpload,
   TranslationEditRequest,
   TranslationExport,
   TranslationJob,
@@ -43,6 +44,12 @@ export function cancelTranslation(id: string): Promise<TranslationJob> {
 
 export function exportTranslation(id: string): Promise<TranslationExport> {
   return request<TranslationExport>(`/api/translation/jobs/${encodeURIComponent(id)}/export`, { method: "POST" });
+}
+
+export function uploadBiliTranslation(id: string): Promise<BiliUpload> {
+  return request<BiliUpload>(`/api/translation/jobs/${encodeURIComponent(id)}/upload-bili`, {
+    method: "POST"
+  });
 }
 
 export function deleteTranslation(id: string): Promise<void> {

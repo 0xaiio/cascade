@@ -697,6 +697,10 @@ class BiliUploadRead(BaseModel):
     subtitle_state: str = "skipped"
     subtitle_lan: str = ""
     subtitle_message: str = ""
+    # 译文字幕轨（zh）的结论。与上面的原轨分开，避免「en 成功」掩盖「zh 失败」。
+    translated_subtitle_state: str = "skipped"
+    translated_subtitle_lan: str = ""
+    translated_subtitle_message: str = ""
     error: str | None = None
     advice: str | None = None
     attempt: int = 1

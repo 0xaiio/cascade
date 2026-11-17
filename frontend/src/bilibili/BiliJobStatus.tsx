@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { AlertTriangle, ExternalLink, RotateCcw } from "lucide-react";
 import { jobUploadProgress } from "./biliProgress";
 import { BiliAutoRetryNote } from "./BiliAutoRetryNote";
@@ -169,11 +169,14 @@ export function BiliJobStatus({
           放在最后是因为它最不重要 —— 视频已经在平台上可看了，缺字幕是收尾工作。 */}
       {notable.map((upload) => {
         const subtitleNotable = isNotableSubtitle(upload.subtitle_state) && Boolean(upload.subtitle_message);
-        if (!subtitleNotable) return null;
+        const translatedNotable =
+          isNotableSubtitle(upload.translated_subtitle_state) && Boolean(upload.translated_subtitle_message);
+        if (!subtitleNotable && !translatedNotable) return null;
         const subtitleBad = isBadSubtitle(upload.subtitle_state);
         return (
+          <Fragment key={upload.id}>
+          {subtitleNotable && (
           <div
-            key={upload.id}
             className={`bili-status-line bili-subtitle-line ${subtitleBad ? "is-bad" : ""}`}
           >
             {subtitleBad && <AlertTriangle size={14} className="bili-warn-icon" />}
@@ -193,6 +196,14 @@ export function BiliJobStatus({
             )}
             <BiliAutoRetryNote retry={upload.auto_retry} />
           </div>
+          )}
+          {translatedNotable && (
+            <div className="bili-status-line bili-subtitle-line">
+              <span className="bili-status-label">中文 CC 字幕</span>
+              <span className="bili-status-detail">{upload.translated_subtitle_message}</span>
+            </div>
+          )}
+          </Fragment>
         );
       })}
     </div>
