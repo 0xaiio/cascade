@@ -33,6 +33,7 @@ from ..contracts.schemas import (
 )
 from ..download.error_advice import cookie_required_message
 from ..download.ytdlp_service import YtDlpService, ensure_youtube_url
+from ..translation.local import validate_local_base_url
 
 
 def read_job_or_404(session: Session, job_id: str) -> JobRead:
@@ -298,6 +299,14 @@ def apply_stored_settings(session: Session, settings: AppSettings, service: YtDl
         settings.bili_auto_retry_max_attempts = _clamp_int(
             stored["bili_auto_retry_max_attempts"], 1, 10, settings.bili_auto_retry_max_attempts
         )
+    # 字幕翻译：地址只能是本机；库里被手改成外部地址时退回默认，而不是照着发请求。
+    if "translation_base_url" in stored:
+        try:
+            settings.translation_base_url = validate_local_base_url(stored["translation_base_url"])
+        except ValueError:
+            pass
+    if stored.get("translation_model"):
+        settings.translation_model = stored["translation_model"].strip()
 
 
 def settings_response(session: Session, settings: AppSettings, service: YtDlpService) -> SettingsRead:
@@ -320,6 +329,8 @@ def settings_response(session: Session, settings: AppSettings, service: YtDlpSer
         bili_auto_retry_enabled=settings.bili_auto_retry_enabled,
         bili_auto_retry_interval_seconds=settings.bili_auto_retry_interval_seconds,
         bili_auto_retry_max_attempts=settings.bili_auto_retry_max_attempts,
+        translation_base_url=settings.translation_base_url,
+        translation_model=settings.translation_model,
     )
 
 

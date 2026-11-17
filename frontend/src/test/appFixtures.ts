@@ -245,7 +245,10 @@ export const settingsPayload: Settings = {
   // B站 自动重试的三个旋钮。
   bili_auto_retry_enabled: true,
   bili_auto_retry_interval_seconds: 60,
-  bili_auto_retry_max_attempts: 3
+  bili_auto_retry_max_attempts: 3,
+  // 字幕翻译只连本机模型；夹具保持与后端默认值一致。
+  translation_base_url: "http://127.0.0.1:8080/v1",
+  translation_model: "local"
 };
 
 /**

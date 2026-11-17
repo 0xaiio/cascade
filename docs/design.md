@@ -47,7 +47,7 @@
 | 模块 | 层 | 职责 | 不负责 |
 | --- | --- | --- | --- |
 | [main.py](../backend/app/main.py#L40) | L0 入口 | **只做装配**：建 `ApiContext`、挂载 `api/routers/` 下的 `APIRouter`、静态资源托管、lifespan 启停。 | 不声明路由（路由在 `api/routers/`），不写业务规则，不做状态转换，不构造 yt-dlp 参数。 |
-| [routers/](../backend/app/api/routers/__init__.py#L21) | L0 入口 | 按资源分模块声明 HTTP 路由（`diagnostics` / `cookies` / `analyze` / `jobs` / `job_files` / `settings` / `events` / `bilibili`）：取参、调辅助、定状态码。 | 不做状态转换，不直接调用 yt-dlp，不写领域规则（产物定位见 `job_artifacts`，设置与错误映射见 `api_support`）。 |
+| [routers/](../backend/app/api/routers/__init__.py#L21) | L0 入口 | 按资源分模块声明 HTTP 路由（`diagnostics` / `cookies` / `analyze` / `jobs` / `job_files` / `settings` / `events` / `bilibili` / `translation`）：取参、调辅助、定状态码。 | 不做状态转换，不直接调用 yt-dlp，不写领域规则（产物定位见 `job_artifacts`，设置与错误映射见 `api_support`）。 |
 | [api_context.py](../backend/app/api/api_context.py#L28) | L0 入口 | 请求级依赖容器 `ApiContext`（`frozen` dataclass）+ `get_context` / `get_session` 依赖别名。 | 不装配依赖（装配在 `main.py`），不写业务规则。 |
 | [api_support.py](../backend/app/api/api_support.py#L26) | L0 入口 | 路由支撑：任务/条目定位与 404、设置读写与响应构造、cookies 元数据提取、目录选择、**建任务与克隆共用的写库路径（含磁盘预算预检）**。 | 不声明路由，不做状态转换。 |
 | [job_artifacts.py](../backend/app/download/job_artifacts.py#L31) | L0 入口 | 产物**定位**（一条候选链）与本机**打开**（播放 / 打开所在目录 / 打开字幕）。 | 不删文件（删除带白名单校验，属 `job_manager`），不决定用什么播放器或查看器（属 `system_open`）。 |
@@ -66,6 +66,7 @@
 | [bili_subtitle.py](../backend/app/bilibili/bili_subtitle.py#L277) | L3 领域 | B站 CC 字幕：SRT/VTT → BCC 转换、语言标识映射、一次字幕上传（`posted` / `skipped` / `failed`）。 | **不参与稿件状态判定**、不写库、不重试；不知道端点长什么样（端点在 `bili_api`）。 |
 | [align.py](../backend/app/translation/align.py) | L3 领域 | 字幕翻译的分块、序号回填、**逐条对齐校验**与中文断行；解析复用 `bili_subtitle.parse_subtitle_text`（翻译态不合并重复条）。 | 不写时间轴（时间只从源 cue 复制）、不发请求、不读库、不拼文件路径。 |
 | [provider.py](../backend/app/translation/provider.py) | L3 领域 | 翻译服务的最小契约（`TranslationProvider` / `TranslationItem` / `TranslationReply`）与原始回复的类型化转换。 | 不做 HTTP、不知道本地模型服务地址；具体后端在步骤 2 的 `translation/local` 里。 |
+| [local.py](../backend/app/translation/local.py) | L3 领域 | 本机模型后端：OpenAI 兼容 `/v1/chat/completions`，标准库 `urllib`；401/429/5xx/超时/坏 JSON 各有可读结论；**只接受 loopback 地址**。 | 不重试、不读库、不管分块；不调外部服务（当前阶段的硬边界）。 |
 | [ytdlp_formats.py](../backend/app/download/ytdlp_formats.py#L9) | L3 领域 | 格式选择器、分辨率/大小/codec 提取、降级候选计算。 | 不导入 yt-dlp。 |
 | [disk_budget.py](../backend/app/download/disk_budget.py#L1) | L3 领域 | **磁盘预算判定**：按目标清晰度估单条 / 整批大小、量目标分区可用空间（向上找存在的祖先）、给出 `ok` / `insufficient` / `unknown` 三档结论与带数字的下一步。读不到只提示、绝不阻断；磁盘量取只在这一处。 | 不写库、不改任务状态、不删文件；不猜码率（flat playlist 没给 `filesize` 就如实返回 `unknown`），阻断与否由调用方按 `blocks` 决定。 |
 | [stall_guard.py](../backend/app/download/stall_guard.py#L32) | L3 领域 | 纯函数式停滞判定与 `DownloadStalled`。 | 不写库、不发布事件。 |
@@ -216,7 +217,7 @@ PlantUML 源文件：[download-data-flow.puml](diagrams/download-data-flow.puml)
 
 ### 建任务与入队
 
-`POST /api/jobs` → 解析 → 选条目（单视频合成 1 条 `VideoEntry`）→ **磁盘预算复核**（按本次实际所选清晰度重算；两边数字都读到了且不够就回 409，库里一行都不写）→ 写 `Job` + N 个 `JobItem` → `enqueue()` 把 queued item id 放进队列。playlist 任务会额外在下载根目录下按安全化标题创建子目录，见 [job_download_dir](../backend/app/api/api_support.py#L91)。
+`POST /api/jobs` → 解析 → 选条目（单视频合成 1 条 `VideoEntry`）→ **磁盘预算复核**（按本次实际所选清晰度重算；两边数字都读到了且不够就回 409，库里一行都不写）→ 写 `Job` + N 个 `JobItem` → `enqueue()` 把 queued item id 放进队列。playlist 任务会额外在下载根目录下按安全化标题创建子目录，见 [job_download_dir](../backend/app/api/api_support.py#L92)。
 
 每条视频真正开始前，`_guard_item_disk_budget` 会用 `prepare_download` 给这一条的**真实** `filesize` 再核一次可用空间：不足则该条直接判失败并给带数字的下一步，一个字节都不写；`skip_existing` 命中已有成品时不核（那一轮不会写入大文件）。这一步是 flat playlist 没有 `filesize` 时唯一的兜底。
 

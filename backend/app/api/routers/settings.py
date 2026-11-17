@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException
 from .. import api_support
 from ..api_context import ContextDep, SessionDep
 from ...contracts.schemas import SettingsRead, SettingsUpdate
+from ...translation.local import validate_local_base_url
 
 router = APIRouter()
 
@@ -87,6 +88,19 @@ async def update_app_settings(update: SettingsUpdate, session: SessionDep, ctx: 
         api_support.set_setting(
             session, "bili_auto_retry_max_attempts", str(update.bili_auto_retry_max_attempts)
         )
+    if update.translation_base_url is not None:
+        try:
+            url = validate_local_base_url(update.translation_base_url)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        settings.translation_base_url = url
+        api_support.set_setting(session, "translation_base_url", url)
+    if update.translation_model is not None:
+        model = update.translation_model.strip()
+        if not model:
+            raise HTTPException(status_code=400, detail="本机模型名不能为空")
+        settings.translation_model = model
+        api_support.set_setting(session, "translation_model", model)
     if runtime_options_changed:
         await ctx.manager.set_runtime_download_defaults(
             settings.default_speed_limit_kbps,

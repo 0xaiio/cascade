@@ -47,3 +47,29 @@ def echo_translator(items: Sequence[TranslationItem], *, context: str = "") -> l
 # 让类型检查器验证假实现确实满足协议（运行时无副作用）。
 _PROTOCOL_CHECK: TranslationProvider = FakeTranslationProvider()
 TRANSLATION_ERROR_CHECK = TranslationError
+
+
+class FakeJsonTransport:
+    """本机模型 HTTP 边界的替身：记录请求，按调用次序返回结果或抛错。"""
+
+    def __init__(self, *, responses: Sequence[dict] | None = None) -> None:
+        self.responses: list[dict] = [dict(r) for r in (responses or [])]
+        self.errors: list[Exception | None] = []
+        self.calls: list[tuple[str, dict, float]] = []
+
+    def queue(self, response: dict | None = None, error: Exception | None = None) -> None:
+        self.responses.append(dict(response or {}))
+        self.errors.append(error)
+
+    def post_json(self, url: str, payload: dict, *, timeout: float) -> dict:
+        self.calls.append((url, payload, timeout))
+        index = len(self.calls) - 1
+        if index < len(self.errors) and self.errors[index] is not None:
+            raise self.errors[index]  # type: ignore[misc]
+        if index >= len(self.responses):
+            return _chat_reply('[{"i":0,"text":"你好"}]')
+        return self.responses[index]
+
+
+def _chat_reply(content: str) -> dict:
+    return {"choices": [{"message": {"role": "assistant", "content": content}}]}

@@ -1114,6 +1114,22 @@ paths:
                   value: |
                     data: {"type": "job_finished", "job_id": "6f1a3d2c-9f4b-4a1e-8c2d-0b7e5a91c3aa", "status": "succeeded", "error": null}
 
+  /api/translation/probe:
+    post:
+      tags: [translation]
+      operationId: probeTranslation
+      summary: Probe the local translation model with one minimal request
+      description: >-
+        Sends a single short cue to the configured loopback endpoint. An unavailable
+        model is a normal result (`ok: false`), not an HTTP error.
+      responses:
+        "200":
+          description: Probe result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranslationProbeRead"
+
   /api/settings:
     get:
       tags: [settings]
@@ -2619,6 +2635,19 @@ components:
             - $ref: "#/components/schemas/JobRead"
             - type: "null"
 
+    TranslationProbeRead:
+      type: object
+      required: [ok, message]
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+          description: Human-readable result; on failure it names the HTTP status or connection error.
+        model:
+          type: string
+          default: ""
+
     SettingsRead:
       type: object
       required:
@@ -2703,11 +2732,25 @@ components:
             handed back to the user instead of polling forever. The default is small on
             purpose: how long a review takes is not knowable from here, so the app tries
             a few times and then hands the decision back.
+        translation_base_url:
+          type: string
+          default: http://127.0.0.1:8080/v1
+          description: OpenAI-compatible endpoint of the LOCAL subtitle model. Loopback only.
+          example: http://127.0.0.1:8080/v1
+        translation_model:
+          type: string
+          default: local
+          description: Model name reported to the local server. No API key is accepted.
 
     SettingsUpdate:
       type: object
       description: Partial update; omitted fields keep their stored value.
       properties:
+        translation_base_url:
+          type: [string, "null"]
+          description: Must be a loopback address; external endpoints are rejected with 400.
+        translation_model:
+          type: [string, "null"]
         bili_auto_retry_enabled:
           type: [boolean, "null"]
         bili_auto_retry_interval_seconds:

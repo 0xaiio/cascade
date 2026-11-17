@@ -304,6 +304,17 @@ class SettingsRead(BaseModel):
     bili_auto_retry_enabled: bool = True
     bili_auto_retry_interval_seconds: int = 60
     bili_auto_retry_max_attempts: int = 3
+    # 字幕翻译（当前只支持本机模型）。没有 API Key 字段：不允许外部服务。
+    translation_base_url: str = "http://127.0.0.1:8080/v1"
+    translation_model: str = "local"
+
+
+class TranslationProbeRead(BaseModel):
+    """「本机模型能不能用」的实测结论。`ok` 只表示这次最短请求成功。"""
+
+    ok: bool
+    message: str
+    model: str = ""
 
 
 class SettingsUpdate(BaseModel):
@@ -322,6 +333,8 @@ class SettingsUpdate(BaseModel):
     bili_auto_retry_enabled: bool | None = None
     bili_auto_retry_interval_seconds: int | None = Field(default=None, ge=10, le=300)
     bili_auto_retry_max_attempts: int | None = Field(default=None, ge=1, le=10)
+    translation_base_url: str | None = None
+    translation_model: str | None = None
 
 
 class CookieStatus(BaseModel):

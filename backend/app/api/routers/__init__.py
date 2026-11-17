@@ -15,6 +15,7 @@ from .events import router as events_router
 from .job_files import router as job_files_router
 from .jobs import router as jobs_router
 from .settings import router as settings_router
+from .translation import router as translation_router
 
 # 顺序沿用重构前 `main.py` 的声明次序，但把同一资源聚在一起：`/api/cookies/verify` 随 cookies 归位
 # （原先它夹在自检路由中间），SSE 排在设置之后。路径之间没有前缀冲突，因此顺序不影响匹配结果，
@@ -28,4 +29,5 @@ API_ROUTERS = (
     settings_router,
     events_router,
     bilibili_router,
+    translation_router,
 )

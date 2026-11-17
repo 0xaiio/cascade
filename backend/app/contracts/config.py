@@ -8,6 +8,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
+# 本地模型服务的默认落点。放在契约层，让 `translation/local.py` 与设置项共用同一份值 ——
+# 两处各写一遍字面量，改了一处就会出现「界面显示的地址和实际请求的地址不一样」。
+DEFAULT_TRANSLATION_BASE_URL = "http://127.0.0.1:8080/v1"
+DEFAULT_TRANSLATION_MODEL = "local"
+DEFAULT_TRANSLATION_TIMEOUT_SECONDS = 120.0
+
 
 def default_download_concurrency() -> int:
     try:
@@ -97,6 +103,14 @@ class AppSettings(BaseSettings):
     # 默认 3 次：先替用户试几下，不成把手动按钮交回给他 —— 审核要多久我们并不知道，
     # 假装能等到它不如早点停下。要覆盖更长的审核期就调大它（上限 10 次）。
     bili_auto_retry_max_attempts: int = Field(default=3, ge=1, le=10)
+
+    # ---- 字幕翻译（当前阶段只支持本机模型）----
+    # 地址与模型名是可写的设置；**没有 API Key 字段**，因为这一阶段只允许连本机服务，
+    # 把凭据写进契约或界面只会让人误以为可以调外部服务。
+    translation_base_url: str = DEFAULT_TRANSLATION_BASE_URL
+    translation_model: str = DEFAULT_TRANSLATION_MODEL
+    # 单次请求的等待上限。长字幕分块后单块只有几十条，120 秒足够本地模型跑完。
+    translation_timeout_seconds: float = Field(default=DEFAULT_TRANSLATION_TIMEOUT_SECONDS, ge=1)
 
     @property
     def cookies_path(self) -> Path:

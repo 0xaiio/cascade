@@ -201,7 +201,11 @@ export interface Settings {
   bili_auto_retry_interval_seconds: number;
   /** 最多自动试几次；超过就停下来，把手动按钮交回给用户。 */
   bili_auto_retry_max_attempts: number;
+  /** 字幕翻译：当前阶段只支持本机模型，地址必须是 127.0.0.1 / localhost / ::1。 */
+  translation_base_url: string;
+  translation_model: string;
 }
+
 
 /** cookies 文件的状态。**来源只有用户给的文件一种**（浏览器导入入口已移除，见 ai/bug-fix/038）。 */
 export interface CookieStatus {

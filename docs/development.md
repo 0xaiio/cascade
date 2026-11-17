@@ -132,7 +132,7 @@ Linux/macOS：bash init/start.sh dev
 
 ## 环境变量
 
-配置类定义见 [AppSettings](../backend/app/contracts/config.py#L19)，前缀为 `YTDL_`，并会读取仓库根目录的 `.env`。`env_file` 用的是**绝对路径**（`REPO_ROOT / ".env"`），所以与你从哪个目录启动无关 —— 相对路径会按当前工作目录解析，而文档里的命令都是 `cd backend` 之后执行的。`.env` 已被 Git 忽略。下表列出 `AppSettings` 的全部 27 个字段及其当前默认值；另有 `YTDL_LOG_LEVEL`（默认 `INFO`）不经过 `AppSettings`，由 [configure_logging](../backend/app/infra/logging_setup.py#L48) 直接读取。
+配置类定义见 [AppSettings](../backend/app/contracts/config.py#L25)，前缀为 `YTDL_`，并会读取仓库根目录的 `.env`。`env_file` 用的是**绝对路径**（`REPO_ROOT / ".env"`），所以与你从哪个目录启动无关 —— 相对路径会按当前工作目录解析，而文档里的命令都是 `cd backend` 之后执行的。`.env` 已被 Git 忽略。下表列出 `AppSettings` 的全部 27 个字段及其当前默认值；另有 `YTDL_LOG_LEVEL`（默认 `INFO`）不经过 `AppSettings`，由 [configure_logging](../backend/app/infra/logging_setup.py#L48) 直接读取。
 
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
