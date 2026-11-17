@@ -33,7 +33,7 @@ from .provider import (
     TranslationProvider,
     TranslationReply,
 )
-from .render import export_files
+from .render import export_bilingual_files, export_files
 from .store import cues_path, cue_records, load_cues, new_translation_id, save_cues
 
 logger = logging.getLogger(__name__)
@@ -97,6 +97,7 @@ class TranslationService:
             translated=row.translated,
             failed=row.failed,
             source_sha256=row.source_sha256,
+            display_mode=row.display_mode,
             output_path=row.output_path,
             bilingual_path=row.bilingual_path,
             error=row.error,
@@ -157,6 +158,22 @@ class TranslationService:
             return self._read(row)
 
     # ------------------------------------------------------------ 编辑与重试
+    def set_display_mode(self, translation_id: str, mode: str) -> TranslationRead:
+        """切换「仅中文 / 中英双语同屏」。只改呈现，不改译文与时间轴。"""
+        if mode not in {"zh", "bilingual"}:
+            raise HTTPException(status_code=422, detail="呈现模式只能是 zh 或 bilingual")
+        with Session(self.engine) as session:
+            row = session.get(SubtitleTranslation, translation_id)
+            if row is None:
+                raise HTTPException(status_code=404, detail="找不到这次字幕翻译")
+            row.display_mode = mode
+            from ..contracts.models import utc_now
+
+            row.updated_at = utc_now()
+            session.add(row)
+            session.commit()
+            return self._read(row)
+
     def edit(self, translation_id: str, index: int, text: str) -> TranslationRead:
         with Session(self.engine) as session:
             row = session.get(SubtitleTranslation, translation_id)
@@ -244,7 +261,13 @@ class TranslationService:
                 for item in data["cues"]
             ]
             try:
-                srt_path, bilingual_path = export_files(source, aligned, row.source_path)
+                if row.display_mode == "bilingual":
+                    srt_path, bilingual_path, bcc_path = export_bilingual_files(
+                        source, aligned, row.source_path
+                    )
+                else:
+                    srt_path, bilingual_path = export_files(source, aligned, row.source_path)
+                    bcc_path = None
             except TranslationError as exc:
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
             row.output_path = srt_path
@@ -255,7 +278,10 @@ class TranslationService:
             session.add(row)
             session.commit()
             return TranslationExportRead(
-                srt_path=srt_path, bilingual_path=bilingual_path, cue_count=len(aligned)
+                srt_path=srt_path,
+                bilingual_path=bilingual_path,
+                cue_count=len(aligned),
+                bcc_path=bcc_path,
             )
 
     def delete(self, translation_id: str) -> None:

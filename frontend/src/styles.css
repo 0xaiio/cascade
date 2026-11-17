@@ -2771,3 +2771,44 @@ th {
   background: #fff;
   color: #1f5cae;
 }
+
+/* 呈现方式分段控件：只有两项，不值得引入通用组件。 */
+.translation-mode {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: -4px 0 10px;
+  color: #54627a;
+  font-size: 12px;
+}
+
+.translation-mode button {
+  padding: 4px 10px;
+  border: 1px solid #d5ddeb;
+  border-radius: 999px;
+  background: #fff;
+  color: #31506f;
+}
+
+.translation-mode button[aria-pressed="true"] {
+  border-color: #1f6feb;
+  background: #e7f0ff;
+  color: #1759b0;
+  font-weight: 700;
+}
+
+.translation-mode-hint {
+  color: #a33b2b;
+}
+
+/* B站 实际渲染形态预览：两行同属一条 cue，绝对不能出现两个时间码。 */
+.translation-bilingual-preview {
+  margin: 6px 0;
+  padding: 7px 9px;
+  border-left: 3px solid #0ea5a4;
+  background: #f5fbfa;
+  white-space: pre-line;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}

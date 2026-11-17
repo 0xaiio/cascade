@@ -6,6 +6,7 @@ import {
   exportTranslation,
   getTranslation,
   retryTranslation,
+  setTranslationMode,
   startTranslation,
   uploadBiliTranslation
 } from "./translation";
@@ -41,6 +42,8 @@ export function SubtitleTranslateDialog({
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState("");
   const [uploadNote, setUploadNote] = useState("");
+  // 切模式后既有导出文件是旧排版，必须重新导出才能上传。
+  const [modeDirty, setModeDirty] = useState(false);
   const jobIdRef = useRef("");
 
   useEffect(() => {
@@ -134,6 +137,38 @@ export function SubtitleTranslateDialog({
                 <span>{job.total} 条</span>
                 <span className={`translation-state is-${job.state}`}>{STATE_LABEL[job.state] || job.state}</span>
               </div>
+              <div className="translation-mode" role="group" aria-label="呈现方式">
+                <span>呈现方式</span>
+                <button
+                  type="button"
+                  aria-pressed={job.display_mode === "zh"}
+                  disabled={Boolean(busy)}
+                  onClick={() =>
+                    void run("切换呈现", async () => {
+                      setModeDirty(true);
+                      setUploadNote("");
+                      return setTranslationMode(job.id, "zh");
+                    })
+                  }
+                >
+                  仅中文
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={job.display_mode === "bilingual"}
+                  disabled={Boolean(busy)}
+                  onClick={() =>
+                    void run("切换呈现", async () => {
+                      setModeDirty(true);
+                      setUploadNote("");
+                      return setTranslationMode(job.id, "bilingual");
+                    })
+                  }
+                >
+                  中英双语（同屏）
+                </button>
+                {modeDirty && <span className="translation-mode-hint">排版已变更，请重新导出后再上传</span>}
+              </div>
               <div className="translation-progress" aria-label="翻译进度">
                 <div className="translation-progress-bar">
                   <span style={{ width: `${job.total ? (job.translated / job.total) * 100 : 0}%` }} />
@@ -183,7 +218,13 @@ export function SubtitleTranslateDialog({
               <div className="translation-cues">
                 {visible.length === 0 && <p className="translation-hint">没有符合条件的条目。</p>}
                 {visible.map((cue) => (
-                  <CueRow key={cue.index} cue={cue} disabled={Boolean(busy)} onSave={saveCue} />
+                  <CueRow
+                    key={cue.index}
+                    cue={cue}
+                    bilingual={job.display_mode === "bilingual"}
+                    disabled={Boolean(busy)}
+                    onSave={saveCue}
+                  />
                 ))}
               </div>
             </>
@@ -197,14 +238,19 @@ export function SubtitleTranslateDialog({
             type="button"
             className="ghost-button"
             disabled={!job || active || busy !== ""}
-            onClick={() => void run("导出", () => exportTranslation(job!.id))}
+            onClick={() =>
+              void run("导出", async () => {
+                await exportTranslation(job!.id);
+                setModeDirty(false);
+              })
+            }
           >
-            导出中文 + 对照 SRT
+            {job?.display_mode === "bilingual" ? "导出双语 SRT / BCC" : "导出中文 + 对照 SRT"}
           </button>
           <button
             type="button"
             className="primary-button"
-            disabled={!job || active || busy !== "" || !job.output_path}
+            disabled={!job || active || busy !== "" || !job.output_path || modeDirty}
             onClick={() =>
               void run("上传中文字幕", async () => {
                 const result = await uploadBiliTranslation(job!.id);
@@ -234,10 +280,12 @@ const STATE_LABEL: Record<string, string> = {
 
 function CueRow({
   cue,
+  bilingual,
   disabled,
   onSave
 }: {
   cue: TranslationCue;
+  bilingual: boolean;
   disabled: boolean;
   onSave: (cue: TranslationCue, text: string) => Promise<void>;
 }) {
@@ -254,6 +302,11 @@ function CueRow({
         {cue.state === "failed" && <span className="translation-failed">翻译失败</span>}
       </div>
       <p className="translation-source">{cue.source}</p>
+      {bilingual && cue.translation && (
+        <p className="translation-bilingual-preview" aria-label={`B站 双语预览 ${cue.index + 1}`}>
+          {`${cue.source.replace(/\s+/g, " ").trim()}\n${cue.translation.replace(/\s+/g, " ").trim()}`}
+        </p>
+      )}
       <textarea
         aria-label={`第 ${cue.index + 1} 条译文`}
         className="translation-target"

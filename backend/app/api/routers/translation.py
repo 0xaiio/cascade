@@ -22,6 +22,7 @@ from ...contracts.schemas import (
     TranslationCreateRequest,
     TranslationEditRequest,
     TranslationExportRead,
+    TranslationModeRequest,
     TranslationProbeRead,
     TranslationRead,
 )
@@ -90,6 +91,14 @@ async def retry_translation(translation_id: str, ctx: ContextDep) -> Translation
 @router.post("/api/translation/jobs/{translation_id}/cancel", response_model=TranslationRead)
 def cancel_translation(translation_id: str, ctx: ContextDep) -> TranslationRead:
     return ctx.translations.cancel(translation_id)
+
+
+@router.patch("/api/translation/jobs/{translation_id}/mode", response_model=TranslationRead)
+def set_translation_mode(
+    translation_id: str, request: TranslationModeRequest, ctx: ContextDep
+) -> TranslationRead:
+    """切换呈现模式；不重译、不改时间轴。"""
+    return ctx.translations.set_display_mode(translation_id, request.mode)
 
 
 @router.post("/api/translation/jobs/{translation_id}/export", response_model=TranslationExportRead)

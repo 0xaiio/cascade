@@ -25,6 +25,17 @@ export function getTranslation(id: string): Promise<TranslationJob> {
   return request<TranslationJob>(`/api/translation/jobs/${encodeURIComponent(id)}`);
 }
 
+export function setTranslationMode(
+  id: string,
+  mode: "zh" | "bilingual"
+): Promise<TranslationJob> {
+  return request<TranslationJob>(`/api/translation/jobs/${encodeURIComponent(id)}/mode`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode })
+  });
+}
+
 export function editTranslationCue(id: string, index: number, text: string): Promise<TranslationJob> {
   const body: TranslationEditRequest = { text };
   return request<TranslationJob>(`/api/translation/jobs/${encodeURIComponent(id)}/cues/${index}`, {

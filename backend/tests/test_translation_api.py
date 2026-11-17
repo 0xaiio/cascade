@@ -334,3 +334,49 @@ def test_upload_bili_endpoint_refuses_before_the_video_is_published(tmp_path: Pa
     response = client.post(f"/api/translation/jobs/{created['id']}/upload-bili")
     assert response.status_code == 409
     assert "找不到已投稿成功" in response.json()["detail"]
+
+
+# ---------------------------------------------------------------- 双语模式
+def test_bilingual_mode_exports_one_cue_with_two_lines_and_bcc(tmp_path: Path) -> None:
+    """默认仅中文；切到双语后导出三件套，两行共用同一条时间轴。"""
+    import json
+
+    client, subtitle = setup_job(tmp_path, ScriptedProvider())
+    created = client.post("/api/translation/jobs", json={"job_id": "job-1"}).json()
+    assert created["display_mode"] == "zh"
+    wait_state(client, created["id"], {"succeeded"})
+
+    changed = client.patch(f"/api/translation/jobs/{created['id']}/mode", json={"mode": "bilingual"})
+    assert changed.status_code == 200 and changed.json()["display_mode"] == "bilingual"
+    assert client.patch(
+        f"/api/translation/jobs/{created['id']}/mode", json={"mode": "ai-zh"}
+    ).status_code == 422
+
+    exported = client.post(f"/api/translation/jobs/{created['id']}/export")
+    assert exported.status_code == 200
+    body = exported.json()
+    assert body["bcc_path"] and Path(body["bcc_path"]).is_file()
+    upload_srt = Path(body["srt_path"])
+    blocks = [block for block in upload_srt.read_text(encoding="utf-8-sig").split("\n\n") if block.strip()]
+    assert len(blocks) == 3
+    assert blocks[0].splitlines()[2:] == ["Hello world", "译文1"]
+    payload = json.loads(Path(body["bcc_path"]).read_text(encoding="utf-8"))
+    assert len(payload["body"]) == 3
+    assert payload["body"][0]["content"] == "Hello world\n译文1"
+    assert payload["body"][0]["from"] == 1.0 and payload["body"][0]["to"] == 2.0
+    assert subtitle.read_text(encoding="utf-8").startswith("1\n")
+
+
+def test_switching_back_to_zh_writes_the_plain_chinese_track(tmp_path: Path) -> None:
+    client, _ = setup_job(tmp_path, ScriptedProvider())
+    created = client.post("/api/translation/jobs", json={"job_id": "job-1"}).json()
+    wait_state(client, created["id"], {"succeeded"})
+    client.patch(f"/api/translation/jobs/{created['id']}/mode", json={"mode": "bilingual"})
+    bilingual = client.post(f"/api/translation/jobs/{created['id']}/export").json()
+    assert bilingual["bcc_path"]
+
+    client.patch(f"/api/translation/jobs/{created['id']}/mode", json={"mode": "zh"})
+    plain = client.post(f"/api/translation/jobs/{created['id']}/export").json()
+    assert plain["bcc_path"] is None
+    assert Path(plain["srt_path"]).name.endswith(".zh.srt")
+    assert Path(plain["srt_path"]).read_text(encoding="utf-8-sig").count("译文1") == 1

@@ -1201,6 +1201,36 @@ paths:
               schema:
                 $ref: "#/components/schemas/TranslationRead"
 
+  /api/translation/jobs/{translation_id}/mode:
+    patch:
+      tags: [translation]
+      operationId: setTranslationMode
+      summary: Switch between Chinese-only and on-screen bilingual presentation
+      description: >-
+        Does not retranslate. After switching, re-export before uploading so the
+        platform gets the new layout.
+      parameters:
+        - name: translation_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TranslationModeRequest"
+      responses:
+        "200":
+          description: Updated task.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranslationRead"
+        "422":
+          description: Unsupported mode.
+
   /api/translation/jobs/{translation_id}/retry:
     post:
       tags: [translation]
@@ -2816,6 +2846,14 @@ components:
         item_id:
           type: [string, "null"]
           description: Omitted means the job's first item. The server resolves the subtitle path.
+    TranslationModeRequest:
+      type: object
+      required: [mode]
+      properties:
+        mode:
+          type: string
+          enum: [zh, bilingual]
+
     TranslationEditRequest:
       type: object
       required: [text]
@@ -2870,6 +2908,11 @@ components:
           type: integer
         source_sha256:
           type: string
+        display_mode:
+          type: string
+          enum: [zh, bilingual]
+          default: zh
+          description: zh = Chinese only; bilingual = English above Chinese in one cue.
         output_path:
           type: [string, "null"]
         bilingual_path:
@@ -2890,6 +2933,9 @@ components:
           type: string
         cue_count:
           type: integer
+        bcc_path:
+          type: [string, "null"]
+          description: Only written in bilingual mode; the exact BCC sent to the platform.
 
     TranslationProbeRead:
       type: object

@@ -808,6 +808,7 @@ class TranslationRead(BaseModel):
     translated: int
     failed: int
     source_sha256: str = ""
+    display_mode: str = "zh"
     output_path: str | None = None
     bilingual_path: str | None = None
     error: str | None = None
@@ -818,7 +819,15 @@ class TranslationEditRequest(BaseModel):
     text: str
 
 
+class TranslationModeRequest(BaseModel):
+    """呈现模式：`zh` 只显示中文；`bilingual` 英上中下两行同屏。"""
+
+    mode: Literal["zh", "bilingual"]
+
+
 class TranslationExportRead(BaseModel):
     srt_path: str
     bilingual_path: str
     cue_count: int
+    #: 仅双语模式写出：平台 BCC 文件，供核对实际提交的内容。
+    bcc_path: str | None = None

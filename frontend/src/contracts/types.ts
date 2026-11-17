@@ -624,6 +624,8 @@ export interface TranslationJob {
   translated: number;
   failed: number;
   source_sha256: string;
+  /** zh = 仅中文；bilingual = 英上中下两行同屏（同一条 cue）。 */
+  display_mode: "zh" | "bilingual";
   output_path: string | null;
   bilingual_path: string | null;
   error: string | null;
@@ -635,6 +637,8 @@ export interface TranslationExport {
   srt_path: string;
   bilingual_path: string;
   cue_count: number;
+  /** 双语模式才有：平台 BCC 文件。 */
+  bcc_path: string | null;
 }
 
 /** 本机模型连通性结论；不可用是正常结果，不是 HTTP 错误。 */

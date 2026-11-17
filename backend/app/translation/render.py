@@ -109,3 +109,35 @@ def export_files(
     srt_path.write_text(render_srt(aligned), encoding="utf-8-sig")
     bilingual_path.write_text(render_bilingual_srt(aligned), encoding="utf-8-sig")
     return str(srt_path), str(bilingual_path)
+
+
+def export_bilingual_files(
+    source: Sequence[Cue],
+    aligned: Sequence[AlignedCue],
+    source_path: str | Path,
+    *,
+    source_first: bool = True,
+) -> tuple[str, str, str]:
+    """双语模式的三个产物：上传用 SRT、人工对照 SRT、平台 BCC。
+
+    与 `export_files` 共用同一套对齐校验；三条路径都由同一个源文件名派生，
+    不会覆盖原字幕，也不会互相覆盖。
+    """
+    errors = validate_alignment(source, aligned)
+    if errors:
+        raise TranslationError("；".join(errors[:5]))
+    if any(not cue.translation.strip() for cue in aligned):
+        for cue in aligned:
+            bilingual_content(cue.source, cue.translation, source_first=source_first)
+        raise TranslationError("还有条目没有译文，不能导出")
+
+    path = Path(source_path)
+    upload_path = path.with_name(f"{path.stem}.bilingual.zh.srt")
+    bilingual_path = path.with_name(f"{path.stem}.bilingual.srt")
+    bcc_path = path.with_name(f"{path.stem}.bilingual.bcc.json")
+    upload_path.write_text(
+        render_bilingual_upload_srt(aligned, source_first=source_first), encoding="utf-8-sig"
+    )
+    bilingual_path.write_text(render_bilingual_srt(aligned), encoding="utf-8-sig")
+    bcc_path.write_text(render_bilingual_bcc(aligned, source_first=source_first), encoding="utf-8")
+    return str(upload_path), str(bilingual_path), str(bcc_path)

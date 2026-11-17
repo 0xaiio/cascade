@@ -11,6 +11,7 @@ import {
   editTranslationCue,
   exportTranslation,
   getTranslation,
+  setTranslationMode,
   retryTranslation,
   startTranslation,
   uploadBiliTranslation
@@ -25,7 +26,8 @@ vi.mock("./translation", () => ({
   exportTranslation: vi.fn(),
   deleteTranslation: vi.fn(),
   probeTranslation: vi.fn(),
-  uploadBiliTranslation: vi.fn()
+  uploadBiliTranslation: vi.fn(),
+  setTranslationMode: vi.fn()
 }));
 
 // vitest 没开 globals ⇒ RTL 不会自动清理 DOM。
@@ -45,6 +47,7 @@ const JOB: TranslationJob = {
   translated: 1,
   failed: 1,
   source_sha256: "abc",
+  display_mode: "zh",
   output_path: "D://Videos//a.zh.srt",
   bilingual_path: "D://Videos//a.bilingual.srt",
   error: "1 条没译出来，点重试只补这些条目",
@@ -125,7 +128,8 @@ describe("字幕翻译抽屉", () => {
     vi.mocked(exportTranslation).mockResolvedValue({
       srt_path: "a.zh.srt",
       bilingual_path: "a.bilingual.srt",
-      cue_count: 2
+      cue_count: 2,
+      bcc_path: null
     });
     const user = userEvent.setup();
     render(
@@ -150,6 +154,46 @@ describe("字幕翻译抽屉", () => {
 
     await user.click(screen.getByRole("button", { name: /导出中文 \+ 对照 SRT/ }));
     expect(exportTranslation).toHaveBeenCalledWith("tr-1");
+  });
+
+  test("切到中英双语后显示 B站 两行预览，且必须重新导出才能上传", async () => {
+    vi.mocked(startTranslation).mockResolvedValue(JOB);
+    vi.mocked(setTranslationMode).mockResolvedValue({ ...JOB, display_mode: "bilingual" });
+    vi.mocked(exportTranslation).mockResolvedValue({
+      srt_path: "a.bilingual.zh.srt",
+      bilingual_path: "a.bilingual.srt",
+      cue_count: 2,
+      bcc_path: "a.bilingual.bcc.json"
+    });
+    vi.mocked(uploadBiliTranslation).mockResolvedValue({
+      ...(await import("../test/appFixtures")).biliUploadPayload,
+      translated_subtitle_state: "posted",
+      translated_subtitle_message: "双语字幕已上传"
+    });
+    const user = userEvent.setup();
+    render(
+      <SubtitleTranslateDialog
+        jobId="job-running"
+        itemId={null}
+        title="视频"
+        refreshToken={0}
+        onClose={() => {}}
+      />
+    );
+    await screen.findByText("字幕翻译");
+    const upload = screen.getByRole("button", { name: "上传中文字幕到 B站" });
+    expect(upload).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "中英双语（同屏）" }));
+    expect(setTranslationMode).toHaveBeenCalledWith("tr-1", "bilingual");
+    expect(await screen.findByLabelText("B站 双语预览 1")).toHaveTextContent("Hello world");
+    expect(screen.getByLabelText("B站 双语预览 1")).toHaveTextContent("你好世界");
+    expect(screen.getByRole("button", { name: "导出双语 SRT / BCC" })).toBeInTheDocument();
+    // 排版变了但还没重新导出 —— 上传必须挡住，防止把旧的纯中文文件传上去。
+    expect(screen.getByRole("button", { name: "上传中文字幕到 B站" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "导出双语 SRT / BCC" }));
+    expect(exportTranslation).toHaveBeenCalledWith("tr-1");
+    expect(screen.getByRole("button", { name: "上传中文字幕到 B站" })).toBeEnabled();
   });
 
   test("SSE 刷新令牌变化时只重拉这一条任务", async () => {

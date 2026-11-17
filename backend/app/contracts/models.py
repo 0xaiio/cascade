@@ -298,6 +298,8 @@ class SubtitleTranslation(SQLModel, table=True):
     translated: int = 0
     failed: int = 0
     source_sha256: str = ""
+    #: zh = 只显示中文（默认）；bilingual = 同一条 cue 里英上中下两行，同屏显示。
+    display_mode: str = "zh"
     output_path: str | None = None
     bilingual_path: str | None = None
     error: str | None = None
