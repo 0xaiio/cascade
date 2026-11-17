@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { TranslateToChineseIcon } from "../translation/TranslateToChineseIcon";
 import { AlertTriangle, Upload, X } from "lucide-react";
 import {
   COPYRIGHT_REPRINT,
@@ -16,7 +15,8 @@ import {
   renderItemTitle
 } from "./biliForm";
 import { errorMessage } from "../shared/errors";
-import type { BiliGroupMode, BiliMetadata, BiliPrefill, BiliPrefillItem, BiliSeasonList } from "../contracts/types";
+import type {
+  SubtitleSelection, BiliGroupMode, BiliMetadata, BiliPrefill, BiliPrefillItem, BiliSeasonList } from "../contracts/types";
 import { BiliIcon } from "./BiliIcon";
 
 /**
@@ -69,8 +69,7 @@ export function BiliUploadDialog({
   seasons,
   loadSeasons,
   onCancel,
-  onSubmit,
-  onTranslateSubtitle
+  onSubmit
 }: {
   prefill: BiliPrefill;
   isCollection: boolean;
@@ -86,8 +85,6 @@ export function BiliUploadDialog({
    */
   loadSeasons: () => void;
   onCancel: () => void;
-  /** 投稿前在这张表里就能发现「这条还能带中文字幕」。不传则整列不出现入口。 */
-  onTranslateSubtitle?: (jobId: string, itemId: string) => void;
   onSubmit: (values: {
     metadata: BiliMetadata;
     makeCover: boolean;
@@ -95,6 +92,7 @@ export function BiliUploadDialog({
     groupMode: BiliGroupMode;
     seasonId: number | null;
     seasonTitle: string;
+    subtitleSelection: SubtitleSelection;
   }) => Promise<void>;
 }) {
   const initial = (isCollection ? prefill.template : prefill.metadata) ?? {
@@ -110,6 +108,10 @@ export function BiliUploadDialog({
   const [metadata, setMetadata] = useState<BiliMetadata>(initial);
   const [makeCover, setMakeCover] = useState(prefill.make_cover);
   const [comment, setComment] = useState(prefill.comment);
+  // 三个勾选项默认全开：en 与 zh 是两条可切换轨，bilingual 会覆盖 zh 轨。
+  const [subtitleSelection, setSubtitleSelection] = useState<SubtitleSelection>({
+    en: true, zh: true, bilingual: true
+  });
   // **默认值由服务端给**（合集 `new` / 单视频 `none`）。这里保留一个按 `kind` 的兜底，
   // 是为了不让「服务端返回里少了这个字段」变成「一个都没选中」—— 那样用户会以为
   // 归集方式是必填项，而其实有一条正确的默认值。
@@ -237,7 +239,8 @@ export function BiliUploadDialog({
         // **只在「加入已有合集」时给编号**：其余场景带上一个残留值会让服务端
         // 按「有 season_id 就不建合集」处理，「新建」悄悄变成往老合集里塞视频。
         seasonId: groupMode === GROUP_MODE_EXISTING ? seasonId : null,
-        seasonTitle
+        seasonTitle,
+        subtitleSelection
       });
     } catch (err) {
       setError(errorMessage(err, "提交失败"));
@@ -533,22 +536,6 @@ export function BiliUploadDialog({
             </span>
           </div>
 
-          {!isCollection && onTranslateSubtitle && prefill.items[0]?.item_id && (
-            <div className="field">
-              <span className="field-label">字幕</span>
-              <span>{prefill.items[0].subtitle || "—"}</span>
-              <button
-                type="button"
-                className="bili-inline-translate"
-                title="把这条字幕译为中文"
-                aria-label={`译为中文 ${prefill.items[0].source_title}`}
-                onClick={() => onTranslateSubtitle(prefill.job_id, prefill.items[0].item_id!)}
-              >
-                <TranslateToChineseIcon size={15} />
-              </button>
-            </div>
-          )}
-
           {isCollection && (
             <div className="field">
               <span className="field-label">逐条预览（{prefill.items.length} 条）</span>
@@ -575,17 +562,6 @@ export function BiliUploadDialog({
                             「界面说自动生成、后端写 ASR」这种两套说法。空串 = 还没有结论。 */}
                         <td>
                           {item.subtitle || "—"}
-                          {onTranslateSubtitle && item.item_id && !item.subtitle.includes("无字幕") && (
-                            <button
-                              type="button"
-                              className="bili-inline-translate"
-                              title="把这条字幕译为中文"
-                              aria-label={`译为中文 ${item.source_title}`}
-                              onClick={() => onTranslateSubtitle(prefill.job_id, item.item_id!)}
-                            >
-                              <TranslateToChineseIcon size={15} />
-                            </button>
-                          )}
                         </td>
                       </tr>
                     ))}
@@ -594,6 +570,38 @@ export function BiliUploadDialog({
               </div>
             </div>
           )}
+
+          <fieldset className="field bili-subtitle-options">
+            <legend className="field-label">上传哪些字幕</legend>
+            <label className="bili-subtitle-option">
+              <input
+                type="checkbox"
+                checked={subtitleSelection.en}
+                onChange={(event) => setSubtitleSelection((cur) => ({ ...cur, en: event.target.checked }))}
+              />
+              英文 CC（原始字幕）
+            </label>
+            <label className="bili-subtitle-option">
+              <input
+                type="checkbox"
+                checked={subtitleSelection.zh}
+                onChange={(event) => setSubtitleSelection((cur) => ({ ...cur, zh: event.target.checked }))}
+              />
+              中文 CC
+            </label>
+            <label className="bili-subtitle-option">
+              <input
+                type="checkbox"
+                checked={subtitleSelection.bilingual}
+                onChange={(event) => setSubtitleSelection((cur) => ({ ...cur, bilingual: event.target.checked }))}
+              />
+              中英双语（同屏，英上中下）
+            </label>
+            <p className="bili-subtitle-hint">
+              中文与双语共用同一条 zh 轨；两者都勾选时按「中文 → 双语」顺序提交，最终显示双语。
+              勾选了还没做好的字幕会在补传时自动翻译制作。
+            </p>
+          </fieldset>
 
           {(localProblems.length > 0 || prefill.problems.length > 0 || notReady.length > 0) && (
             <ul className="bili-problems" role="alert">

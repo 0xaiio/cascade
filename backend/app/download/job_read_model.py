@@ -6,7 +6,7 @@ from pathlib import Path
 from sqlmodel import Session, select
 
 from .fallback_policy import build_resolution_fallback
-from ..contracts.models import Job, JobItem, JobStatus, utc_now
+from ..contracts.models import Job, JobItem, JobStatus, SubtitleTranslation, utc_now
 from .output_paths import discover_existing_output_path, existing_subtitle_file, resolve_existing_output_path
 from ..contracts.schemas import DownloadOptions, JobItemRead, JobRead, ResolutionFallback
 
@@ -16,6 +16,7 @@ def read_job(session: Session, job_id: str) -> JobRead | None:
     if not job:
         return None
     items = session.exec(select(JobItem).where(JobItem.job_id == job_id).order_by(JobItem.index)).all()
+    translated_paths = _translated_paths(session, job_id)
     paused_at, paused_approximate = _paused_since(job)
     return JobRead(
         id=job.id,
@@ -42,7 +43,7 @@ def read_job(session: Session, job_id: str) -> JobRead | None:
         notify_on_complete=_notify_on_complete(job),
         paused_at=paused_at,
         paused_since_approximate=paused_approximate,
-        items=[_read_job_item(item, job.download_dir) for item in items],
+        items=[_read_job_item(item, job.download_dir, translated_paths.get(item.id)) for item in items],
     )
 
 
@@ -77,7 +78,9 @@ def _notify_on_complete(job: Job) -> bool:
         return False
 
 
-def _read_job_item(item: JobItem, job_download_dir: str | None) -> JobItemRead:
+def _read_job_item(
+    item: JobItem, job_download_dir: str | None, translated_subtitle_path: str | None = None
+) -> JobItemRead:
     base_dir = Path(job_download_dir) if job_download_dir else None
     output_path = _project_output_path(item, job_download_dir)
     return JobItemRead(
@@ -109,6 +112,7 @@ def _read_job_item(item: JobItem, job_download_dir: str | None) -> JobItemRead:
         subtitle_language=item.subtitle_language,
         subtitle_source=item.subtitle_source,
         subtitle_path=_project_subtitle_path(item, output_path, base_dir),
+        translated_subtitle_path=translated_subtitle_path,
         error=item.error,
         created_at=item.created_at,
         updated_at=item.updated_at,
@@ -116,6 +120,24 @@ def _read_job_item(item: JobItem, job_download_dir: str | None) -> JobItemRead:
         finished_at=item.finished_at,
         elapsed_seconds=elapsed_seconds(item.started_at, item.finished_at),
     )
+
+
+def _translated_paths(session: Session, job_id: str) -> dict[str, str]:
+    """一次查询拿到该任务所有「已成功且产物还在」的译轨。
+
+    按 created_at 倒序、每个 item 只取第一条 —— 多次重译后入口必须指向最新那份，
+    而不是最早那次的文件。文件已经不在的当作没有，避免按钮点开 409。
+    """
+    found: dict[str, str] = {}
+    rows = session.exec(
+        select(SubtitleTranslation)
+        .where(SubtitleTranslation.job_id == job_id, SubtitleTranslation.state == "succeeded")
+        .order_by(SubtitleTranslation.created_at.desc())
+    ).all()
+    for row in rows:
+        if row.item_id and row.item_id not in found and row.output_path and Path(row.output_path).is_file():
+            found[row.item_id] = row.output_path
+    return found
 
 
 def _project_output_path(item: JobItem, job_download_dir: str | None) -> str | None:

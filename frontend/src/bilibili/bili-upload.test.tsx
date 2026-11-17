@@ -601,7 +601,9 @@ describe("App · B站 上传表单（单视频）", () => {
       // 用户没动过就照传。`season_id` 在非 `existing` 时**根本不提交这个字段** ——
       // 带上一个残留编号会让服务端按「有 season_id 就不建合集」处理。
       group_mode: "none",
-      season_title: "Unsupported resolution"
+      season_title: "Unsupported resolution",
+      // 上传页三个字幕选项默认全勾。
+      subtitle_selection: { en: true, zh: true, bilingual: true }
     });
   });
 
@@ -981,7 +983,9 @@ describe("App · B站 上传表单（合集）", () => {
       make_cover: true,
       comment: "本视频由个人工作流同步上传，欢迎在评论区交流。",
       // 归集方式默认「新建」—— 改动前的行为就是每次投完自动建一个。
-      group_mode: "new"
+      group_mode: "new",
+      // 三个字幕选项默认全勾。
+      subtitle_selection: { en: true, zh: true, bilingual: true }
     });
     await waitFor(() =>
       expect(notice()).toHaveTextContent("已开始上传《Playlist batch》的 2 个视频，逐个投完后会自动归入同一个合集。")

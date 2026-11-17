@@ -822,3 +822,35 @@ def test_retry_season_returns_the_season_view(client):
     assert response.json()["season"]["id"] == season_id
     # `action` 是「这一次到底做了什么」，界面按它选配色（waiting 与 failed 必须分得开）。
     assert response.json()["action"] in {"grouped", "failed", "waiting"}
+
+
+def test_create_upload_persists_the_subtitle_selection(client):
+    """上传页的勾选必须活过请求边界：等 cid 后补传时要按它执行。"""
+    from app.contracts.models import BiliUpload
+
+    client.seed_job("job1", "单视频任务", 1)
+    payload = single_payload(client)
+    payload["subtitle_selection"] = {"en": True, "zh": False, "bilingual": False}
+    response = client.client.post("/api/bilibili/uploads", json=payload)
+    assert response.status_code == 200
+    client.wait_until_finished(response.json()["uploads"][0]["id"])
+
+    with Session(client.engine) as session:
+        row = session.exec(select(BiliUpload)).first()
+        assert row is not None
+        assert json.loads(row.subtitle_selection_json) == {"en": True, "zh": False, "bilingual": False}
+
+
+def test_create_upload_defaults_to_all_three_subtitle_options(client):
+    """不传就全勾 —— 与上传页的出厂状态一致，老调用方也不必改。"""
+    from app.contracts.models import BiliUpload
+
+    client.seed_job("job1", "单视频任务", 1)
+    response = client.client.post("/api/bilibili/uploads", json=single_payload(client))
+    assert response.status_code == 200
+    client.wait_until_finished(response.json()["uploads"][0]["id"])
+
+    with Session(client.engine) as session:
+        row = session.exec(select(BiliUpload)).first()
+        assert row is not None
+        assert json.loads(row.subtitle_selection_json) == {"en": True, "zh": True, "bilingual": True}

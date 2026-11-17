@@ -46,11 +46,12 @@ class ScriptedProvider:
         return [TranslationReply(index=item.index, text=f"译文{item.index + 1}") for item in items]
 
 
-def setup_job(tmp_path: Path, provider: ScriptedProvider, model_server_ensurer=None):
+def setup_job(tmp_path: Path, provider: ScriptedProvider, model_server_ensurer=None, system_opener=None):
     client = make_client(
         tmp_path,
         translation_provider_factory=lambda: provider,
         model_server_ensurer=model_server_ensurer,
+        system_opener=system_opener,
     )
     seed_job(tmp_path, "job-1", "任务", 1)
     saved = client.get("/api/jobs").json()[0]["items"][0]
@@ -495,3 +496,123 @@ def test_model_server_is_ensured_before_any_translation_request(tmp_path: Path) 
     done = wait_state(client, created["id"], {"succeeded"})
     assert events == ["ensure"]
     assert done["translated"] == 3 and provider.calls
+
+
+# ---------------------------------------------------------------- 状态复用与入口
+def test_job_item_reports_the_translated_subtitle_path(tmp_path: Path) -> None:
+    client, subtitle = setup_job(tmp_path, ScriptedProvider())
+    created = client.post("/api/translation/jobs", json={"job_id": "job-1"}).json()
+    wait_state(client, created["id"], {"succeeded"})
+    assert client.post(f"/api/translation/jobs/{created['id']}/export").status_code == 200
+    exported = client.get(f"/api/translation/jobs/{created['id']}").json()["output_path"]
+
+    item = client.get("/api/jobs").json()[0]["items"][0]
+    assert item["subtitle_path"] == str(subtitle)
+    assert item["translated_subtitle_path"] == exported
+
+    Path(exported).unlink()
+    item = client.get("/api/jobs").json()[0]["items"][0]
+    assert item["translated_subtitle_path"] is None  # 文件没了就不给可点入口
+
+
+def test_lookup_reuses_a_finished_translation_without_a_new_request(tmp_path: Path) -> None:
+    provider = ScriptedProvider()
+    client, _ = setup_job(tmp_path, provider)
+    created = client.post("/api/translation/jobs", json={"job_id": "job-1"}).json()
+    wait_state(client, created["id"], {"succeeded"})
+    calls = len(provider.calls)
+
+    looked = client.get("/api/translation/lookup", params={"job_id": "job-1", "item_id": created["item_id"]})
+    assert looked.status_code == 200
+    assert looked.json()["id"] == created["id"]
+    assert looked.json()["state"] == "succeeded"
+    assert len(provider.calls) == calls  # 查历史不算翻译
+
+
+def test_lookup_without_any_translation_is_404(tmp_path: Path) -> None:
+    client, _ = setup_job(tmp_path, ScriptedProvider())
+    assert client.get("/api/translation/lookup", params={"job_id": "job-1"}).status_code == 404
+
+
+def test_open_translated_subtitle_hands_the_generated_file_to_the_os(tmp_path: Path) -> None:
+    opened: list[Path] = []
+    client, _ = setup_job(tmp_path, ScriptedProvider(), system_opener=lambda p: opened.append(Path(p)))
+    created = client.post("/api/translation/jobs", json={"job_id": "job-1"}).json()
+    wait_state(client, created["id"], {"succeeded"})
+    client.post(f"/api/translation/jobs/{created['id']}/export")
+
+    response = client.post(
+        "/api/translation/open", params={"job_id": "job-1", "item_id": created["item_id"]}
+    )
+    assert response.status_code == 204
+    expected = client.get(f"/api/translation/jobs/{created['id']}").json()["output_path"]
+    assert opened == [Path(expected)]
+
+
+def test_open_translated_subtitle_without_export_is_409(tmp_path: Path) -> None:
+    client, _ = setup_job(tmp_path, ScriptedProvider())
+    created = client.post("/api/translation/jobs", json={"job_id": "job-1"}).json()
+    wait_state(client, created["id"], {"succeeded"})
+    assert client.post(
+        "/api/translation/open", params={"job_id": "job-1", "item_id": created["item_id"]}
+    ).status_code == 409
+
+
+# ---------------------------------------------------------------- 状态复用与入口
+def test_job_item_reports_the_translated_subtitle_path(tmp_path: Path) -> None:
+    client, subtitle = setup_job(tmp_path, ScriptedProvider())
+    created = client.post("/api/translation/jobs", json={"job_id": "job-1"}).json()
+    wait_state(client, created["id"], {"succeeded"})
+    assert client.post(f"/api/translation/jobs/{created['id']}/export").status_code == 200
+    exported = client.get(f"/api/translation/jobs/{created['id']}").json()["output_path"]
+
+    item = client.get("/api/jobs").json()[0]["items"][0]
+    assert item["subtitle_path"] == str(subtitle)
+    assert item["translated_subtitle_path"] == exported
+
+    Path(exported).unlink()
+    item = client.get("/api/jobs").json()[0]["items"][0]
+    assert item["translated_subtitle_path"] is None  # 文件没了就不给可点入口
+
+
+def test_lookup_reuses_a_finished_translation_without_a_new_request(tmp_path: Path) -> None:
+    provider = ScriptedProvider()
+    client, _ = setup_job(tmp_path, provider)
+    created = client.post("/api/translation/jobs", json={"job_id": "job-1"}).json()
+    wait_state(client, created["id"], {"succeeded"})
+    calls = len(provider.calls)
+
+    looked = client.get("/api/translation/lookup", params={"job_id": "job-1", "item_id": created["item_id"]})
+    assert looked.status_code == 200
+    assert looked.json()["id"] == created["id"]
+    assert looked.json()["state"] == "succeeded"
+    assert len(provider.calls) == calls  # 查历史不算翻译
+
+
+def test_lookup_without_any_translation_is_404(tmp_path: Path) -> None:
+    client, _ = setup_job(tmp_path, ScriptedProvider())
+    assert client.get("/api/translation/lookup", params={"job_id": "job-1"}).status_code == 404
+
+
+def test_open_translated_subtitle_hands_the_generated_file_to_the_os(tmp_path: Path) -> None:
+    opened: list[Path] = []
+    client, _ = setup_job(tmp_path, ScriptedProvider(), system_opener=lambda p: opened.append(Path(p)))
+    created = client.post("/api/translation/jobs", json={"job_id": "job-1"}).json()
+    wait_state(client, created["id"], {"succeeded"})
+    client.post(f"/api/translation/jobs/{created['id']}/export")
+
+    response = client.post(
+        "/api/translation/open", params={"job_id": "job-1", "item_id": created["item_id"]}
+    )
+    assert response.status_code == 204
+    expected = client.get(f"/api/translation/jobs/{created['id']}").json()["output_path"]
+    assert opened == [Path(expected)]
+
+
+def test_open_translated_subtitle_without_export_is_409(tmp_path: Path) -> None:
+    client, _ = setup_job(tmp_path, ScriptedProvider())
+    created = client.post("/api/translation/jobs", json={"job_id": "job-1"}).json()
+    wait_state(client, created["id"], {"succeeded"})
+    assert client.post(
+        "/api/translation/open", params={"job_id": "job-1", "item_id": created["item_id"]}
+    ).status_code == 409

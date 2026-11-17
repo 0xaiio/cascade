@@ -1316,6 +1316,57 @@ paths:
         "409":
           description: Translation not exported, file missing, or no accepted upload exists.
 
+  /api/translation/lookup:
+    get:
+      tags: [translation]
+      operationId: lookupTranslation
+      summary: Find the newest translation for an item without starting one
+      description: >-
+        The task-center entry calls this first so a restart reopens the previous result
+        instead of retranscribing it. A miss is a normal 404, not a failure.
+      parameters:
+        - name: job_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: item_id
+          in: query
+          required: false
+          schema:
+            type: [string, "null"]
+      responses:
+        "200":
+          description: Existing task.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranslationRead"
+        "404":
+          description: No translation record for this item.
+
+  /api/translation/open:
+    post:
+      tags: [translation]
+      operationId: openTranslatedSubtitle
+      summary: Open the generated Chinese subtitle with the system default program
+      parameters:
+        - name: job_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: item_id
+          in: query
+          required: false
+          schema:
+            type: [string, "null"]
+      responses:
+        "204":
+          description: Handed to the OS.
+        "409":
+          description: No successful translation and exported file for this item.
+
   /api/translation/probe:
     post:
       tags: [translation]
@@ -2682,6 +2733,13 @@ components:
             same-name `.srt`/`.vtt` next to the video (rows created before that column
             existed).
           example: D:\\Videos\\Title [abc123].en.vtt
+        translated_subtitle_path:
+          type: [string, "null"]
+          description: >-
+            Absolute path of the newest successful Chinese translation for this item,
+            `null` when none exists or the generated file is gone. The task center turns
+            its translation entry into "open Chinese subtitle" from this field alone.
+          example: D:\\Videos\\Title [abc123].zh.srt
         error:
           type: [string, "null"]
           description: Readable failure reason. Media-stream failures are prefixed
@@ -3741,6 +3799,25 @@ components:
           type: string
           default: ""
           description: Only meaningful for `group_mode=new`. Falls back to the job title.
+        subtitle_selection:
+          $ref: "#/components/schemas/SubtitleSelection"
+
+    SubtitleSelection:
+      type: object
+      description: >-
+        Which subtitle tracks to submit. `en` and `zh` are switchable CC tracks;
+        `bilingual` writes two lines into the same `zh` cue, so zh then bilingual
+        means the latter overwrites the former rather than creating a third track.
+      properties:
+        en:
+          type: boolean
+          default: true
+        zh:
+          type: boolean
+          default: true
+        bilingual:
+          type: boolean
+          default: true
 
     BiliCollectionCreate:
       type: object
@@ -3763,6 +3840,8 @@ components:
         comment:
           type: string
           default: ""
+        subtitle_selection:
+          $ref: "#/components/schemas/SubtitleSelection"
 
     BiliUploadRead:
       type: object

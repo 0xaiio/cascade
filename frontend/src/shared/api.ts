@@ -1,6 +1,7 @@
 import { GROUP_MODE_EXISTING } from "../bilibili/biliForm";
 import type {
   AnalyzeResponse,
+  SubtitleSelection,
   ApiErrorDetail,
   BiliGroupMode,
   BiliJobUploads,
@@ -367,7 +368,8 @@ export function createBiliUpload(
   comment: string,
   groupMode: BiliGroupMode,
   seasonId: number | null,
-  seasonTitle: string
+  seasonTitle: string,
+  subtitleSelection: SubtitleSelection
 ): Promise<BiliJobUploads> {
   return request<BiliJobUploads>("/api/bilibili/uploads", {
     method: "POST",
@@ -377,6 +379,7 @@ export function createBiliUpload(
       metadata,
       make_cover: makeCover,
       comment,
+      subtitle_selection: subtitleSelection,
       ...biliGroupFields(groupMode, seasonId, seasonTitle)
     })
   });
@@ -390,7 +393,8 @@ export function createBiliCollection(
   makeCover: boolean,
   comment: string,
   groupMode: BiliGroupMode,
-  seasonId: number | null
+  seasonId: number | null,
+  subtitleSelection: SubtitleSelection
 ): Promise<BiliJobUploads> {
   return request<BiliJobUploads>("/api/bilibili/collections", {
     method: "POST",
@@ -400,6 +404,7 @@ export function createBiliCollection(
       season_desc: seasonDesc,
       make_cover: makeCover,
       comment,
+      subtitle_selection: subtitleSelection,
       ...biliGroupFields(groupMode, seasonId, seasonTitle)
     })
   });

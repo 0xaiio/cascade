@@ -151,6 +151,7 @@ from ..contracts.schemas import (
     BiliSeasonRetryRead,
     BiliStatusRead,
     BiliToolRead,
+    SubtitleSelection,
     BiliUploadRead,
     BiliRetryRead,
 )
@@ -781,6 +782,7 @@ class BiliManager:
         season_id: int | None = None,
         season_title: str = "",
         season_desc: str = "",
+        subtitle_selection: SubtitleSelection | None = None,
     ) -> BiliUploadRead:
         """投稿一条单视频，并按需把它归进一个合集。
 
@@ -806,6 +808,7 @@ class BiliManager:
                 video_path=Path(video_path),
                 make_cover=make_cover,
                 comment=comment,
+                subtitle_selection=subtitle_selection,
             )
             self._upsert_season(
                 session,
@@ -848,6 +851,7 @@ class BiliManager:
         comment: str,
         group_mode: str = GROUP_MODE_NEW,
         season_id: int | None = None,
+        subtitle_selection: SubtitleSelection | None = None,
     ) -> BiliJobUploadsRead:
         self._require_ready()
         missing = [
@@ -894,6 +898,7 @@ class BiliManager:
                     video_path=Path(path) if path else Path(""),
                     make_cover=make_cover,
                     comment=comment,
+                    subtitle_selection=subtitle_selection,
                 )
                 upload_ids.append(row.id)
             season = self._upsert_season(
@@ -951,6 +956,7 @@ class BiliManager:
         video_path: Path,
         make_cover: bool,
         comment: str,
+        subtitle_selection: SubtitleSelection | None = None,
     ) -> BiliUpload:
         row = self._find_upload(session, job_id, item_id)
         if row is None:
@@ -977,6 +983,11 @@ class BiliManager:
         row.cover_path = None
         row.make_cover = make_cover
         row.comment = comment or ""
+        # 空串表示「老投稿没勾选过」，重传时维持旧行为；新投稿才落 JSON。
+        row.subtitle_selection_json = (
+            json.dumps(subtitle_selection.model_dump(), ensure_ascii=False)
+            if subtitle_selection is not None else ""
+        )
         row.status = BiliUploadStatus.queued.value
         row.progress = 0.0
         row.error = None

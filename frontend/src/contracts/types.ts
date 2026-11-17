@@ -130,6 +130,8 @@ export interface JobItem {
    * 前端只拿它决定「打开字幕」按钮是否可点，不拼路径、不自己猜语言后缀。
    */
   subtitle_path: string | null;
+  /** 最新一次成功翻译产出的中文字幕路径；有值则入口变成「打开中文字幕」。 */
+  translated_subtitle_path: string | null;
   error: string | null;
   created_at: string;
   updated_at: string;
@@ -463,6 +465,13 @@ export interface BiliPrefill {
    * 而漂移的表现是「升级后投稿悄悄多出一批合集」，不会报错。
    */
   default_group_mode: BiliGroupMode;
+}
+
+/** 投稿要带哪些字幕轨。zh 与 bilingual 共用同一条 zh 轨，顺序提交后者覆盖前者。 */
+export interface SubtitleSelection {
+  en: boolean;
+  zh: boolean;
+  bilingual: boolean;
 }
 
 export interface BiliUpload {

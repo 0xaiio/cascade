@@ -46,6 +46,7 @@ export function JobQueue({
   onOpenSourcePage,
   onOpenSubtitle,
   onTranslateSubtitle,
+  onOpenTranslatedSubtitle,
   onOpenVideoPage,
   onPause,
   onPlay,
@@ -88,6 +89,8 @@ export function JobQueue({
   onOpenSubtitle: (jobId: string, itemId: string | null) => MaybePromise;
   /** 把这一条的非中文字幕译为中文。入口紧贴「打开字幕」，不另设工具栏按钮。 */
   onTranslateSubtitle: (jobId: string, itemId: string) => void;
+  /** 已有成功译文时入口变成「打开中文字幕」。 */
+  onOpenTranslatedSubtitle: (jobId: string, itemId: string) => void;
   onOpenVideoPage: (url: string) => void;
   onPause: (jobId: string) => void;
   onPlay: (jobId: string) => MaybePromise;
@@ -411,13 +414,17 @@ export function JobQueue({
                     onOpen={() => runLocalFileAction(jobLocalActionKey, () => onOpenSubtitle(job.id, null))}
                   />
                 )}
-                {!isPlaylist && primaryItem?.subtitle_path && (
+                {!isPlaylist && (primaryItem?.subtitle_path || primaryItem?.translated_subtitle_path) && (
                   <button
                     type="button"
                     className="icon-button subtitle-translate-button"
-                    title="把这条字幕译为中文"
-                    aria-label={`译为中文 ${title}`}
-                    onClick={() => primaryItem.id && onTranslateSubtitle(job.id, primaryItem.id)}
+                    title={primaryItem?.translated_subtitle_path ? "打开中文字幕" : "把这条字幕译为中文"}
+                    aria-label={primaryItem?.translated_subtitle_path ? `打开中文字幕 ${title}` : `译为中文 ${title}`}
+                    onClick={() => {
+                      if (!primaryItem?.id) return;
+                      if (primaryItem.translated_subtitle_path) onOpenTranslatedSubtitle(job.id, primaryItem.id);
+                      else onTranslateSubtitle(job.id, primaryItem.id);
+                    }}
                   >
                     <TranslateToChineseIcon size={18} />
                   </button>
@@ -635,13 +642,17 @@ export function JobQueue({
                             runLocalFileAction(itemLocalActionKey, () => onOpenSubtitle(job.id, item.id))
                           }
                         />
-                        {item.subtitle_path && (
+                        {(item.subtitle_path || item.translated_subtitle_path) && (
                           <button
                             type="button"
                             className="icon-button item-action-button subtitle-translate-button"
-                            title="把这条字幕译为中文"
-                            aria-label={`译为中文 ${item.title}`}
-                            onClick={() => onTranslateSubtitle(job.id, item.id)}
+                            title={item.translated_subtitle_path ? "打开中文字幕" : "把这条字幕译为中文"}
+                            aria-label={item.translated_subtitle_path ? `打开中文字幕 ${item.title}` : `译为中文 ${item.title}`}
+                            onClick={() =>
+                              item.translated_subtitle_path
+                                ? onOpenTranslatedSubtitle(job.id, item.id)
+                                : onTranslateSubtitle(job.id, item.id)
+                            }
                           >
                             <TranslateToChineseIcon size={16} />
                           </button>

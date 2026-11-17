@@ -47,6 +47,7 @@ from ...contracts.schemas import (
     BiliSeasonRetryRead,
     BiliStatusRead,
     BiliUploadCreate,
+    SubtitleSelection,
 )
 
 logger = logging.getLogger(__name__)
@@ -222,6 +223,7 @@ async def bili_create_upload(
             season_id=payload.season_id,
             # 与合集那边同一个兜底口径：留空用任务名。单视频的任务名就是视频标题。
             season_title=(payload.season_title or job.title).strip(),
+            subtitle_selection=payload.subtitle_selection,
         )
     except BiliPreconditionError as exc:
         raise _not_ready(exc) from exc
@@ -291,6 +293,7 @@ async def bili_create_collection(
             comment=payload.comment,
             group_mode=mode,
             season_id=payload.season_id,
+            subtitle_selection=payload.subtitle_selection,
         )
     except BiliPreconditionError as exc:
         raise _not_ready(exc) from exc

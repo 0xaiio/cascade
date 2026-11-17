@@ -100,6 +100,8 @@ def _ensure_columns(engine: Engine) -> None:
             "translated_subtitle_state": "TEXT DEFAULT 'skipped'",
             "translated_subtitle_lan": "TEXT DEFAULT ''",
             "translated_subtitle_message": "TEXT DEFAULT ''",
+            # 老投稿没有勾选这一步，空串 ⇒ 重传时维持「只补原轨」的旧行为。
+            "subtitle_selection_json": "TEXT DEFAULT ''",
         },
         "subtitle_translation": {
             # 同屏双语是这张表建出来之后才加的呈现模式。老任务默认「仅中文」——

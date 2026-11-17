@@ -228,6 +228,9 @@ class JobItemRead(BaseModel):
     # 不给这个字段，前端就只能在点下去之后吃一个 409。与 `output_path` 一样是**后端算的**，
     # 前端不拼路径。
     subtitle_path: str | None = None
+    # 最新一次成功翻译产出的中文字幕（文件真的在磁盘上才给值）。
+    # 入口按钮据此在「译为中文」与「打开中文字幕」之间切换。
+    translated_subtitle_path: str | None = None
     error: str | None = None
     created_at: UtcDateTime
     updated_at: UtcDateTime
@@ -587,12 +590,25 @@ class BiliPrefillRead(BaseModel):
     default_group_mode: str = "none"
 
 
+class SubtitleSelection(BaseModel):
+    """投稿要带哪些字幕轨。
+
+    `zh` 与 `bilingual` 共用同一条 `lan=zh` 轨，按 zh → bilingual 顺序提交，后者覆盖前者；
+    这不是三条可并存的轨，界面必须写明。缺省全开与上传页的出厂勾选一致。
+    """
+
+    en: bool = True
+    zh: bool = True
+    bilingual: bool = True
+
+
 class BiliUploadCreate(BaseModel):
     job_id: str = Field(min_length=1)
     item_id: str | None = None
     metadata: BiliMetadata
     make_cover: bool = True
     comment: str = ""
+    subtitle_selection: SubtitleSelection = Field(default_factory=SubtitleSelection)
     # 归入方式：`none` 不归集 / `existing` 加进 `season_id` 指定的已有合集 /
     # `new` 用 `season_title` 新建一个。**默认 `none`** —— 改动前单视频从不进任何合集，
     # 把 `new` 当默认会让此后每条单视频投稿都在账号里多出一个只含它自己的合集。
@@ -635,6 +651,7 @@ class BiliCollectionCreate(BaseModel):
     season_desc: str = ""
     make_cover: bool = True
     comment: str = ""
+    subtitle_selection: SubtitleSelection = Field(default_factory=SubtitleSelection)
     # 归入方式：`none` 不归集 / `existing` 加进 `season_id` 指定的已有合集 /
     # `new` 用 `season_title` 新建一个。默认 `new` —— 改动前的行为就是每次新建。
     group_mode: str = "new"

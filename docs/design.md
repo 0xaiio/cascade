@@ -283,7 +283,7 @@ yt-dlp 自己按「人工先占、自动只补缺」的顺序挑 → 下载成�
 
 单视频：`GET /api/bilibili/prefill` 预填表单 → `POST /api/bilibili/uploads` 落一行 `queued` 的 `BiliUpload` 并入队 → worker 依次做「抽帧封面（可选）→ `biliup` 投稿 → 回读稿件列表对账 → 发并置顶评论（可选）」→ 状态收敛为 `published` / `reviewing` / `unverified` / `rejected` / `failed` → SSE 通知，前端按 `GET /api/bilibili/uploads` 或 `/summary` 重拉读模型。
 
-**预填优先复用上一次投稿**（[build_prefill](../backend/app/bilibili/bili_manager.py#L238)，FR-45）：这个任务/条目投过，就把那一行的入参原样填回表单；没有才按视频标题现算默认值。三条边界：
+**预填优先复用上一次投稿**（[build_prefill](../backend/app/bilibili/bili_manager.py#L239)，FR-45）：这个任务/条目投过，就把那一行的入参原样填回表单；没有才按视频标题现算默认值。三条边界：
 
 - **量的必须是「上一次真的提交出去的那一份」**，不是当前表单的残留 —— 投稿是异步的，表单关掉就没了，所以唯一可靠的来源是 `bili_upload` / `bili_season.template_json`。
 - **合集要存模板原文**：那些行存的是渲染后的结果，反推模板只能猜（见[持久化设计](#持久化设计)）。
@@ -294,7 +294,7 @@ yt-dlp 自己按「人工先占、自动只补缺」的顺序挑 → 下载成�
 两条与平台语义直接相关的约束：
 
 - **命令返回码 0 不等于已发布**。`biliup` 退出后必须用账号的稿件列表回读对账（按标题前缀匹配，两侧都做空白归一），对不上就是 `unverified`（「待核对」，不是失败）——两者措辞必须分开，否则用户会去重投一条**已经投上去**的稿件。
-- **重试动作由终态决定，而不是由按钮决定**：`failed` / `rejected` → 重新投稿（复用同一行，`attempt` 自增）；`unverified` → **只**重读平台列表，绝不重投；已发布或在途 → **什么都不做，除非字幕失败**（那时走「只重传字幕」）。判定只在 [BiliManager](../backend/app/bilibili/bili_manager.py#L434) 里做，界面只负责把这个结论显示出来。
+- **重试动作由终态决定，而不是由按钮决定**：`failed` / `rejected` → 重新投稿（复用同一行，`attempt` 自增）；`unverified` → **只**重读平台列表，绝不重投；已发布或在途 → **什么都不做，除非字幕失败**（那时走「只重传字幕」）。判定只在 [BiliManager](../backend/app/bilibili/bili_manager.py#L435) 里做，界面只负责把这个结论显示出来。
 
 #### 挂在投稿末尾的 CC 字幕
 
@@ -342,7 +342,7 @@ B站 上传有**自己的两套状态**，与 `JobStatus` 无关：
 - `BiliUpload.status`（8 态）：`queued` → `uploading` → 三选一分支 —— `submitted`（命令成功、还没对账）→ `published` / `reviewing` / `rejected`（平台稿件状态码折合）；命令失败或对账查不到则落到 `unverified`（待核对）或 `failed`。`unverified` **不是失败**：它表达「我们还不知道」，所以它的重试只重读平台，不重投。
 - `BiliSeason.status`（4 态）：`pending` → `grouping` → `grouped` / `failed`。`grouped` 的文案是「已提交归集（B站 需人工审核）」——平台侧还有一个看不见的人工审核环节，界面不能承诺「合集已上线」。
 
-界面上的那**一档徽标**（`none` / `uploading` / `uploaded` / `unverified` / `partial` / `failed`）不落库，由 [derive_badge](../backend/app/bilibili/bili_read_model.py#L68) 从「这个任务的全部记录 + 合集记录」现场算出来 —— 多条记录的聚合规则只有这一处，前端不参与。重启后的一致性靠 [resume_interrupted](../backend/app/bilibili/bili_manager.py#L491)：进程退出时停在 `uploading` 的记录（含 `queued`）一律折成**可重试的失败**，而不是永远停在「上传中」。
+界面上的那**一档徽标**（`none` / `uploading` / `uploaded` / `unverified` / `partial` / `failed`）不落库，由 [derive_badge](../backend/app/bilibili/bili_read_model.py#L68) 从「这个任务的全部记录 + 合集记录」现场算出来 —— 多条记录的聚合规则只有这一处，前端不参与。重启后的一致性靠 [resume_interrupted](../backend/app/bilibili/bili_manager.py#L492)：进程退出时停在 `uploading` 的记录（含 `queued`）一律折成**可重试的失败**，而不是永远停在「上传中」。
 
 ## 持久化设计
 
@@ -350,7 +350,7 @@ B站 上传有**自己的两套状态**，与 `JobStatus` 无关：
 | --- | --- | --- |
 | WAL + `busy_timeout=5000` + `synchronous=NORMAL` | 每个连接建立时下发 pragma，见 [_configure_sqlite_connection](../backend/app/infra/db.py#L14)。 | 多 worker 并发写入时"等待"而不是直接 `database is locked`；被其他进程锁住时只跳过 pragma，不让应用起不来。 |
 | 追加式补列 | [_ensure_columns](../backend/app/infra/db.py#L43) 用 `PRAGMA table_info` + `ALTER TABLE ADD COLUMN`。 | 兼容旧库，无需迁移框架。**只支持追加**，不支持删除/改名/改类型。 |
-| WAL checkpoint | lifespan 启动与停止各执行一次 `wal_checkpoint(TRUNCATE)`，见 [checkpoint_wal](../backend/app/infra/db.py#L123)。 | 避免进程被强杀后 `-wal` 侧车无界增长，也避免每次读都回放 WAL。失败只记日志。 |
+| WAL checkpoint | lifespan 启动与停止各执行一次 `wal_checkpoint(TRUNCATE)`，见 [checkpoint_wal](../backend/app/infra/db.py#L125)。 | 避免进程被强杀后 `-wal` 侧车无界增长，也避免每次读都回放 WAL。失败只记日志。 |
 | 进度写入节流 | `ProgressPersistGate`：首次、终态、间隔 ≥250ms 或进度跳变 ≥0.5% 才写。 | 5 路并行时避免把每个 chunk 回调都变成一次事务。 |
 | 进度聚合 | `DownloadProgressAggregator` 按子流分别累计已下载字节，分母取"各子流已知总和的较大者"并以下限钳制。 | 字幕/chunk/分离音视频都会各自回调；不能让小文件或当前 chunk 的 100% 冒充整体完成，也不能把已下载字节归零。 |
 | B站 上传两张表 | `bili_upload`（一条稿件一行）与 `bili_season`（一个任务的合集一行）。前者存投稿入参（标题/简介/标签/分区/视频路径/是否做封面/评论）+ 结果（`bvid`/`aid`/`cid`/`verified_state`/`progress`/`attempt`/`log_tail`），后者存 `season_id` 与归集状态。 | **入参也落库**：投稿是异步的，worker 必须能在用户关掉页面之后照着重投；只存结果会让重试变成「拿当前表单再猜一次」。`attempt` 让重投复用同一行，界面不出现重复条目。 |

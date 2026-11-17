@@ -92,6 +92,7 @@ export const jobPayload: Job = {
       subtitle_source: null,
       // 后端算好的「字幕文件真的在哪」；`null` = 没下到字幕（或已经被删）。按钮的可点性只看它。
       subtitle_path: null,
+      translated_subtitle_path: null,
       error: null
     }
   ]

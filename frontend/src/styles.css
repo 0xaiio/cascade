@@ -2876,3 +2876,32 @@ th {
   line-height: 1.55;
   overflow-wrap: anywhere;
 }
+
+/* 投稿页的字幕勾选：三档默认全开，明确写出同 lan 覆盖的语义。 */
+.bili-subtitle-options {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid #dfe6f2;
+  border-radius: 10px;
+}
+
+.bili-subtitle-options legend {
+  padding: 0 4px;
+  font-weight: 700;
+}
+
+.bili-subtitle-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+  color: #25344b;
+  font-size: 13px;
+}
+
+.bili-subtitle-hint {
+  margin: 8px 0 0;
+  color: #71809a;
+  font-size: 12px;
+  line-height: 1.5;
+}

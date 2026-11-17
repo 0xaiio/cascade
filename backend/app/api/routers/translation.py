@@ -41,6 +41,28 @@ def _launch(ctx: ContextDep, translation_id: str, loop: asyncio.AbstractEventLoo
     task.add_done_callback(_BACKGROUND.discard)
 
 
+@router.get("/api/translation/lookup", response_model=TranslationRead)
+def lookup_translation(job_id: str, item_id: str | None = None, ctx: ContextDep = None) -> TranslationRead:
+    """入口先查：有就打开上次成果，没有才新建。不触发翻译、不发模型请求。"""
+    found = ctx.translations.find(job_id, item_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail="这一条还没有翻译记录")
+    return found
+
+
+@router.post("/api/translation/open", status_code=status.HTTP_204_NO_CONTENT)
+def open_translated_subtitle(job_id: str, item_id: str | None = None, ctx: ContextDep = None) -> Response:
+    """用系统默认程序打开中文字幕；路径由服务端算，前端不拼。"""
+    found = ctx.translations.find(job_id, item_id)
+    if found is None or found.state != "succeeded" or not found.output_path:
+        raise HTTPException(status_code=409, detail="还没有可用的中文字幕")
+    path = Path(found.output_path)
+    if not path.is_file():
+        raise HTTPException(status_code=409, detail="中文字幕文件已不在磁盘上")
+    ctx.open_local_path(path)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.post("/api/translation/probe", response_model=TranslationProbeRead)
 def probe_translation(ctx: ContextDep) -> TranslationProbeRead:
     """用一条最短请求实测本机模型是否可用。不可用时是正常结果（`ok: false`），不是 4xx。"""

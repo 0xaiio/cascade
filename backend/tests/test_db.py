@@ -127,7 +127,8 @@ def test_upgrade_adds_translated_subtitle_columns_and_display_mode(tmp_path: Pat
         upload = connection.execute(
             text(
                 "SELECT translated_subtitle_state, translated_subtitle_lan, "
-                "translated_subtitle_message FROM bili_upload WHERE id = 'old-1'"
+                "translated_subtitle_message, subtitle_selection_json "
+                "FROM bili_upload WHERE id = 'old-1'"
             )
         ).one()
         mode = connection.execute(
@@ -138,9 +139,10 @@ def test_upgrade_adds_translated_subtitle_columns_and_display_mode(tmp_path: Pat
         "translated_subtitle_state",
         "translated_subtitle_lan",
         "translated_subtitle_message",
+        "subtitle_selection_json",
     } <= upload_columns
     assert "display_mode" in translation_columns
-    assert tuple(upload) == ("skipped", "", "")
+    assert tuple(upload) == ("skipped", "", "", "")
     assert mode == "zh"
 
 

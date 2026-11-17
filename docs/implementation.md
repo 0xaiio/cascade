@@ -11,7 +11,7 @@ FastAPI 应用由 [create_app](../backend/app/main.py#L43) 创建，启动时：
 - 创建 `EventBroker`。
 - 创建 `YtDlpService` 并注入 PO token、chunk、throttled rate、aria2c 等配置。
 - 创建 `JobManager` 并在 lifespan 中启动/停止 worker。
-- 创建 [BiliManager](../backend/app/bilibili/bili_manager.py#L434)（B站 投稿队列，单 worker）并同样在 lifespan 中启停；启动时会先把上次退出时停在 `uploading` 的记录折成可重试的失败。
+- 创建 [BiliManager](../backend/app/bilibili/bili_manager.py#L435)（B站 投稿队列，单 worker）并同样在 lifespan 中启停；启动时会先把上次退出时停在 `uploading` 的记录折成可重试的失败。
 - 把这些依赖装进 [ApiContext](../backend/app/api/api_context.py#L29) 并挂到 `app.state`。
 
 `create_app` 只做装配：HTTP 路由按资源拆到 [routers/](../backend/app/api/routers/__init__.py#L21) 下（`diagnostics` / `cookies` / `analyze` / `jobs` / `job_files` / `settings` / `events` / `bilibili`），由 `API_ROUTERS` 统一挂载。路由只做「取参 → 调辅助 → 定状态码」：请求级依赖经 [api_context.py](../backend/app/api/api_context.py#L45) 的 `ContextDep` / `SessionDep` 取，跨路由复用的任务/条目定位、设置读写与 cookies 处理在 [api_support.py](../backend/app/api/api_support.py#L26)，产物定位与本机打开在 [job_artifacts.py](../backend/app/download/job_artifacts.py#L31)。任务序列化逻辑委托给 [job_read_model.py](../backend/app/download/job_read_model.py#L12)，状态转换一律委托 `JobManager`；B站 那一组同理由 [bili_manager.py](../backend/app/bilibili/bili_manager.py) 承担，读模型投影在 [bili_read_model.py](../backend/app/bilibili/bili_read_model.py#L60)。
@@ -29,7 +29,7 @@ FastAPI 应用由 [create_app](../backend/app/main.py#L43) 创建，启动时：
 | `BiliUpload` | B站 投稿记录：入参（标题/简介/标签/分区/视频路径/是否做封面/评论）+ 结果（`bvid`/`aid`/`cid`、进度、对账结论 `verified_state`、`attempt`、`log_tail`）+ 字幕结论（`subtitle_state` / `subtitle_lan` / `subtitle_message`，**独立于稿件状态**）。**入参也落库**，这样用户在关掉页面之后重试仍能照原样重投。 |
 | `BiliSeason` | B站 合集归集记录：`season_id`（建好后即使补加视频失败也保留，重试只补加不重建）、归集状态与错误。 |
 
-数据库初始化调用 [init_db](../backend/app/infra/db.py#L38)。为了兼容旧数据库，[_ensure_columns](../backend/app/infra/db.py#L43) 会补齐新增列。[create_app_engine](../backend/app/infra/db.py#L27) 在每条 SQLite 连接上先设置 `busy_timeout=5000`，再启用 WAL 和 `synchronous=NORMAL`，让多个下载 worker 的进度写入互相等待而不是立刻报 `database is locked`。如果数据库已被其他进程锁住（例如本机已有 uvicorn），WAL pragma 会跳过而不是让应用启动失败。应用启动和停止时各执行一次 `PRAGMA wal_checkpoint(TRUNCATE)`（[checkpoint_wal](../backend/app/infra/db.py#L123)）：避免进程被强杀后遗留的 `-wal` 文件无界增长，也避免每次读取都要回放 WAL；该操作失败只记日志，不影响启动或停止。
+数据库初始化调用 [init_db](../backend/app/infra/db.py#L38)。为了兼容旧数据库，[_ensure_columns](../backend/app/infra/db.py#L43) 会补齐新增列。[create_app_engine](../backend/app/infra/db.py#L27) 在每条 SQLite 连接上先设置 `busy_timeout=5000`，再启用 WAL 和 `synchronous=NORMAL`，让多个下载 worker 的进度写入互相等待而不是立刻报 `database is locked`。如果数据库已被其他进程锁住（例如本机已有 uvicorn），WAL pragma 会跳过而不是让应用启动失败。应用启动和停止时各执行一次 `PRAGMA wal_checkpoint(TRUNCATE)`（[checkpoint_wal](../backend/app/infra/db.py#L125)）：避免进程被强杀后遗留的 `-wal` 文件无界增长，也避免每次读取都要回放 WAL；该操作失败只记日志，不影响启动或停止。
 
 ## 任务调度
 
@@ -142,7 +142,7 @@ yt-dlp 对字幕、缩略图、HTTP chunk 和分离视频/音频流会多次发�
 
 视频大小复用 `JobItem.total_bytes`：下载前由 `prepare_download()` 从所选格式的 `filesize/filesize_approx` 写入，下载中由 progress payload 校准，下载完成后继续保留，前端在任务行和 playlist 子视频行展示。
 
-视频时长走的是另一条路，因为它**不需要等选出格式**：`POST /api/jobs` 建任务时就把解析结果里每个条目的 `duration` 写进 `JobItem.duration`（[routers/jobs.py](../backend/app/api/routers/jobs.py#L57)），任务一进队列就能显示。`duration` 这一列是后补的，补列之前建的旧任务重启时由 [_apply_download_preparation](../backend/app/download/job_manager.py#L1025) 从预检的同一份 `info` 里补上（预检反正要取一次元数据，不为时长多发一次请求）。前端格式化见 [formatMediaDuration](../frontend/src/shared/formatting.ts#L15)：固定 `时:分:秒`，与「已用/剩余」用的 `formatClock` 刻意不同 —— 后者不到一小时时省掉时位，而时长是视频的固有属性，三段位数固定更好扫读。任务行的时长由 [formatJobDuration](../frontend/src/task-center/JobQueue.tsx#L761) 按子视频求和，与「大小」同一套折法（有子视频未知时前缀「已知」）。
+视频时长走的是另一条路，因为它**不需要等选出格式**：`POST /api/jobs` 建任务时就把解析结果里每个条目的 `duration` 写进 `JobItem.duration`（[routers/jobs.py](../backend/app/api/routers/jobs.py#L57)），任务一进队列就能显示。`duration` 这一列是后补的，补列之前建的旧任务重启时由 [_apply_download_preparation](../backend/app/download/job_manager.py#L1025) 从预检的同一份 `info` 里补上（预检反正要取一次元数据，不为时长多发一次请求）。前端格式化见 [formatMediaDuration](../frontend/src/shared/formatting.ts#L15)：固定 `时:分:秒`，与「已用/剩余」用的 `formatClock` 刻意不同 —— 后者不到一小时时省掉时位，而时长是视频的固有属性，三段位数固定更好扫读。任务行的时长由 [formatJobDuration](../frontend/src/task-center/JobQueue.tsx#L772) 按子视频求和，与「大小」同一套折法（有子视频未知时前缀「已知」）。
 
 平均速度由 [TransferStats](../backend/app/download/transfer_stats.py#L5) 根据聚合下载字节和时间计算。运行中 `speed` 是 yt-dlp 当前瞬时速度，终态 `speed` 是平均速度，终态聚合见 [_terminal_job_speed](../backend/app/download/job_manager.py#L918)。
 
@@ -150,7 +150,7 @@ yt-dlp 对字幕、缩略图、HTTP chunk 和分离视频/音频流会多次发�
 
 **下载有字节级进度，上传没有**：`biliup` 在管道模式（非 TTY）下不输出已传字节数，只在三个节点各打一行（`pre_upload` / `Upload completed` / `APP接口投稿成功`），[_PROGRESS_STAGES](../backend/app/bilibili/bili_bin.py#L196) 把它们折成 0.2 / 0.6 / 0.95。所以界面上给的是**四段轨迹**（排队 / 传输 / 提交 / 核对）与「已用时间」，不是百分比条 —— 一个停在 20% 不动的数字比没有数字更糟。阶段映射与聚合在 [biliProgress.ts](../frontend/src/bilibili/biliProgress.ts#L23)。
 
-事件侧有一条与下载不同的约定：[_store_progress](../backend/app/bilibili/bili_manager.py#L1533) **只在进度值真的变大时才发 `bili_upload_progress`**。`on_progress` 是每读一行输出回调一次，不判「变没变」会往 SSE 里灌几百条同值事件；判了之后，一次投稿最多 3 条。前端沿用「收到任何一条事件就重拉」的既有口径，因此不需要为进度维护第二份状态。
+事件侧有一条与下载不同的约定：[_store_progress](../backend/app/bilibili/bili_manager.py#L1544) **只在进度值真的变大时才发 `bili_upload_progress`**。`on_progress` 是每读一行输出回调一次，不判「变没变」会往 SSE 里灌几百条同值事件；判了之后，一次投稿最多 3 条。前端沿用「收到任何一条事件就重拉」的既有口径，因此不需要为进度维护第二份状态。
 
 ## 读模型
 
@@ -164,7 +164,7 @@ API 返回不直接暴露 SQLModel，而由 [read_job](../backend/app/download/j
 - 投影字幕结论（`subtitle_language` / `subtitle_source`）。**不在这里拼展示文案**：投稿表单里那句
   `en · 人工` 由 [`subtitle_summary`](../backend/app/download/subtitle_plan.py#L92) 在服务端的预填阶段算好
   （`BiliPrefillItem.subtitle`），前端原样显示 —— 两处各拼一遍就会出现「界面写自动生成、后端写 ASR」。
-- 把逐任务的「完成后通知」开关从 `options_json` 抬进读模型（[_notify_on_complete](../backend/app/download/job_read_model.py#L64)）。
+- 把逐任务的「完成后通知」开关从 `options_json` 抬进读模型（[_notify_on_complete](../backend/app/download/job_read_model.py#L65)）。
   它只存在于 `options_json` 里，而 SSE 的每个事件只是让前端重拉 `/api/jobs` —— 不抬出来的话，
   「这次会话里提交的任务会提醒、重开页面后同一个任务就不提醒」。提醒本身在浏览器里做，
   后端只存偏好（`completion_notification`）与这个逐任务开关，见 [FR-48](requirements.md#功能需求)。
@@ -190,7 +190,7 @@ B站 上传是一条与下载完全解耦的链路，模块划分（详见 [设�
 
 - **`run_command` 的读取放在后台线程**。早先是「主线程 `for line in process.stdout` 读完再 `wait(timeout)`」—— 阻塞在管道上时那段 `wait` 根本执行不到，于是一个**不打印任何输出就挂住**的投稿会让超时形同虚设（记录永远停在「上传中」），而「挂死」恰恰是这个超时唯一要防的东西。现在读取是 daemon 线程 + 有界 `join`，超时会 kill 并写入 `local-upload-deadline-reached` 标记，该标记会被 [classify_failure](../backend/app/bilibili/bili_policy.py#L376) 翻成「这次上传等得太久」。
 - **`--submit` 照传，但它在 0.2.4 里不起作用**：上游 `uploader.rs` 的 `match submit` 两个分支都调 `submit_by_app`，实际提交永远走 `/x/vu/app/add`。真正会拦住投稿的是**登录文件里缺 `token_info.access_token`** —— `login_by_cookies` 会先拿它去 `oauth2/info` 校验，空串换来 `-400 请求错误` 之后 biliup 直接退出。[exchange_tv_token](../backend/app/bilibili/bili_auth.py#L142) 补上 TV 端三步交换，并把 `platform` 写成 `BiliTV`（biliup 靠它挑续期用的 appkey），见 [011](../ai/bug-fix/011-biliup-refuses-a-token-less-cookie-file.md)。
-- **失败时 biliup 的原始输出会逐行进日志**（前缀 `biliup 输出 | `，`WARNING` 级）。此前 `UploadContext.on_log` 没有任何调用方，用户照着失败建议去 `app.log` 搜只会扑空；现在这条通道由 [bili_manager._log_biliup_line](../backend/app/bilibili/bili_manager.py#L195) 提供，落盘前过 `sanitize_log_message`。
+- **失败时 biliup 的原始输出会逐行进日志**（前缀 `biliup 输出 | `，`WARNING` 级）。此前 `UploadContext.on_log` 没有任何调用方，用户照着失败建议去 `app.log` 搜只会扑空；现在这条通道由 [bili_manager._log_biliup_line](../backend/app/bilibili/bili_manager.py#L196) 提供，落盘前过 `sanitize_log_message`。
 - **传输层断线也是一类结论**。`biliup` 被对端断开时输出里**没有业务码**（`error sending request` → `connection error` → `peer closed connection … close_notify`），旧分类表一条也命中不了，界面只剩「没能识别出具体原因」。现在 `TRANSPORT_FAILURE_NEEDLES` 收这一类，并按「失败那一行的 URL 是不是上传 CDN」决定敢不敢承诺「重试不会投重」——承诺的成立只依赖「字节没传完 ⇒ 提交接口没被调用过」（见 [021](../ai/bug-fix/021-a-dropped-upload-link-looks-like-nothing-at-all.md)）。
 - **对账按标题前缀匹配，且两侧都做 `strip()`**。平台会对标题做首尾空白处理；只归一不比较的写法会让用户多打一个尾随空格就永远查不到，于是一次成功投稿被标成「待核对」。
 - **请求参数风格在两个端点上不一致**：`season/add` 的 `csrf` 走 form 且返回 `data` 为 `season_id`；`season/section/episodes/add` 的 `csrf` 走 **query**，body 用 **camelCase**（`sectionId` / `episodes`）。两处都由 `bili_api` 封装，调用方不用记。
@@ -206,7 +206,7 @@ B站 上传是一条与下载完全解耦的链路，模块划分（详见 [设�
   所以 `zh-Hans` 压成 `zh`、繁体三档原样保留、认不出来退 `en`。
   这条实测靠 `submit=false`（只存草稿、不发布）逐个枚举候选值得到 —— 它是唯一能在
   **不动任何已发布稿件**的前提下验证接口形态的方式。
-- **字幕路径只在 `JobItem` 上存一份**（[`_subtitle_of`](../backend/app/bilibili/bili_manager.py#L1475) 从那里读），
+- **字幕路径只在 `JobItem` 上存一份**（[`_subtitle_of`](../backend/app/bilibili/bili_manager.py#L1486) 从那里读），
   投稿记录里不复制；读的时候还要**再看一次文件在不在**，不在就当没有。
 - **字幕失败有专门的补救动作**：已发布/审核中且 `subtitle_state=failed` 的稿件，重试走
   `_reverify_work` 并带上字幕，回执「已重新上传字幕」。**绝不**为了字幕重投一次视频。
@@ -255,9 +255,9 @@ B站 上传的界面由四个组件加一个图标组成：[BiliIcon](../fronten
 时旧位置 `top=-1019px`，整条在视口上方一屏之外 —— 用户看到的只是「点了没反应」。
 
 **每个请求都有截止时间**：[api.ts](../frontend/src/shared/api.ts#L51) 的 `request()` 用 `AbortController` 挂一个定时器，
-默认 60 秒（[REQUEST_TIMEOUT_MS](../frontend/src/shared/api.ts#L53)），超时后把 `AbortError` 翻译成一句
-**能照做的话**（[timeoutError](../frontend/src/shared/api.ts#L61)：区分「没响应」与「失败」，并指向日志文件与重启后端）。
-唯一放宽的是**解析链接**（180 秒，[ANALYZE_TIMEOUT_MS](../frontend/src/shared/api.ts#L59)）—— 它要真的连 YouTube，
+默认 60 秒（[REQUEST_TIMEOUT_MS](../frontend/src/shared/api.ts#L54)），超时后把 `AbortError` 翻译成一句
+**能照做的话**（[timeoutError](../frontend/src/shared/api.ts#L62)：区分「没响应」与「失败」，并指向日志文件与重启后端）。
+唯一放宽的是**解析链接**（180 秒，[ANALYZE_TIMEOUT_MS](../frontend/src/shared/api.ts#L60)）—— 它要真的连 YouTube，
 实测能到半分钟以上。两个值都取自「服务端最长的一次合法阻塞」的实测（打开方式窗口 6 s、cookies 库约 10 s、B站 请求 20 s），
 所以看门狗不会误伤正常路径。**超时与用户主动取消必须分得开**：前者要报错，后者应该安静地结束，
 因此 `catch` 里用 `controller.signal.aborted` 判断而不是看异常类型。

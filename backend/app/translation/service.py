@@ -112,6 +112,18 @@ class TranslationService:
             cues=cues,
         )
 
+    def find(self, job_id: str, item_id: str | None = None) -> TranslationRead | None:
+        """按 `(job_id, item_id)` 找最新一次翻译任务（**包含已完成的**）。
+
+        入口先查后建：重启后再次点击不应该新建任务、更不该再发一次模型请求。
+        """
+        with Session(self.engine) as session:
+            query = select(SubtitleTranslation).where(SubtitleTranslation.job_id == job_id)
+            if item_id:
+                query = query.where(SubtitleTranslation.item_id == item_id)
+            row = session.exec(query.order_by(SubtitleTranslation.created_at.desc())).first()
+            return self._read(row) if row is not None else None
+
     # ------------------------------------------------------------ 创建
     def create(self, job_id: str, item_id: str | None = None) -> TranslationRead:
         with Session(self.engine) as session:

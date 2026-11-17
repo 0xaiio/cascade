@@ -29,12 +29,15 @@ export function SubtitleTranslateDialog({
   itemId,
   title,
   refreshToken,
+  existingId = null,
   onClose
 }: {
   jobId: string;
   itemId: string | null;
   title: string;
   refreshToken: number;
+  /** 打开已有翻译任务（重启后复用成果）；为空才新建。 */
+  existingId?: string | null;
   onClose: () => void;
 }) {
   const [job, setJob] = useState<TranslationJob | null>(null);
@@ -49,7 +52,7 @@ export function SubtitleTranslateDialog({
 
   useEffect(() => {
     let alive = true;
-    startTranslation(jobId, itemId)
+    (existingId ? getTranslation(existingId) : startTranslation(jobId, itemId))
       .then((created) => {
         if (!alive) return;
         jobIdRef.current = created.id;
@@ -59,7 +62,7 @@ export function SubtitleTranslateDialog({
     return () => {
       alive = false;
     };
-  }, [jobId, itemId]);
+  }, [jobId, itemId, existingId]);
 
   useEffect(() => {
     if (!jobIdRef.current || !job || !["queued", "running"].includes(job.state)) return;

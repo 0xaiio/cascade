@@ -1,5 +1,7 @@
 ﻿import { CheckCircle2, Info } from "lucide-react";
+import type { SubtitleSelection } from "./contracts/types";
 import { SubtitleTranslateDialog } from "./translation/SubtitleTranslateDialog";
+import { lookupTranslation, openTranslatedSubtitle } from "./translation/translation";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   ApiError,
@@ -177,6 +179,8 @@ export default function App() {
     jobId: string;
     itemId: string | null;
     title: string;
+    /** 命中历史任务时直接打开，不让对话框再新建一次。 */
+    existingId?: string;
   } | null>(null);
   const [translationRefresh, setTranslationRefresh] = useState(0);
 
@@ -519,6 +523,7 @@ export default function App() {
     groupMode: BiliGroupMode;
     seasonId: number | null;
     seasonTitle: string;
+    subtitleSelection: SubtitleSelection;
   }) {
     if (!biliDialog) return;
     const { prefill, isCollection, itemId } = biliDialog;
@@ -536,7 +541,8 @@ export default function App() {
             values.makeCover,
             values.comment,
             values.groupMode,
-            values.seasonId
+            values.seasonId,
+            values.subtitleSelection
           )
         : await createBiliUpload(
             prefill.job_id,
@@ -547,7 +553,8 @@ export default function App() {
             values.groupMode,
             values.seasonId,
             // 与合集那边同一个口径：留空时用任务名（单视频的任务名就是视频标题）顶上。
-            values.seasonTitle || prefill.job_title
+            values.seasonTitle || prefill.job_title,
+            values.subtitleSelection
           );
     } catch (err) {
       throw new Error(biliMessage(err, "提交失败"));
@@ -800,11 +807,14 @@ export default function App() {
               onTranslateSubtitle={(jobId, itemId) => {
                 const job = jobs.find((entry) => entry.id === jobId);
                 const item = job?.items.find((entry) => entry.id === itemId);
-                setTranslationTarget({
-                  jobId,
-                  itemId,
-                  title: item?.title || job?.title || "视频"
-                });
+                const target = { jobId, itemId, title: item?.title || job?.title || "视频" };
+                // 重启后再次点入口：先查上次成果，命中就打开，不重译、不再发模型请求。
+                void lookupTranslation(jobId, itemId)
+                  .then((found) => setTranslationTarget({ ...target, existingId: found.id }))
+                  .catch(() => setTranslationTarget(target));
+              }}
+              onOpenTranslatedSubtitle={(jobId, itemId) => {
+                void openTranslatedSubtitle(jobId, itemId).catch((err: Error) => setError(err.message));
               }}
               onOpenVideoPage={openExternalPage}
               onPlay={(jobId) => playJobVideo(jobId)}
@@ -853,10 +863,6 @@ export default function App() {
             resetSeasonList();
           }}
           onSubmit={handleBiliSubmit}
-          onTranslateSubtitle={(jobId, itemId) => {
-            const item = biliDialog.prefill.items.find((entry) => entry.item_id === itemId);
-            setTranslationTarget({ jobId, itemId, title: item?.source_title || biliDialog.prefill.job_title });
-          }}
         />
       )}
       {translationTarget && (
@@ -865,6 +871,7 @@ export default function App() {
           itemId={translationTarget.itemId}
           title={translationTarget.title}
           refreshToken={translationRefresh}
+          existingId={translationTarget.existingId ?? null}
           onClose={() => setTranslationTarget(null)}
         />
       )}
