@@ -623,3 +623,23 @@ BCC 结构只有一处：`bili_subtitle.to_bcc_entries`；`to_bcc` 与普通字�
 切模式不重译：改的是 `SubtitleTranslation.display_mode`，译文与时间轴不变。
 同一 `lan` 再传是覆盖（字幕 id 会换），不是新增轨；平台缓存可能导致短时间内查不到，
 判据仍是「拿到 URL 且 body 稳定」。
+
+## 字幕上传闭环的实现判据
+
+**状态复用**：`TranslationService.find(job_id, item_id)` 查最新记录（含已完成），
+`lookup` 路由只查不建。真正的判据是「再次点入口时 provider 调用次数为 0」——
+不是「界面显示已完成」。`JobItemRead.translated_subtitle_path` 用**一次** SQL 取该任务全部
+成功译轨、按 `created_at` 倒序每条目取最新，且文件不在磁盘就不给值；
+否则用户点「打开中文字幕」会吃一个 409。
+
+**勾选持久化**：选择存在 `BiliUpload.subtitle_selection_json` 而不是只活在请求对象里 ——
+等 cid 的补传可能发生在另一次请求、几分钟之后。`_selection_of` 对空串与坏数据返 `None`，
+老投稿因此维持「只补原轨」的旧行为，不会突然多出两条轨。
+
+**按勾选补传**：`_reverify_work` 在 `reverify()` 之后串行执行 zh → bilingual。
+`translation_fulfiller` 是注入接缝（装配层默认实现会复用 lookup/create/start/export），
+测试注入假实现即可离线；它抛错时只把字幕结论记为 `failed`，**绝不**翻稿件状态或重跑投稿命令。
+zh 与 bilingual 共用 `lan=zh`，两次上传是覆盖，最后一次决定平台上的呈现。
+
+**真机判据**：`tmp_acceptance/ui_upload_closure.py` 量「已有译文 → 打开中文字幕」
+「无译文 → 译为中文」「翻译成功后上传按钮可点」，全过才敢说需求 1/2/3 成立。

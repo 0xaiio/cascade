@@ -462,3 +462,22 @@ cookies 体检结果。字段分三层：
 `body[].content` 形如 `English line\n中文行`，两行共用同一 `from`/`to`；
 `lan=zh`、`oid=cid`、`submit="true"`。成功回执会点明「中英双语」与
 「同一 zh 轨是覆盖，不会多一条轨」。`en` 与 `zh` 两条单语轨仍保留供切换。
+
+### 字幕上传闭环
+
+`GET /api/translation/lookup?job_id=&item_id=` 返回该条目**最新一次**翻译任务（含 `succeeded`），
+没有则 404。任务中心入口先查后建：重启后点入口不会新建任务、也不会发模型请求。
+`POST /api/translation/open?job_id=&item_id=` 用系统默认程序打开最新译文，路径由服务端推导；
+没有成功译文或文件已不在时 409。
+
+`JobItemRead.translated_subtitle_path` 是后端算出的最新成功译文路径（文件不在就是 `null`），
+前端据此把入口从「译为中文」切换为「打开中文字幕」，不自己拼路径。
+
+`BiliUploadCreate` / `BiliCollectionCreate` 新增 `subtitle_selection`
+（`{en, zh, bilingual}`，默认全 `true`），随投稿记录持久化到 `subtitle_selection_json`。
+`zh` 与 `bilingual` 共用同一条 `lan=zh` 轨，按 zh → bilingual 顺序提交，后者覆盖前者；
+界面必须说明这一点，不能承诺三条轨并存。
+
+`retry_upload` 在稿件已发布/审核中且拿到 `aid/bvid/cid` 后，按保存的勾选补传：
+取消的轨不再顺手补；中文/双语缺译文时调用可注入的 `fulfill_translation` 现场翻译、导出，
+完成后才上传。制作失败只写进 `translated_subtitle_*` 结论，稿件状态与 `aid/bvid` 不变。

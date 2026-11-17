@@ -336,3 +336,16 @@ B站 上传的界面由四个组件加一个图标组成：[BiliIcon](../fronten
 `SubtitleTranslation.display_mode` 存模式，`PATCH .../mode` 只改呈现。
 双语导出写 `.bilingual.zh.srt` / `.bilingual.srt` / `.bilingual.bcc.json`；
 上传继续走 `attach_translated_subtitle`，`upload_subtitle` 读 SRT 时多行合并进同一 `content`。
+
+字幕上传闭环的落点：
+
+- `translation/service.find` + `GET /translation/lookup`：查历史、不重译；
+  `POST /translation/open` 交给 `job_artifacts` 的 opener 打开译文。
+- `download/job_read_model._translated_paths`：一次 SQL 取该任务所有成功译轨，
+  写入 `JobItemRead.translated_subtitle_path`。
+- `contracts/schemas.SubtitleSelection` → `BiliUpload.subtitle_selection_json`（补列已登记
+  `infra/db._ensure_columns`），`bili_manager._selection_of` 兼容老行空串。
+- `bili_manager._complete_selected_subtitles`：按 en → zh → bilingual 串行补轨；
+  `main.fulfill_translation` 装配默认制作能力，`BiliManager` 只持有可注入回调。
+- 前端 `BiliUploadDialog` 的三个勾选项、`SubtitleTranslateDialog` 的上传自动导出、
+  `JobQueue` 的入口文案切换。

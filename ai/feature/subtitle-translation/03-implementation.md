@@ -49,3 +49,14 @@
 | `local._http_error_message` | 连接被拒从 `WinError` 翻成可操作提示 |
 | `create_app(model_server_ensurer=...)` | 注入点；测试传 no-op，避免真起服务 |
 | `SubtitleTranslateDialog` | 0/N 且 running 时显示"正在准备本机模型服务" |
+
+### 增量实现
+
+| 落点 | 做什么 |
+| --- | --- |
+| `translation/service.find` + `GET/POST /translation/lookup|open` | 查历史不重译、打开译文 |
+| `download/job_read_model._translated_paths` | 一次 SQL 给每个条目算最新译文路径 |
+| `contracts/schemas.SubtitleSelection` / `models.BiliUpload.subtitle_selection_json` | 三档勾选与持久化（含老库补列） |
+| `bilibili/bili_manager._complete_selected_subtitles` | en→zh→bilingual 串行补轨、缺则调 fulfiller |
+| `main.fulfill_translation` | 默认制作能力：复用/新建 → 等 succeeded → 切模式 → 导出 |
+| `frontend/.../BiliUploadDialog` / `SubtitleTranslateDialog` | 三勾选与上传自动导出 |
