@@ -21,6 +21,7 @@ import type { JobStatusFilter } from "./jobFilter";
 import { batchRestartHint, itemRestartHint, jobRestartHint, resolutionRestartHint } from "./restartSemantics";
 import { PAUSED_TICK_MS, pausedDurationLabel } from "./pausedSince";
 import { SubtitleOpenButton } from "./SubtitleOpenButton";
+import { TranslateToChineseIcon } from "../translation/TranslateToChineseIcon";
 
 type MaybePromise = void | Promise<void>;
 
@@ -413,12 +414,12 @@ export function JobQueue({
                 {!isPlaylist && primaryItem?.subtitle_path && (
                   <button
                     type="button"
-                    className="ghost-button subtitle-translate-button"
+                    className="icon-button subtitle-translate-button"
                     title="把这条字幕译为中文"
                     aria-label={`译为中文 ${title}`}
                     onClick={() => primaryItem.id && onTranslateSubtitle(job.id, primaryItem.id)}
                   >
-                    译为中文
+                    <TranslateToChineseIcon size={18} />
                   </button>
                 )}
                 <button
@@ -637,12 +638,12 @@ export function JobQueue({
                         {item.subtitle_path && (
                           <button
                             type="button"
-                            className="ghost-button subtitle-translate-button"
+                            className="icon-button item-action-button subtitle-translate-button"
                             title="把这条字幕译为中文"
                             aria-label={`译为中文 ${item.title}`}
                             onClick={() => onTranslateSubtitle(job.id, item.id)}
                           >
-                            译为中文
+                            <TranslateToChineseIcon size={16} />
                           </button>
                         )}
                         <button

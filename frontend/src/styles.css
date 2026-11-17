@@ -2748,28 +2748,92 @@ th {
 .translation-cue-error,
 .translation-error,
 .translation-hint {
-  color: #a33b2b;
+  color: #71809a;
   font-size: 13px;
 }
 
-.translation-hint {
-  color: #71809a;
-}
-
-/* 入口紧贴既有字幕控件；不新开工具栏按钮，避免和打开字幕抢位置。 */
+/* 入口紧贴既有字幕控件；不新开工具栏按钮，避免和打开字幕抢位置。
+   换成图标后 padding 交给 `.icon-button` 的固定尺寸，图标本身不要被挤偏。 */
 .subtitle-translate-button,
 .bili-inline-translate {
-  padding: 4px 9px;
-  font-size: 12px;
-  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  padding: 0;
+  line-height: 1;
 }
 
 .bili-inline-translate {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
   margin-left: 8px;
   border: 1px solid #cddcf3;
-  border-radius: 999px;
+  border-radius: 8px;
   background: #fff;
   color: #1f5cae;
+}
+
+/* CC 字幕 + 右下角「中」字角标：与旁边的「打开字幕」区分开。 */
+.translate-zh-icon {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.translate-zh-badge {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 11px;
+  height: 11px;
+  line-height: 11px;
+  border-radius: 3px;
+  background: #1f6feb;
+  box-shadow: 0 0 0 1px #fff;
+  color: #fff;
+  font-size: 8px;
+  font-weight: 800;
+  text-align: center;
+}
+
+/* 首次启动模型服务是「确实在做事」的等待，不是普通提示。
+   蓝底 + 左边框 + 转圈的重量级，避免用户以为按钮点了没反应。 */
+.translation-booting {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid #b9d4ff;
+  border-left: 4px solid #1f6feb;
+  border-radius: 10px;
+  background: #f0f6ff;
+}
+
+.translation-booting strong {
+  display: block;
+  color: #16457f;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.translation-booting span {
+  display: block;
+  margin-top: 3px;
+  color: #4a6691;
+  font-size: 12px;
+}
+
+.translation-spinner {
+  flex: none;
+  color: #1f6feb;
+  animation: translation-spin 1s linear infinite;
+}
+
+@keyframes translation-spin {
+  to { transform: rotate(360deg); }
 }
 
 /* 呈现方式分段控件：只有两项，不值得引入通用组件。 */

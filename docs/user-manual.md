@@ -143,7 +143,7 @@ YouTube Downloader 是本机单用户工具。前端提供链接解析、下载�
 
 ## 任务中心
 
-任务中心展示任务级和子视频级状态。后端 API 返回的字段见 [JobRead](../backend/app/contracts/schemas.py#L239) 和 [JobItemRead](../backend/app/contracts/schemas.py#L200)，前端展示组件见 [JobQueue](../frontend/src/task-center/JobQueue.tsx#L30)。
+任务中心展示任务级和子视频级状态。后端 API 返回的字段见 [JobRead](../backend/app/contracts/schemas.py#L239) 和 [JobItemRead](../backend/app/contracts/schemas.py#L200)，前端展示组件见 [JobQueue](../frontend/src/task-center/JobQueue.tsx#L31)。
 Playlist 展开后会用浅色分组背景承载子视频列表，便于区分合集任务行和单个视频任务。
 
 | 信息 | 说明 |
@@ -622,9 +622,11 @@ YouTube 把登录态与出口 IP 绑定。导出 cookies 时走代理 A、下载
 
 ## 把非中文字幕译为中文
 
-**不用先手动启动服务**：点「译为中文」后，应用会先确认本机模型服务是否可用；没起就用
-本机已有的 GGUF 自动拉起 `llama-server`（首次约十几秒，界面会提示「正在准备本机模型服务」）。
-显卡后端不可用时会自动退回 CPU，只是更慢。日志在 `data/logs/model-server.log`。
+**不用先手动启动服务**：点「译为中文」图标后，应用会先确认本机模型服务是否可用；没起就用
+本机已有的 GGUF 自动拉起 `llama-server`（首次约十几秒）。抽屉里会出现一条**蓝底、带转圈图标**
+的状态条「正在启动本机模型服务…首次约需十几秒，随后自动开始翻译，无需任何操作」——
+这不是卡住，是它在替你做准备。显卡后端不可用时会自动退回 CPU，只是更慢。
+日志在 `data/logs/model-server.log`。
 
 如果自动拉起失败（没装 llama.cpp，或模型不在常见位置），按错误提示把 Qwen3-8B 的 GGUF
 放进 `D:/models`、或设置环境变量 `YTDL_TRANSLATION_MODEL_PATH`；也可以自己先跑一个：
@@ -637,8 +639,9 @@ llama-server -m D:/models/Qwen3-8B-Q5_K_M.gguf --host 127.0.0.1 --port 8080 ^
 然后在设置里确认地址是 `http://127.0.0.1:8080/v1`、模型名可用。设置里**没有 API Key**，
 因为这一版只允许连本机模型，字幕文本不会发到外部。
 
-**使用**：任务中心里，已下到字幕的视频在「打开字幕」按钮旁有一个「译为中文」文字按钮；
-B站 投稿预览表的「字幕」列也有同一个入口。点开后：
+**使用**：任务中心里，已下到字幕的视频在「打开字幕」按钮旁有一个图标按钮：
+**CC 字幕图标 + 右下角「中」字角标**（鼠标悬停显示「把这条字幕译为中文」）；
+B站 投稿预览表的「字幕」列也有同一个图标。点开后：
 
 1. 翻译自动开始，进度显示「已译 N / 总数」与失败数，译文逐条出现；
 2. 上方是原文（只读），下方是译文，**点一下就能改**；改过的会标「已改」，重跑不会覆盖；

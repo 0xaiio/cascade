@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Loader2 } from "lucide-react";
 import type { TranslationCue, TranslationJob } from "../contracts/types";
 import {
   cancelTranslation,
@@ -180,7 +181,13 @@ export function SubtitleTranslateDialog({
               </div>
               {job.error && <p className="translation-error">{job.error}</p>}
               {active && !job.error && job.translated === 0 && job.failed === 0 && (
-                <p className="translation-hint">正在准备本机模型服务，首次启动约需十几秒…</p>
+                <div className="translation-booting" role="status" aria-live="polite">
+                  <Loader2 size={18} className="translation-spinner" aria-hidden="true" />
+                  <div>
+                    <strong>正在启动本机模型服务…</strong>
+                    <span>首次约需十几秒，随后自动开始翻译，无需任何操作</span>
+                  </div>
+                </div>
               )}
 
               <div className="translation-tools">

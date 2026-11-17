@@ -408,3 +408,9 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 
 真机：从 8080 无监听开始，`ensure_model_server()` 17.6 秒拉起服务、`/health` 200；真实翻译
 `We begin with the fundamentals of query execution.` → `我们从查询执行的基础开始。`（11.2 秒）。
+
+**界面验收**（`tmp_acceptance/ui_translate_ux.py`，真实 Edge + CDP，18 项全过）：四处入口统一换成
+「CC 字幕图标 + 右下角「中」字角标」的图标按钮；真机量到它在「打开视频文件夹」按钮右侧、
+同高 36px、按钮正文只有角标「中」、主图标是 `lucide-captions`、Tooltip 仍是「把这条字幕译为中文」。
+抽屉里的启动状态条量到蓝底 `rgb(240,246,255)`、4px 左边框、标题加粗、转圈动画在跑，
+`role="status"` 且写明「无需任何操作」。截图 `translate_ux.png` / `translate_ux_zoom.png`。

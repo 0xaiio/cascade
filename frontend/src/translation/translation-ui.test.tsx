@@ -113,7 +113,9 @@ describe("字幕翻译抽屉", () => {
         onClose={() => {}}
       />
     );
-    expect(await screen.findByText(/正在准备本机模型服务/)).toBeInTheDocument();
+    const status = await screen.findByRole("status");
+    expect(status).toHaveTextContent(/正在启动本机模型服务/);
+    expect(status.querySelector(".translation-spinner")).not.toBeNull();
   });
 
   test("筛选只显示失败项，空白译文确实没有拿原文顶上", async () => {
@@ -305,7 +307,10 @@ describe("两个入口", () => {
         onToggleJobSelection={() => {}}
       />
     );
-    await user.click(screen.getByRole("button", { name: `译为中文 ${jobPayload.title}` }));
+    const entry = screen.getByRole("button", { name: `译为中文 ${jobPayload.title}` });
+    expect(entry.querySelector(".translate-zh-icon")).not.toBeNull();
+    expect(entry.querySelector(".translate-zh-badge")).toHaveTextContent("中");
+    await user.click(entry);
     expect(onTranslateSubtitle).toHaveBeenCalledWith("job-running", jobPayload.items[0].id);
   });
 
@@ -324,6 +329,7 @@ describe("两个入口", () => {
       />
     );
     const entry = screen.getByRole("button", { name: /^译为中文 / });
+    expect(entry.querySelector(".translate-zh-badge")).toHaveTextContent("中");
     await user.click(entry);
     expect(onTranslateSubtitle).toHaveBeenCalledWith(
       biliPrefillSinglePayload.job_id,

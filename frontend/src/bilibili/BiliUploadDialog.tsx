@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { TranslateToChineseIcon } from "../translation/TranslateToChineseIcon";
 import { AlertTriangle, Upload, X } from "lucide-react";
 import {
   COPYRIGHT_REPRINT,
@@ -539,10 +540,11 @@ export function BiliUploadDialog({
               <button
                 type="button"
                 className="bili-inline-translate"
+                title="把这条字幕译为中文"
                 aria-label={`译为中文 ${prefill.items[0].source_title}`}
                 onClick={() => onTranslateSubtitle(prefill.job_id, prefill.items[0].item_id!)}
               >
-                译为中文
+                <TranslateToChineseIcon size={15} />
               </button>
             </div>
           )}
@@ -577,10 +579,11 @@ export function BiliUploadDialog({
                             <button
                               type="button"
                               className="bili-inline-translate"
+                              title="把这条字幕译为中文"
                               aria-label={`译为中文 ${item.source_title}`}
                               onClick={() => onTranslateSubtitle(prefill.job_id, item.item_id!)}
                             >
-                              译为中文
+                              <TranslateToChineseIcon size={15} />
                             </button>
                           )}
                         </td>
