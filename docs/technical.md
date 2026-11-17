@@ -425,7 +425,7 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 
 **语言白名单（实测，不是从文档推的）**：接受 `zh` / `en` / `zh-Hant` / `zh-TW` / `zh-HK` / `ja` /
 `ko` / `yue` / `fr`；**拒绝** `zh-CN` / `en-US` / `zh-Hans` / `en-GB`，报
-`code=79011 不合法的语言`。所以 [`bilibili_language`](../backend/app/bilibili/bili_subtitle.py#L93) 把
+`code=79011 不合法的语言`。所以 [`bilibili_language`](../backend/app/bilibili/bili_subtitle.py#L94) 把
 `zh-Hans` / `zh-CN` 压成 `zh`，繁体三档**原样保留**（它们在白名单里，压平反而丢信息），英文一律
 `en`，认不出来退 `en`。判据是用 `submit=false`（只存草稿、不发布）逐个枚举候选值得到的 ——
 **真发一次投稿去试语言值，试错成本是一堆不可撤销的稿件。**
@@ -448,7 +448,7 @@ BCC 的 `body` 一段就是一条 cue。YouTube 的自动字幕是**滚动**的�
 0.010s，文字 100% 被相邻 cue 覆盖），而 `merge_repeated_cues` 只合并「整条同文」，合不掉它们 ——
 于是传上去 239 段，对应只有 122 句台词。
 
-[`drop_transition_cues`](../backend/app/bilibili/bili_subtitle.py#L211) 判据是**两条同时成立**：时长
+[`drop_transition_cues`](../backend/app/bilibili/bili_subtitle.py#L212) 判据是**两条同时成立**：时长
 ≤ `TRANSITION_MAX_SECONDS`(0.05) **且**文字被**紧邻**的 cue 完整覆盖。只看时长会误删真的只有
 几十毫秒的短字幕；只看「文字在别处出现过」会误删正常重复（同一句话隔几秒再说一次是新字幕）。
 `load_bcc` 的三步定序固定为 **解析 → 丢过渡条 → 合并同文**（先合会把过渡条并进上一条，之后就认不出来）。
@@ -601,3 +601,18 @@ notepad / VS Code / Sublime 只能是它的子集：用户装了别的我们不�
 ## 文件删除语义
 
 任务中心的“仅删除任务”只删除数据库中的任务记录；“删除任务并删除已下载文件”会删除数据库记录，并按 `JobItem.output_path` 删除输出视频及同名字幕、metadata、缩略图、description、info.json 等 sidecar。若历史任务或运行中任务尚未写入 `output_path`，后端会按 YouTube id 在任务下载目录中发现 `... [id].mp4/.webm/.mkv`、字幕、metadata 和 `.part` 等部分下载文件并纳入删除候选。删除逻辑仍限制在下载根目录或该任务下载目录内，避免误删任意路径。
+
+## 中英双语同屏的实现判据
+
+B站 播放器一次只显示一条 CC 轨，所以「`en` + `zh` 两条轨」解决的是**切换**，
+不是同屏。同屏双语把 `英文原文\n中文译文` 放进**同一条 cue 的 `content`**：
+两行没有各自的时间戳，共用唯一 `from`/`to`，因此结构上不可能不同步。
+
+BCC 结构只有一处：`bili_subtitle.to_bcc_entries`；`to_bcc` 与普通字幕复用它，
+双语只改变 `content` 的文本。`render.bilingual_content` 默认英上中下，
+两边各自把内部换行规整成空格，确保播放器只显示两行。
+导出前仍跑 `validate_alignment`（条数、序号、时间逐值、译文非空）与「恰好两段非空文本」校验。
+
+切模式不重译：改的是 `SubtitleTranslation.display_mode`，译文与时间轴不变。
+同一 `lan` 再传是覆盖（字幕 id 会换），不是新增轨；平台缓存可能导致短时间内查不到，
+判据仍是「拿到 URL 且 body 稳定」。

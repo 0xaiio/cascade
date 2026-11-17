@@ -445,3 +445,18 @@ cookies 体检结果。字段分三层：
 用于「刚装完 Node/Deno，不想重启应用」的场景。
 
 诊断响应不返回 token 原文，不返回 cookies 内容，只返回是否已配置的布尔值；日志文件内容也不经 API 暴露。
+
+### 中英双语同屏
+
+`TranslationRead.display_mode` 为 `zh`（默认）或 `bilingual`。
+`PATCH /api/translation/jobs/{id}/mode` 带 `{"mode":"bilingual"}` 切换呈现，**不重译、不改时间轴**；
+切换后必须重新 `POST .../export` 才能上传（前端会禁用上传按钮直到重新导出）。
+
+双语模式导出三个文件：`srt_path` 是 `<原名>.bilingual.zh.srt`（一条 cue、两行文本，用于上传），
+`bilingual_path` 是人工对照，`bcc_path` 是 `<原名>.bilingual.bcc.json`（实际提交的 BCC）。
+`zh` 模式下 `bcc_path` 为 `null`。
+
+上传仍走 `POST /api/translation/jobs/{id}/upload-bili`：双语时表单 `data` 的
+`body[].content` 形如 `English line\n中文行`，两行共用同一 `from`/`to`；
+`lan=zh`、`oid=cid`、`submit="true"`。成功回执会点明「中英双语」与
+「同一 zh 轨是覆盖，不会多一条轨」。`en` 与 `zh` 两条单语轨仍保留供切换。

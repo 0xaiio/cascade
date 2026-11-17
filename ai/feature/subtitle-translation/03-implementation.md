@@ -28,3 +28,14 @@
 `SettingsRead/Update`、`TranslationProbeRead`、`TranslationRead`、`TranslationCueRead`、
 `TranslationExportRead`、`TranslationCreateRequest`、`TranslationEditRequest`、`BiliUploadRead`。
 `check_api_contract.py` 已把新增接口登记到 `SCHEMA_PAIRS`。
+
+### 增量实现
+
+| 落点 | 做什么 |
+| --- | --- |
+| `translation/render.bilingual_content` | 同条 cue 的双行文本，默认英上中下 |
+| `bili_subtitle.to_bcc_entries` | 从 `to_bcc` 抽出的 BCC 唯一结构，双语复用 |
+| `translation/render.export_bilingual_files` | 三件套：上传 SRT / 对照 SRT / BCC |
+| `SubtitleTranslation.display_mode` + `PATCH .../mode` | 模式落库，切换不重译 |
+| `translation.ts` / `SubtitleTranslateDialog` | 分段控件、B站 两行预览、切模式后禁用上传直到重新导出 |
+| `upload-bili` 回执 | 明说「中英双语」与「同 lan 覆盖」 |

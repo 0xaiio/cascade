@@ -198,7 +198,7 @@ B站 上传是一条与下载完全解耦的链路，模块划分（详见 [设�
 - **二维码 SVG 的尺寸单位是毫米**（B站 返回 `width="29.6mm"`），前端必须显式覆盖宽高，否则渲染尺寸会跟着宿主字号变。
 - **CC 字幕挂在投稿的最末尾**，因为字幕要挂在**分P**上：必须先拿到 `cid`（`oid` 取的就是它），
   而 `cid` 只有对账之后才有。拿不到就 `skipped`，绝不因为字幕把已发布的稿件翻成失败
-  （[upload_subtitle](../backend/app/bilibili/bili_subtitle.py#L277) 内部也不抛异常，理由同上）。
+  （[upload_subtitle](../backend/app/bilibili/bili_subtitle.py#L284) 内部也不抛异常，理由同上）。
 - **BCC 的时间是秒不是毫秒**。`00:01:02,500` 解析成 `62.5`；解析不出来返回 `None` 而不是猜 0 ——
   时间错了整条字幕就废了，猜出来的 0 会让所有字幕堆在片头。
 - **语言标识不是需求里写的那两个值**：B站 不接受 `zh-CN` / `en-US`（`code=79011 不合法的语言`），
@@ -330,3 +330,9 @@ B站 上传的界面由四个组件加一个图标组成：[BiliIcon](../fronten
 - **`create_app()` 会被反复调用**（测试里尤其多），模块级 `_configured` 保证幂等；目录不可写时降级成「仅控制台」并 `root.warning`，不让应用起不来。
 
 日志级别可用 `YTDL_LOG_LEVEL` 覆盖（默认 INFO）。路径通过 `/api/diagnostics.log_file` 暴露给界面。
+
+双语呈现的落点：`translation/render.bilingual_content` 生成同条 cue 的双行文本，
+`render_bilingual_bcc` 复用 `bili_subtitle.to_bcc_entries` 的 BCC 结构；
+`SubtitleTranslation.display_mode` 存模式，`PATCH .../mode` 只改呈现。
+双语导出写 `.bilingual.zh.srt` / `.bilingual.srt` / `.bilingual.bcc.json`；
+上传继续走 `attach_translated_subtitle`，`upload_subtitle` 读 SRT 时多行合并进同一 `content`。
