@@ -164,6 +164,15 @@ else
   if [ -n "$PORT" ]; then
     echo "==> 已自动选择端口 $PORT，正在打开浏览器 http://127.0.0.1:$PORT ..."
     sleep 1
+    # 地址在 uvicorn 绑定端口时就打印了，早于 lifespan（建表 / 孤儿恢复）。
+    # 后端可能在 lifespan 里才崩（例如数据库缺列），这时进程已退出；继续开浏览器
+    # 只会让用户看到「拒绝连接」，而不是真正的错误。
+    if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+      echo "错误：后端在启动过程中退出，未打开浏览器。最近日志：" >&2
+      tail -n 20 "$LOG" >&2
+      rm -f "$LOG"
+      exit 1
+    fi
     open_browser "http://127.0.0.1:$PORT"
   else
     echo "警告：未能从日志解析出服务地址，请手动打开后端打印的「服务地址」。" >&2

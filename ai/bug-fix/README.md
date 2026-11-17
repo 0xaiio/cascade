@@ -67,6 +67,7 @@
 | [037](037-deleting-a-job-leaves-its-uploads.md) | 删任务不删投稿记录：摘要里一直有「已不存在的任务」 | `—` | `JobManager.delete()` / `delete_items()` 只删 `JobEvent`/`JobItem`/`Job`，而 `read_all_job_uploads()` 的 job 集合取自 `bili_upload`/`bili_season` 的并集 ⇒ `uploads/summary` 一直回已删任务的记录，`bili_auto_retry` 还会继续问平台。修法：`BiliManager.active_upload_message()` / `forget_job()` + 三条删除路径「预检 → 删任务 → 清记录」；**有在途投稿时拒绝（409）**而不是取消再删，批量删除整批预检 |
 | [038](038-browser-cookie-import-is-gone.md) | 浏览器 cookies 导入：一个必然失败的入口，外加一条会杀掉所有 Edge 窗口的失败分支 | `—` | 本机 Edge 的 cookies 是 v20 app-bound 加密，离线**必然解不开**；失败分支 `taskkill /IM msedge.exe /F /T` 会关掉用户所有 Edge 窗口，更早的 CDP 回退还清空过真实 cookie 库（53 → 0）。入口之外还有两处**用户看不见**的自动导入（解析失败一次、下载失败一次）。修法：整条链路删除（UI / 路由 / 模块 / 两处自动重试），只留「扩展导出 + 上传」；失败消息给出导出步骤，不再提已删按钮 |
 | [039](039-subtitle-default-silences-the-plan.md) | 默认字幕语言把「按主语言挑字幕」整条路堵死了 | `—` | 出厂默认 `["en"]` 每次解析都被原样塞进选项，而非空列表会让后端**绕过**字幕计划（显式选择优先）；yt-dlp 拿一个视频里不存在的语言 → 匹配不到任何轨 → **静默不下字幕、任务照样成功**，界面还写着「已选 1 项：en」且摘不掉。影响面：所有非英文视频在默认设置下都没有字幕。修法：前端把默认值收敛到该视频真有的语言，一个都不命中就留空（= 自动，交回后端的按主语言计划）；空态标签由「选择字幕语言」改为「自动（按视频语言）」并写明规则 |
+| [040](040-a-column-that-tests-never-added.md) | 新列没登记迁移：地址打印得出来，服务却在 lifespan 里崩了 | `—` | `BiliUpload` 的译轨三列与 `SubtitleTranslation.display_mode` 是表建好之后才加的，只改了模型没登记到 `_ensure_columns`；`create_all` 不给已存在的表加列 ⇒ 孤儿恢复的 SELECT 报 `no such column`，`Application startup failed`。测试全绿是因为全部从零建库。修法：登记四列（默认值对齐历史事实）+ **先建旧表再 init_db** 的升级测试 + 一键脚本开浏览器前查进程存活 |
 
 ## 本轮（2026-10-01）背景
 

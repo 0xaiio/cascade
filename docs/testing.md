@@ -12,25 +12,25 @@
 python -m compileall backend\app
 ```
 
-后端测试（当前基线：**1519 passed**，62 个 `test_*.py`）：
+后端测试（当前基线：**1520 passed**，62 个 `test_*.py`）：
 
 ```powershell
 python -m pytest backend\tests -q
 ```
 
 > **在 WorkBuddy 沙箱里请分块跑。** 本仓库没有 `pytest.ini`，所以 pytest 会把临时目录建在系统 Temp、收尾时再清理；
-> 沙箱的批量删除守卫是**累积计数**的（一轮命令内累计到阈值就整条拒掉），于是 1519 个用例放在一个进程里跑会在中途被拦下。
+> 沙箱的批量删除守卫是**累积计数**的（一轮命令内累计到阈值就整条拒掉），于是 1520 个用例放在一个进程里跑会在中途被拦下。
 > 现象很好认：**大量 `at setup of ...` 的 error，而 `FAILED` 一个都没有** —— 那是环境问题，不是代码问题。
 >
-> 按下面的分块跑，六块相加应恰好等于 1519（各块 133～356 项；若某块仍被拦下，继续拆小即可）：
+> 按下面的分块跑，六块相加应恰好等于 1520（各块 134～360 项；若某块仍被拦下，继续拆小即可）：
 >
 > ```powershell
 > python -m pytest backend\tests\test_bili_policy.py backend\tests\test_bili_meta.py backend\tests\test_bili_auth.py backend\tests\test_bili_bin.py -q -p no:cacheprovider --basetemp=tmp_pytest\a   # 221
 > python -m pytest backend\tests\test_bili_read_model.py backend\tests\test_bili_subtitle.py backend\tests\test_bili_api.py -q -p no:cacheprovider --basetemp=tmp_pytest\b                                            # 201
-> python -m pytest backend\tests\test_bili_upload.py backend\tests\test_bili_manager.py backend\tests\test_bili_auto_retry.py backend\tests\test_bili_auto_retry_integration.py backend\tests\test_api_bilibili.py backend\tests\test_translation_align.py backend\tests\test_translation_local.py backend\tests\test_translation_api.py backend\tests\test_translation_bilingual.py -q -p no:cacheprovider --basetemp=tmp_pytest\c                                                # 356
+> python -m pytest backend\tests\test_bili_upload.py backend\tests\test_bili_manager.py backend\tests\test_bili_auto_retry.py backend\tests\test_bili_auto_retry_integration.py backend\tests\test_api_bilibili.py backend\tests\test_translation_align.py backend\tests\test_translation_local.py backend\tests\test_translation_api.py backend\tests\test_translation_bilingual.py -q -p no:cacheprovider --basetemp=tmp_pytest\c                                                # 360
 > python -m pytest backend\tests\test_ytdlp_service.py backend\tests\test_subtitle_plan.py backend\tests\test_subtitle_recording.py backend\tests\test_api.py backend\tests\test_cookie_import_removed.py backend\tests\test_diagnostics_settings_audit.py backend\tests\test_job_delete_cleans_uploads.py backend\tests\test_analyze_local.py backend\tests\test_analyze_scope.py backend\tests\test_disk_budget.py backend\tests\test_disk_budget_lifecycle.py -q -p no:cacheprovider --basetemp=tmp_pytest\d                # 306
 > python -m pytest backend\tests\test_resolution_decisions.py backend\tests\test_output_paths.py backend\tests\test_safe_delete.py backend\tests\test_system_open.py backend\tests\test_open_with_registry.py backend\tests\test_dev_server.py backend\tests\test_instance_lock.py backend\tests\test_config_paths.py backend\tests\test_proxy.py backend\tests\test_cookie_health.py backend\tests\test_stall_guard.py backend\tests\test_ytdlp_formats.py backend\tests\test_resolution_input.py backend\tests\test_job_routes.py backend\tests\test_clone_job.py backend\tests\test_paused_since.py backend\tests\test_restart_semantics.py -q -p no:cacheprovider --basetemp=tmp_pytest\e   # 298
-> python -m pytest backend\tests\test_error_advice.py backend\tests\test_connectivity.py backend\tests\test_download_progress.py backend\tests\test_runtime_env.py backend\tests\test_job_manager_finally.py backend\tests\test_finally_guards.py backend\tests\test_check_layers.py backend\tests\test_orphan_recovery.py backend\tests\test_completion_notification.py backend\tests\test_db.py backend\tests\test_logging_setup.py backend\tests\test_paths.py backend\tests\test_transfer_stats.py backend\tests\test_progress_persist.py backend\tests\test_log_safety.py backend\tests\test_events.py backend\tests\test_job_artifacts.py backend\tests\test_bili_http.py -q -p no:cacheprovider --basetemp=tmp_pytest\f   # 133
+> python -m pytest backend\tests\test_error_advice.py backend\tests\test_connectivity.py backend\tests\test_download_progress.py backend\tests\test_runtime_env.py backend\tests\test_job_manager_finally.py backend\tests\test_finally_guards.py backend\tests\test_check_layers.py backend\tests\test_orphan_recovery.py backend\tests\test_completion_notification.py backend\tests\test_db.py backend\tests\test_logging_setup.py backend\tests\test_paths.py backend\tests\test_transfer_stats.py backend\tests\test_progress_persist.py backend\tests\test_log_safety.py backend\tests\test_events.py backend\tests\test_job_artifacts.py backend\tests\test_bili_http.py -q -p no:cacheprovider --basetemp=tmp_pytest\f   # 134
 > ```
 >
 > 上面的块内数字不用手数：`python -m pytest backend\tests --collect-only -q -p no:cacheprovider` 会逐条打印用例 id，
@@ -129,7 +129,7 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 
 ## 后端测试范围
 
-后端测试位于 [backend/tests](../backend/tests/)（58 个 `test_*.py` + [fakes.py](../backend/tests/fakes.py) / [bili_fakes.py](../backend/tests/bili_fakes.py)，2026-11-17 双语增量后实测 **1519 passed**）：
+后端测试位于 [backend/tests](../backend/tests/)（62 个 `test_*.py` + [fakes.py](../backend/tests/fakes.py) / [bili_fakes.py](../backend/tests/bili_fakes.py)，2026-11-17 迁移补列后实测 **1520 passed**）：
 
 > **数字必须自己数一遍**，不要只信 `-q` 的汇总行。逐文件规模用
 > `pytest backend/tests/<文件> -q -p no:cacheprovider --co` 取，各文件之和应**恰等于**全集
@@ -386,3 +386,11 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 | [translation-ui.test.tsx](../frontend/src/translation/translation-ui.test.tsx) | +1 | 分段控件切模式、B站 两行预览、切模式后必须重新导出才能上传、覆盖提示 |
 
 变异测试：把 `bilingual_content` 改成只返回译文 → 4 条当场红；断言钉在「一条 cue、两行内容」上。
+
+## 增量测试：老库升级补列（2026-11-17，缺陷 [040](../ai/bug-fix/040-a-column-that-tests-never-added.md)）
+
+[test_db.py](../backend/tests/test_db.py) +1：`test_upgrade_adds_translated_subtitle_columns_and_display_mode`
+**先手动建缺列的旧表并插入老行**，再跑 `init_db`，断言四列补齐且老行拿到的是
+`skipped` / `''` / `'zh'`。这一条来自"地址打印得出来、服务却在 lifespan 里崩了"的启动事故：
+此前所有用例都从 `create_all` 全新建库，从不走升级路径，因而全绿也没发现漏登记。
+变异测试：临时禁用 `_ensure_columns(engine)` → 当场红在 `no such column: translated_subtitle_state`。

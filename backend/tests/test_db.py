@@ -83,6 +83,67 @@ def test_init_db_adds_columns_that_existing_databases_are_missing(tmp_path: Path
     assert "duration" in columns
 
 
+def test_upgrade_adds_translated_subtitle_columns_and_display_mode(tmp_path: Path) -> None:
+    """老库升级的回归测试：**真的先建旧形状的表**，再跑 `init_db`。
+
+    这一条来自 2026-11-17 的启动事故：译轨三列与 `display_mode` 加进模型后忘了登记
+    到 `_ensure_columns`，单测全绿（都用 `create_all` 从零建表），但本机真实库启动时
+    `reviewing` 恢复查询直接报 `no such column`，服务起不来。断言分两段：
+    列补上了，且老行的默认值表达的是「当时没有这一步」，而不是凭空失败。
+    """
+    settings = AppSettings(
+        data_dir=tmp_path / "data",
+        download_dir=tmp_path / "downloads",
+        database_path=tmp_path / "data" / "app.sqlite3",
+    )
+    engine = create_app_engine(settings)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE bili_upload ("
+                "id TEXT PRIMARY KEY, job_id TEXT, status TEXT, "
+                "subtitle_state TEXT DEFAULT 'skipped', "
+                "subtitle_lan TEXT DEFAULT '', subtitle_message TEXT DEFAULT '')"
+            )
+        )
+        connection.execute(
+            text("CREATE TABLE subtitle_translation (id TEXT PRIMARY KEY, job_id TEXT, state TEXT)")
+        )
+        connection.execute(
+            text("INSERT INTO bili_upload (id, status) VALUES ('old-1', 'published')")
+        )
+        connection.execute(
+            text("INSERT INTO subtitle_translation (id, job_id, state) "
+                 "VALUES ('tr-1', 'job-1', 'succeeded')")
+        )
+
+    init_db(engine)
+
+    with engine.begin() as connection:
+        upload_columns = {row[1] for row in connection.execute(text("PRAGMA table_info(bili_upload)"))}
+        translation_columns = {
+            row[1] for row in connection.execute(text("PRAGMA table_info(subtitle_translation)"))
+        }
+        upload = connection.execute(
+            text(
+                "SELECT translated_subtitle_state, translated_subtitle_lan, "
+                "translated_subtitle_message FROM bili_upload WHERE id = 'old-1'"
+            )
+        ).one()
+        mode = connection.execute(
+            text("SELECT display_mode FROM subtitle_translation WHERE id = 'tr-1'")
+        ).scalar_one()
+
+    assert {
+        "translated_subtitle_state",
+        "translated_subtitle_lan",
+        "translated_subtitle_message",
+    } <= upload_columns
+    assert "display_mode" in translation_columns
+    assert tuple(upload) == ("skipped", "", "")
+    assert mode == "zh"
+
+
 class _FailingEngine:
     def begin(self):
         raise RuntimeError("database is locked")

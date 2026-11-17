@@ -187,6 +187,13 @@ if ($Mode -eq 'dev') {
             if ($port) {
             Write-Host "==> 已自动选择端口 $port，正在打开浏览器 http://127.0.0.1:$port ..."
             Start-Sleep -Seconds 1
+            # 地址是在 uvicorn 绑定端口时打印的，早于 lifespan（init_db / 孤儿恢复）。
+            # 后端可能在那之后才崩（例如数据库缺列），此时进程已退出，开浏览器只会
+            # 让用户看到一个「拒绝连接」的页面，而不是错误信息。
+            if ($script:backendProc.HasExited) {
+                Write-Host "错误：后端在启动过程中退出，未打开浏览器；下面的错误日志说明了原因。" -ForegroundColor Red
+                break
+            }
             try { Start-Process "http://127.0.0.1:$port" } catch { Write-Host "提示：未能自动打开浏览器，请手动访问 http://127.0.0.1:$port" -ForegroundColor Yellow }
             $port = $null
             }

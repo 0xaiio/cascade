@@ -94,6 +94,17 @@ def _ensure_columns(engine: Engine) -> None:
             "subtitle_state": "TEXT DEFAULT 'skipped'",
             "subtitle_lan": "TEXT DEFAULT ''",
             "subtitle_message": "TEXT DEFAULT ''",
+            # 译文字幕（zh）是**另一条轨**，结论单独记。补列时库里已有的行当时
+            # 根本没有译轨这一步，按 `skipped` 处理才是历史事实；默认值若用
+            # `failed`，一批老稿件会凭空多出一个失败结论。
+            "translated_subtitle_state": "TEXT DEFAULT 'skipped'",
+            "translated_subtitle_lan": "TEXT DEFAULT ''",
+            "translated_subtitle_message": "TEXT DEFAULT ''",
+        },
+        "subtitle_translation": {
+            # 同屏双语是这张表建出来之后才加的呈现模式。老任务默认「仅中文」——
+            # 那是它们创建时的实际行为，不是新功能的默认偏好。
+            "display_mode": "TEXT DEFAULT 'zh'",
         },
         "bili_season": {
             # 上一次提交的模板原文。补列时老行是空串 ⇒ 读出来是 `None` ⇒ 表单退回默认模板，

@@ -29,7 +29,7 @@ FastAPI 应用由 [create_app](../backend/app/main.py#L43) 创建，启动时：
 | `BiliUpload` | B站 投稿记录：入参（标题/简介/标签/分区/视频路径/是否做封面/评论）+ 结果（`bvid`/`aid`/`cid`、进度、对账结论 `verified_state`、`attempt`、`log_tail`）+ 字幕结论（`subtitle_state` / `subtitle_lan` / `subtitle_message`，**独立于稿件状态**）。**入参也落库**，这样用户在关掉页面之后重试仍能照原样重投。 |
 | `BiliSeason` | B站 合集归集记录：`season_id`（建好后即使补加视频失败也保留，重试只补加不重建）、归集状态与错误。 |
 
-数据库初始化调用 [init_db](../backend/app/infra/db.py#L38)。为了兼容旧数据库，[_ensure_columns](../backend/app/infra/db.py#L43) 会补齐新增列。[create_app_engine](../backend/app/infra/db.py#L27) 在每条 SQLite 连接上先设置 `busy_timeout=5000`，再启用 WAL 和 `synchronous=NORMAL`，让多个下载 worker 的进度写入互相等待而不是立刻报 `database is locked`。如果数据库已被其他进程锁住（例如本机已有 uvicorn），WAL pragma 会跳过而不是让应用启动失败。应用启动和停止时各执行一次 `PRAGMA wal_checkpoint(TRUNCATE)`（[checkpoint_wal](../backend/app/infra/db.py#L112)）：避免进程被强杀后遗留的 `-wal` 文件无界增长，也避免每次读取都要回放 WAL；该操作失败只记日志，不影响启动或停止。
+数据库初始化调用 [init_db](../backend/app/infra/db.py#L38)。为了兼容旧数据库，[_ensure_columns](../backend/app/infra/db.py#L43) 会补齐新增列。[create_app_engine](../backend/app/infra/db.py#L27) 在每条 SQLite 连接上先设置 `busy_timeout=5000`，再启用 WAL 和 `synchronous=NORMAL`，让多个下载 worker 的进度写入互相等待而不是立刻报 `database is locked`。如果数据库已被其他进程锁住（例如本机已有 uvicorn），WAL pragma 会跳过而不是让应用启动失败。应用启动和停止时各执行一次 `PRAGMA wal_checkpoint(TRUNCATE)`（[checkpoint_wal](../backend/app/infra/db.py#L123)）：避免进程被强杀后遗留的 `-wal` 文件无界增长，也避免每次读取都要回放 WAL；该操作失败只记日志，不影响启动或停止。
 
 ## 任务调度
 
