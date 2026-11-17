@@ -134,9 +134,20 @@ def upload_translated_subtitle(translation_id: str, ctx: ContextDep) -> BiliUplo
             raise HTTPException(status_code=409, detail="找不到已投稿成功的对应稿件")
         upload_id = upload.id
     try:
-        return ctx.bili.attach_translation(upload_id, path)
+        result = ctx.bili.attach_translation(upload_id, path)
     except BiliPreconditionError as exc:
         raise HTTPException(status_code=409, detail=exc.message) from exc
+    if job.display_mode == "bilingual" and result.translated_subtitle_state == "posted":
+        # 明确告诉用户这是英上中下的同屏双语，且同一 lan 是覆盖而不是新增轨。
+        return result.model_copy(
+            update={
+                "translated_subtitle_message": (
+                    f"中英双语（英上中下，两行共用同一时间轴）：{result.translated_subtitle_message}；"
+                    "同一语言轨再传是覆盖，不会多一条轨"
+                )
+            }
+        )
+    return result
 
 
 @router.delete("/api/translation/jobs/{translation_id}", status_code=status.HTTP_204_NO_CONTENT)

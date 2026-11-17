@@ -189,6 +189,7 @@ describe("字幕翻译抽屉", () => {
     expect(await screen.findByLabelText("B站 双语预览 1")).toHaveTextContent("Hello world");
     expect(screen.getByLabelText("B站 双语预览 1")).toHaveTextContent("你好世界");
     expect(screen.getByRole("button", { name: "导出双语 SRT / BCC" })).toBeInTheDocument();
+    expect(screen.getByText(/同一 zh 轨是覆盖/)).toBeInTheDocument();
     // 排版变了但还没重新导出 —— 上传必须挡住，防止把旧的纯中文文件传上去。
     expect(screen.getByRole("button", { name: "上传中文字幕到 B站" })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "导出双语 SRT / BCC" }));

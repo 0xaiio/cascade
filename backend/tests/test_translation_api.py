@@ -380,3 +380,78 @@ def test_switching_back_to_zh_writes_the_plain_chinese_track(tmp_path: Path) -> 
     assert plain["bcc_path"] is None
     assert Path(plain["srt_path"]).name.endswith(".zh.srt")
     assert Path(plain["srt_path"]).read_text(encoding="utf-8-sig").count("译文1") == 1
+
+
+def test_bilingual_upload_reaches_bili_as_two_lines_in_one_cue(tmp_path: Path) -> None:
+    """导出的双语 SRT 经真实 upload_subtitle 读回后，B站 表单里的 content 必须是两行、一个时间。"""
+    import json
+
+    from app.bilibili.bili_upload import UploadContext, attach_translated_subtitle
+    from bili_fakes import FakeBiliTransport
+
+    client, subtitle = setup_job(tmp_path, ScriptedProvider())
+    created = client.post("/api/translation/jobs", json={"job_id": "job-1"}).json()
+    wait_state(client, created["id"], {"succeeded"})
+    client.patch(f"/api/translation/jobs/{created['id']}/mode", json={"mode": "bilingual"})
+    exported = client.post(f"/api/translation/jobs/{created['id']}/export").json()
+
+    transport = FakeBiliTransport()
+    context = UploadContext(
+        biliup_exe="biliup.exe",
+        cookie_path=tmp_path / "cookies.json",
+        jar={"SESSDATA": "s", "bili_jct": "jct", "DedeUserID": "42"},
+        transport=transport,
+    )
+    state, message, count = attach_translated_subtitle(
+        context, aid=111, bvid="BV1xx", cid=7001, path=Path(exported["srt_path"]), lan="zh"
+    )
+    assert state == "posted" and count == 3
+    assert transport.subtitles, message
+    form = transport.subtitles[0]
+    assert form["lan"] == "zh" and form["oid"] == 7001 and form["submit"] == "true"
+    body = json.loads(form["data"])["body"]
+    assert len(body) == 3
+    assert body[0]["content"] == "Hello world\n译文1"
+    assert body[0]["from"] == 1.0 and body[0]["to"] == 2.0
+
+
+def test_bilingual_upload_reply_names_the_mode_and_overwrite(tmp_path: Path) -> None:
+    """回执必须说清是同屏双语、同 lan 覆盖，避免用户以为会多一条轨。"""
+    from sqlmodel import Session
+
+    from app.bilibili.bili_read_model import read_upload
+    from app.contracts.models import BiliUpload, BiliUploadStatus, utc_now
+
+    client, _ = setup_job(tmp_path, ScriptedProvider())
+    created = client.post("/api/translation/jobs", json={"job_id": "job-1"}).json()
+    wait_state(client, created["id"], {"succeeded"})
+    client.patch(f"/api/translation/jobs/{created['id']}/mode", json={"mode": "bilingual"})
+    assert client.post(f"/api/translation/jobs/{created['id']}/export").status_code == 200
+
+    engine = client.app.state.db_engine
+    with Session(engine) as session:
+        session.add(
+            BiliUpload(
+                id="upload-bi", job_id="job-1", item_id=created["item_id"], title="演示",
+                status=BiliUploadStatus.published.value, aid=111, bvid="BV1xx", cid=7001,
+                created_at=utc_now(), updated_at=utc_now(),
+            )
+        )
+        session.commit()
+
+    manager = client.app.state.api_context.bili
+
+    def fake_attach(upload_id: str, path: Path):
+        with Session(engine) as session:
+            row = session.get(BiliUpload, upload_id)
+            row.translated_subtitle_state = "posted"
+            row.translated_subtitle_lan = "zh"
+            row.translated_subtitle_message = "CC 字幕已上传（3 条，zh）"
+            session.add(row)
+            session.commit()
+            return read_upload(row, index=1)
+
+    manager.attach_translation = fake_attach  # type: ignore[method-assign]
+    body = client.post(f"/api/translation/jobs/{created['id']}/upload-bili").json()
+    assert "中英双语" in body["translated_subtitle_message"]
+    assert "覆盖" in body["translated_subtitle_message"]

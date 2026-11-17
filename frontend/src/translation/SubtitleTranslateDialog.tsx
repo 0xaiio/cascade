@@ -233,6 +233,9 @@ export function SubtitleTranslateDialog({
 
         <footer className="modal-footer">
           <button type="button" className="ghost-button" onClick={onClose}>关闭</button>
+          {job?.display_mode === "bilingual" && (
+            <span className="translation-mode-hint">同一 zh 轨是覆盖，不会多一条轨</span>
+          )}
           {uploadNote && <span className="translation-upload-note">{uploadNote}</span>}
           <button
             type="button"
