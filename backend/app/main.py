@@ -11,6 +11,7 @@
 
 import asyncio
 import logging
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Callable
@@ -110,6 +111,32 @@ def create_app(
         broker,
         ensure_server=model_server_ensurer,
     )
+
+    def fulfill_translation(job_id: str, item_id: str | None, mode: str, loop: asyncio.AbstractEventLoop) -> Path:
+        """补传时缺译文就现场制作：跑在 to_thread 的后台线程里，可以等翻译完成。"""
+        found = translations.find(job_id, item_id)
+        if found is not None and found.state == "succeeded":
+            task = found
+        else:
+            task = translations.create(job_id, item_id)
+            translations.start(task.id, loop)
+        deadline = time.monotonic() + 900
+        while True:
+            state = translations.get(task.id).state
+            if state == "succeeded":
+                break
+            if state in {"failed", "cancelled"}:
+                raise RuntimeError(f"中文字幕没能完成（{state}）")
+            if time.monotonic() > deadline:
+                raise RuntimeError("中文字幕制作超时")
+            time.sleep(0.5)
+        wanted = "bilingual" if mode == "bilingual" else "zh"
+        if translations.get(task.id).display_mode != wanted:
+            translations.set_display_mode(task.id, wanted)
+        return Path(translations.export(task.id).srt_path)
+
+    # bili 的构造早于 translations（lifespan 要用它），这里补上可注入的接缝。
+    bili.translation_fulfiller = fulfill_translation
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

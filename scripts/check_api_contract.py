@@ -68,6 +68,7 @@ SCHEMA_PAIRS: dict[str, str | None] = {
     "TranslationExport": "TranslationExportRead",
     "TranslationProbe": "TranslationProbeRead",
     "TranslationEditRequest": "TranslationEditRequest",
+    "SubtitleSelection": "SubtitleSelection",
     # B站 上传。后端用 `Read` 后缀区分「读模型」，前端只消费读模型；只有 `BiliAdvice` /
     # `BiliMetadata` / `BiliLimits` / `BiliPrefillItem` 两侧同名。
     # `BiliBadge` / `BiliBadgeTone` 是 `type` 别名，不进这张表（脚本只比对 `interface`）。

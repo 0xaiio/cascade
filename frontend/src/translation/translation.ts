@@ -13,6 +13,20 @@ export function probeTranslation(): Promise<TranslationProbe> {
   return request<TranslationProbe>("/api/translation/probe", { method: "POST" });
 }
 
+/** 入口先查：命中就打开上次成果；404 才新建。不触发翻译、不发模型请求。 */
+export function lookupTranslation(jobId: string, itemId: string | null): Promise<TranslationJob> {
+  const query = new URLSearchParams({ job_id: jobId });
+  if (itemId) query.set("item_id", itemId);
+  return request<TranslationJob>(`/api/translation/lookup?${query.toString()}`);
+}
+
+/** 用系统默认程序打开中文字幕；路径由服务端推导。 */
+export function openTranslatedSubtitle(jobId: string, itemId: string | null): Promise<void> {
+  const query = new URLSearchParams({ job_id: jobId });
+  if (itemId) query.set("item_id", itemId);
+  return request<void>(`/api/translation/open?${query.toString()}`, { method: "POST" });
+}
+
 export function startTranslation(jobId: string, itemId: string | null): Promise<TranslationJob> {
   return request<TranslationJob>("/api/translation/jobs", {
     method: "POST",

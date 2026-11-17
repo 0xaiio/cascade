@@ -96,6 +96,23 @@ describe("字幕翻译抽屉", () => {
     expect(screen.getByLabelText("第 1 条译文")).toHaveValue("你好世界");
   });
 
+  test("传 existingId 时打开历史任务，不新建、不发翻译请求", async () => {
+    vi.mocked(getTranslation).mockResolvedValue({ ...JOB, id: "tr-existing", state: "succeeded" });
+    render(
+      <SubtitleTranslateDialog
+        jobId="job-running"
+        itemId={null}
+        title="视频"
+        refreshToken={0}
+        existingId="tr-existing"
+        onClose={() => {}}
+      />
+    );
+    expect(await screen.findByText("字幕翻译")).toBeInTheDocument();
+    expect(getTranslation).toHaveBeenCalledWith("tr-existing");
+    expect(startTranslation).not.toHaveBeenCalled();
+  });
+
   test("首次翻译时说明在准备本机模型服务，而不是让用户对着 0/N 猜", async () => {
     vi.mocked(startTranslation).mockResolvedValue({
       ...JOB,
@@ -330,6 +347,7 @@ describe("两个入口", () => {
         onOpenSourcePage={() => {}}
         onOpenSubtitle={() => {}}
         onTranslateSubtitle={onTranslateSubtitle}
+        onOpenTranslatedSubtitle={() => {}}
         onOpenVideoPage={() => {}}
         onPause={() => {}}
         onPlay={() => {}}
@@ -346,9 +364,58 @@ describe("两个入口", () => {
     expect(onTranslateSubtitle).toHaveBeenCalledWith("job-running", jobPayload.items[0].id);
   });
 
-  test("投稿预览表的字幕列也有入口", async () => {
+  test("已有译文时任务中心入口变成「打开中文字幕」", async () => {
     const user = userEvent.setup();
     const onTranslateSubtitle = vi.fn();
+    const onOpenTranslatedSubtitle = vi.fn();
+    const withTranslation = {
+      ...jobPayload,
+      total_items: 1,
+      items: [{
+        ...jobPayload.items[0],
+        subtitle_path: "D:////Videos////a.en.vtt",
+        translated_subtitle_path: "D:////Videos////a.zh.srt"
+      }]
+    };
+    render(
+      <JobQueue
+        biliUploads={{}}
+        jobs={[withTranslation]}
+        selectedJobIds={new Set()}
+        onBatchAction={() => {}}
+        onCloneJob={async () => null}
+        onBiliRetrySeason={async () => true}
+        onBiliRetryUpload={() => {}}
+        onBiliRetryMany={() => {}}
+        onBiliUpload={() => {}}
+        onCopyLink={async () => {}}
+        onDelete={() => {}}
+        onDeleteItems={() => {}}
+        onOpenFolder={() => {}}
+        onOpenItemFolder={() => {}}
+        onOpenSourcePage={() => {}}
+        onOpenSubtitle={() => {}}
+        onTranslateSubtitle={onTranslateSubtitle}
+        onOpenTranslatedSubtitle={onOpenTranslatedSubtitle}
+        onOpenVideoPage={() => {}}
+        onPause={() => {}}
+        onPlay={() => {}}
+        onPlayItem={() => {}}
+        onRestart={() => {}}
+        onRestartItem={() => {}}
+        onToggleJobSelection={() => {}}
+      />
+    );
+    const entry = screen.getByRole("button", { name: `打开中文字幕 ${jobPayload.title}` });
+    expect(entry).toHaveAttribute("title", "打开中文字幕");
+    await user.click(entry);
+    expect(onOpenTranslatedSubtitle).toHaveBeenCalledWith("job-running", jobPayload.items[0].id);
+    expect(onTranslateSubtitle).not.toHaveBeenCalled();
+  });
+
+  test("投稿页三个字幕选项默认全勾，且不再有手动「译为中文」入口", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn(async () => {});
     render(
       <BiliUploadDialog
         prefill={biliPrefillSinglePayload}
@@ -356,16 +423,23 @@ describe("两个入口", () => {
         seasons={null}
         loadSeasons={() => {}}
         onCancel={() => {}}
-        onSubmit={async () => {}}
-        onTranslateSubtitle={onTranslateSubtitle}
+        onSubmit={onSubmit}
       />
     );
-    const entry = screen.getByRole("button", { name: /^译为中文 / });
-    expect(entry.querySelector(".translate-zh-badge")).toHaveTextContent("中");
-    await user.click(entry);
-    expect(onTranslateSubtitle).toHaveBeenCalledWith(
-      biliPrefillSinglePayload.job_id,
-      expect.any(String)
+    const boxes = Array.from(
+      document.querySelectorAll('.bili-subtitle-options input[type="checkbox"]')
+    ) as HTMLInputElement[];
+    expect(boxes).toHaveLength(3);
+    expect(boxes.every((box) => box.checked)).toBe(true);
+    expect(screen.getByText(/中文与双语共用同一条 zh 轨/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^译为中文 / })).not.toBeInTheDocument();
+
+    await user.click(boxes[1]);  // 取消中文 CC
+    const submit = screen.getByRole("button", { name: /开始上传/ });
+    expect(submit).toBeEnabled();
+    await user.click(submit);
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ subtitleSelection: { en: true, zh: false, bilingual: true } })
     );
   });
 });

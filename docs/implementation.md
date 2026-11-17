@@ -4,14 +4,14 @@
 
 ## 后端入口
 
-FastAPI 应用由 [create_app](../backend/app/main.py#L43) 创建，启动时：
+FastAPI 应用由 [create_app](../backend/app/main.py#L44) 创建，启动时：
 
 - 创建配置和目录。
 - 初始化 SQLite engine 和表结构。
 - 创建 `EventBroker`。
 - 创建 `YtDlpService` 并注入 PO token、chunk、throttled rate、aria2c 等配置。
 - 创建 `JobManager` 并在 lifespan 中启动/停止 worker。
-- 创建 [BiliManager](../backend/app/bilibili/bili_manager.py#L435)（B站 投稿队列，单 worker）并同样在 lifespan 中启停；启动时会先把上次退出时停在 `uploading` 的记录折成可重试的失败。
+- 创建 [BiliManager](../backend/app/bilibili/bili_manager.py#L445)（B站 投稿队列，单 worker）并同样在 lifespan 中启停；启动时会先把上次退出时停在 `uploading` 的记录折成可重试的失败。
 - 把这些依赖装进 [ApiContext](../backend/app/api/api_context.py#L29) 并挂到 `app.state`。
 
 `create_app` 只做装配：HTTP 路由按资源拆到 [routers/](../backend/app/api/routers/__init__.py#L21) 下（`diagnostics` / `cookies` / `analyze` / `jobs` / `job_files` / `settings` / `events` / `bilibili`），由 `API_ROUTERS` 统一挂载。路由只做「取参 → 调辅助 → 定状态码」：请求级依赖经 [api_context.py](../backend/app/api/api_context.py#L45) 的 `ContextDep` / `SessionDep` 取，跨路由复用的任务/条目定位、设置读写与 cookies 处理在 [api_support.py](../backend/app/api/api_support.py#L26)，产物定位与本机打开在 [job_artifacts.py](../backend/app/download/job_artifacts.py#L31)。任务序列化逻辑委托给 [job_read_model.py](../backend/app/download/job_read_model.py#L12)，状态转换一律委托 `JobManager`；B站 那一组同理由 [bili_manager.py](../backend/app/bilibili/bili_manager.py) 承担，读模型投影在 [bili_read_model.py](../backend/app/bilibili/bili_read_model.py#L60)。
@@ -150,7 +150,7 @@ yt-dlp 对字幕、缩略图、HTTP chunk 和分离视频/音频流会多次发�
 
 **下载有字节级进度，上传没有**：`biliup` 在管道模式（非 TTY）下不输出已传字节数，只在三个节点各打一行（`pre_upload` / `Upload completed` / `APP接口投稿成功`），[_PROGRESS_STAGES](../backend/app/bilibili/bili_bin.py#L196) 把它们折成 0.2 / 0.6 / 0.95。所以界面上给的是**四段轨迹**（排队 / 传输 / 提交 / 核对）与「已用时间」，不是百分比条 —— 一个停在 20% 不动的数字比没有数字更糟。阶段映射与聚合在 [biliProgress.ts](../frontend/src/bilibili/biliProgress.ts#L23)。
 
-事件侧有一条与下载不同的约定：[_store_progress](../backend/app/bilibili/bili_manager.py#L1544) **只在进度值真的变大时才发 `bili_upload_progress`**。`on_progress` 是每读一行输出回调一次，不判「变没变」会往 SSE 里灌几百条同值事件；判了之后，一次投稿最多 3 条。前端沿用「收到任何一条事件就重拉」的既有口径，因此不需要为进度维护第二份状态。
+事件侧有一条与下载不同的约定：[_store_progress](../backend/app/bilibili/bili_manager.py#L1620) **只在进度值真的变大时才发 `bili_upload_progress`**。`on_progress` 是每读一行输出回调一次，不判「变没变」会往 SSE 里灌几百条同值事件；判了之后，一次投稿最多 3 条。前端沿用「收到任何一条事件就重拉」的既有口径，因此不需要为进度维护第二份状态。
 
 ## 读模型
 
@@ -190,7 +190,7 @@ B站 上传是一条与下载完全解耦的链路，模块划分（详见 [设�
 
 - **`run_command` 的读取放在后台线程**。早先是「主线程 `for line in process.stdout` 读完再 `wait(timeout)`」—— 阻塞在管道上时那段 `wait` 根本执行不到，于是一个**不打印任何输出就挂住**的投稿会让超时形同虚设（记录永远停在「上传中」），而「挂死」恰恰是这个超时唯一要防的东西。现在读取是 daemon 线程 + 有界 `join`，超时会 kill 并写入 `local-upload-deadline-reached` 标记，该标记会被 [classify_failure](../backend/app/bilibili/bili_policy.py#L376) 翻成「这次上传等得太久」。
 - **`--submit` 照传，但它在 0.2.4 里不起作用**：上游 `uploader.rs` 的 `match submit` 两个分支都调 `submit_by_app`，实际提交永远走 `/x/vu/app/add`。真正会拦住投稿的是**登录文件里缺 `token_info.access_token`** —— `login_by_cookies` 会先拿它去 `oauth2/info` 校验，空串换来 `-400 请求错误` 之后 biliup 直接退出。[exchange_tv_token](../backend/app/bilibili/bili_auth.py#L142) 补上 TV 端三步交换，并把 `platform` 写成 `BiliTV`（biliup 靠它挑续期用的 appkey），见 [011](../ai/bug-fix/011-biliup-refuses-a-token-less-cookie-file.md)。
-- **失败时 biliup 的原始输出会逐行进日志**（前缀 `biliup 输出 | `，`WARNING` 级）。此前 `UploadContext.on_log` 没有任何调用方，用户照着失败建议去 `app.log` 搜只会扑空；现在这条通道由 [bili_manager._log_biliup_line](../backend/app/bilibili/bili_manager.py#L196) 提供，落盘前过 `sanitize_log_message`。
+- **失败时 biliup 的原始输出会逐行进日志**（前缀 `biliup 输出 | `，`WARNING` 级）。此前 `UploadContext.on_log` 没有任何调用方，用户照着失败建议去 `app.log` 搜只会扑空；现在这条通道由 [bili_manager._log_biliup_line](../backend/app/bilibili/bili_manager.py#L206) 提供，落盘前过 `sanitize_log_message`。
 - **传输层断线也是一类结论**。`biliup` 被对端断开时输出里**没有业务码**（`error sending request` → `connection error` → `peer closed connection … close_notify`），旧分类表一条也命中不了，界面只剩「没能识别出具体原因」。现在 `TRANSPORT_FAILURE_NEEDLES` 收这一类，并按「失败那一行的 URL 是不是上传 CDN」决定敢不敢承诺「重试不会投重」——承诺的成立只依赖「字节没传完 ⇒ 提交接口没被调用过」（见 [021](../ai/bug-fix/021-a-dropped-upload-link-looks-like-nothing-at-all.md)）。
 - **对账按标题前缀匹配，且两侧都做 `strip()`**。平台会对标题做首尾空白处理；只归一不比较的写法会让用户多打一个尾随空格就永远查不到，于是一次成功投稿被标成「待核对」。
 - **请求参数风格在两个端点上不一致**：`season/add` 的 `csrf` 走 form 且返回 `data` 为 `season_id`；`season/section/episodes/add` 的 `csrf` 走 **query**，body 用 **camelCase**（`sectionId` / `episodes`）。两处都由 `bili_api` 封装，调用方不用记。
@@ -206,7 +206,7 @@ B站 上传是一条与下载完全解耦的链路，模块划分（详见 [设�
   所以 `zh-Hans` 压成 `zh`、繁体三档原样保留、认不出来退 `en`。
   这条实测靠 `submit=false`（只存草稿、不发布）逐个枚举候选值得到 —— 它是唯一能在
   **不动任何已发布稿件**的前提下验证接口形态的方式。
-- **字幕路径只在 `JobItem` 上存一份**（[`_subtitle_of`](../backend/app/bilibili/bili_manager.py#L1486) 从那里读），
+- **字幕路径只在 `JobItem` 上存一份**（[`_subtitle_of`](../backend/app/bilibili/bili_manager.py#L1562) 从那里读），
   投稿记录里不复制；读的时候还要**再看一次文件在不在**，不在就当没有。
 - **字幕失败有专门的补救动作**：已发布/审核中且 `subtitle_state=failed` 的稿件，重试走
   `_reverify_work` 并带上字幕，回执「已重新上传字幕」。**绝不**为了字幕重投一次视频。

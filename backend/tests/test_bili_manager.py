@@ -40,6 +40,7 @@ from app.bilibili.bili_policy import SEASON_CREATE_FAILED
 from app.bilibili.bili_read_model import read_job_uploads
 from app.bilibili.bili_upload import UploadResult, UploadTarget
 from app.contracts.config import AppSettings
+from app.contracts.schemas import SubtitleSelection
 from app.infra.events import EventBroker
 from app.contracts.models import (
     BiliSeason,
@@ -2235,4 +2236,106 @@ async def test_a_write_targets_the_same_season_row_the_reader_reports(tmp_path):
     # 老那条**一个字段都没被碰**：写入不能顺手把首条也改了。
     assert (old.title, old.status) == ("", BiliSeasonStatus.grouped.value)
     assert created.id
+    await harness.manager.stop()
+
+
+# ================================================================ 按勾选补传字幕
+@pytest.mark.parametrize(
+    ("selection", "expected_lans", "expected_modes"),
+    [
+        ({"en": True, "zh": False, "bilingual": False}, ["en"], []),
+        ({"en": False, "zh": True, "bilingual": False}, ["zh"], ["zh"]),
+        ({"en": False, "zh": False, "bilingual": True}, ["zh"], ["bilingual"]),
+        ({"en": True, "zh": True, "bilingual": True}, ["en", "zh", "zh"], ["zh", "bilingual"]),
+    ],
+)
+async def test_retry_upload_honours_the_saved_subtitle_selection(
+    tmp_path: Path, selection: dict, expected_lans: list[str], expected_modes: list[str]
+) -> None:
+    """勾选决定补哪几条轨；zh 与 bilingual 同 lan 串行覆盖，投稿命令始终只跑一次。"""
+    calls: list[list[str]] = []
+
+    def counting_runner(argv, timeout, on_line):
+        calls.append(list(argv))
+        if on_line is not None:
+            for line in ("start pre_upload", "Upload completed", "APP接口投稿成功"):
+                on_line(line)
+        return CommandResult(0, "APP接口投稿成功", "")
+
+    transport = FakeBiliTransport(
+        archives=[{"aid": 9, "bvid": "BV9", "title": TITLE, "state": 0}],
+        video={"cid": 7001, "pic": "https://i0.hdslb.com/bfs/archive/pic.jpg"},
+    )
+    harness = make_harness(tmp_path, transport=transport, runner=counting_runner)
+    items = harness.seed_job("job1", "任务", 1)
+    subtitle = Path(items[0]["path"]).with_suffix(".en.vtt")
+    subtitle.write_text("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHello\n", encoding="utf-8")
+    harness.set_item_subtitle(items[0]["id"], subtitle)
+
+    created = await harness.manager.submit_single(
+        job_id="job1", item_id=items[0]["id"], meta=harness.meta(),
+        video_path=Path(items[0]["path"]), make_cover=False, comment="",
+        subtitle_selection=SubtitleSelection(en=True, zh=True, bilingual=True),
+    )
+    await drain(harness.manager)
+    with Session(harness.engine) as session:
+        row = session.get(BiliUpload, created.id)
+        assert row is not None
+        row.subtitle_state = "failed"  # 仿真「字幕没传上」，进入补传分支
+        row.translated_subtitle_state = "skipped"
+        row.subtitle_selection_json = json.dumps(selection)
+        session.add(row)
+        session.commit()
+
+    made: list[str] = []
+
+    def fulfill(job_id, item_id, mode, loop):
+        made.append(mode)
+        path = tmp_path / f"{mode}.srt"
+        path.write_text("1\n00:00:01,000 --> 00:00:02,000\n译文\n", encoding="utf-8")
+        return path
+
+    harness.manager.translation_fulfiller = fulfill
+    already_submitted = len(transport.subtitles)  # 投稿时已经传过的那几条不算这次补传
+    result = await harness.manager.retry_upload(created.id)
+
+    assert result.action == "reverify"
+    assert [entry["lan"] for entry in transport.subtitles[already_submitted:]] == expected_lans
+    assert made == expected_modes
+    assert all(entry["oid"] == 7001 for entry in transport.subtitles)
+    assert len(calls) == 1  # 绝不为字幕重投视频
+    assert result.upload.status == BiliUploadStatus.published.value
+    await harness.manager.stop()
+
+
+async def test_retry_upload_says_so_when_the_missing_translation_cannot_be_made(tmp_path: Path) -> None:
+    """自动制作失败是字幕结论，不把已发布稿件翻成失败。"""
+    transport = FakeBiliTransport(
+        archives=[{"aid": 9, "bvid": "BV9", "title": TITLE, "state": 0}],
+        video={"cid": 7001, "pic": "https://i0.hdslb.com/bfs/archive/pic.jpg"},
+    )
+    harness = make_harness(tmp_path, transport=transport)
+    items = harness.seed_job("job1", "任务", 1)
+    created = await harness.manager.submit_single(
+        job_id="job1", item_id=items[0]["id"], meta=harness.meta(),
+        video_path=Path(items[0]["path"]), make_cover=False, comment="",
+    )
+    await drain(harness.manager)
+    with Session(harness.engine) as session:
+        row = session.get(BiliUpload, created.id)
+        assert row is not None
+        row.subtitle_state = "failed"
+        row.subtitle_selection_json = json.dumps({"en": False, "zh": True, "bilingual": False})
+        session.add(row)
+        session.commit()
+
+    def broken(job_id, item_id, mode, loop):
+        raise RuntimeError("本机模型不在")
+
+    harness.manager.translation_fulfiller = broken
+    result = await harness.manager.retry_upload(created.id)
+    assert result.action == "reverify"
+    assert result.upload.translated_subtitle_state == "failed"
+    assert "本机模型不在" in result.upload.translated_subtitle_message
+    assert result.upload.status == BiliUploadStatus.published.value
     await harness.manager.stop()

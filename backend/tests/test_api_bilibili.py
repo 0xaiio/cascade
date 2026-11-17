@@ -782,7 +782,11 @@ def test_retry_upload_404s_for_an_unknown_record(client):
 
 
 def test_retry_upload_reports_none_for_a_published_record(client):
-    """幂等：已经成功的稿件点重试不能再投一次。标题要与替身里的稿件对上，才会走到 published。"""
+    """幂等：已经成功的稿件点重试不能再投一次。标题要与替身里的稿件对上，才会走到 published。
+
+    这里显式全不勾：需求 5 下勾选了字幕的已发布稿件重试会补字幕（仍不重投），
+    那条幂等判据单独立在 `test_bili_manager` 的按勾选补传用例里。
+    """
     client.seed_job("job1", "任务", 1)
     created = client.client.post(
         "/api/bilibili/uploads",
@@ -796,6 +800,7 @@ def test_retry_upload_reports_none_for_a_published_record(client):
                 "copyright": COPYRIGHT_REPRINT,
                 "source": "https://youtu.be/demo",
             },
+            subtitle_selection={"en": False, "zh": False, "bilingual": False},
         ),
     ).json()
     upload_id = created["uploads"][0]["id"]

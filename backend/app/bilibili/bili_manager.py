@@ -185,6 +185,16 @@ class BiliPreconditionError(RuntimeError):
         return {"code": self.code, "message": self.message, "advice": self.advice}
 
 
+def _selection_of(raw: str | None) -> SubtitleSelection | None:
+    """投稿时勾选的字幕选项；空串/坏数据 = 老投稿，维持旧行为。"""
+    if not raw:
+        return None
+    try:
+        return SubtitleSelection.model_validate_json(raw)
+    except Exception:  # noqa: BLE001 - 坏数据不该让重试整体失败
+        return None
+
+
 def _new_id() -> str:
     return uuid4().hex
 
@@ -443,6 +453,7 @@ class BiliManager:
         transport: Transport | None = None,
         runner: Runner | None = None,
         sleeper: Callable[[float], None] = time.sleep,
+        translation_fulfiller: Callable[[str, str | None, str, asyncio.AbstractEventLoop], Path] | None = None,
     ) -> None:
         self.engine = engine
         self.settings = settings
@@ -452,6 +463,8 @@ class BiliManager:
         self.transport: Transport = transport or default_transport()
         self.runner = runner
         self.sleeper = sleeper
+        # 缺译文时的「制作」能力由装配层提供；测试注入假实现即可完全离线。
+        self.translation_fulfiller = translation_fulfiller
         self._queue: asyncio.Queue[str | None] | None = None
         self._workers: list[asyncio.Task[None]] = []
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -1164,6 +1177,7 @@ class BiliManager:
             )
             title, item_id = row.title, row.item_id
             index = read.index
+            selection = _selection_of(row.subtitle_selection_json)
             if status in IN_FLIGHT_STATUSES:
                 return BiliRetryRead(action="none", message="这一条正在上传中，请稍候", upload=read)
             if status in {BiliUploadStatus.published.value, BiliUploadStatus.reviewing.value}:
@@ -1177,7 +1191,12 @@ class BiliManager:
                 #     有字幕但当时挂不上）。只认 `failed` 的话，修复前被误记成 `skipped`
                 #     的历史行（实测两条）永远救不回来。见 `ai/bug-fix/016`。
                 recoverable = subtitle_path is not None and row.subtitle_state != SUBTITLE_POSTED
-                if row.subtitle_state != SUBTITLE_FAILED and not recoverable:
+                needs_translation = (
+                    selection is not None
+                    and (selection.zh or selection.bilingual)
+                    and row.translated_subtitle_state != SUBTITLE_POSTED
+                )
+                if row.subtitle_state != SUBTITLE_FAILED and not recoverable and not needs_translation:
                     return BiliRetryRead(
                         action="none",
                         message="这一条已经上传成功，没有重复投稿（避免在 B 站留下重复稿件）",
@@ -1191,6 +1210,8 @@ class BiliManager:
                     item_id,
                     subtitle_path,
                     subtitle_language,
+                    selection,
+                    asyncio.get_running_loop(),
                 )
                 if updated.subtitle_state == SUBTITLE_POSTED:
                     self._close_auto_retry(target_id=upload_id, message="字幕已补传")
@@ -1219,6 +1240,9 @@ class BiliManager:
                 row = session.get(BiliUpload, upload_id)
                 if row is not None:
                     subtitle_path, subtitle_language = self._subtitle_of(session, row)
+                    selection = _selection_of(row.subtitle_selection_json)
+                else:
+                    selection = None
             updated = await asyncio.to_thread(
                 self._reverify_work,
                 upload_id,
@@ -1227,6 +1251,8 @@ class BiliManager:
                 item_id,
                 subtitle_path,
                 subtitle_language,
+                selection,
+                asyncio.get_running_loop(),
             )
             return BiliRetryRead(action="reverify", message="已重新核对一次", upload=updated)
 
@@ -1287,15 +1313,23 @@ class BiliManager:
         item_id: str | None,
         subtitle_path: Path | None,
         subtitle_language: str | None,
+        selection: SubtitleSelection | None = None,
+        loop: asyncio.AbstractEventLoop | None = None,
     ) -> BiliUploadRead:
         context = self._context()
+        # 取消英文勾选时不能「顺手」把原轨再传一次 —— 勾选项表达的是用户要明确要哪些轨。
+        # selection 为 None 表示老投稿没勾过，维持既有行为。
+        effective_subtitle_path = subtitle_path if (selection is None or selection.en) else None
         result = reverify(
             context,
             title=title,
             index=index,
             item_id=item_id,
-            subtitle_path=subtitle_path,
+            subtitle_path=effective_subtitle_path,
             subtitle_language=subtitle_language,
+        )
+        self._complete_selected_subtitles(
+            result, self._job_of(upload_id), item_id, selection, loop, context
         )
         self._store_result(upload_id, result)
         self._publish_threadsafe(
@@ -1305,6 +1339,48 @@ class BiliManager:
             row = session.get(BiliUpload, upload_id)
             assert row is not None
             return read_upload(row, index=index, auto_retry=read_auto_retry(session, row.id))
+
+    def _complete_selected_subtitles(
+        self,
+        result,
+        job_id: str | None,
+        item_id: str | None,
+        selection: SubtitleSelection | None,
+        loop: asyncio.AbstractEventLoop | None,
+        context: UploadContext,
+    ) -> None:
+        """按投稿时的勾选补中文/双语轨；没做好的现场制作，绝不为它重投视频。"""
+        if selection is None or not (selection.zh or selection.bilingual):
+            return
+        if not (result.ok and result.aid and result.bvid and result.cid):
+            result.translated_subtitle_state = SUBTITLE_SKIPPED
+            result.translated_subtitle_message = "稿件还没核对到 aid/cid，中文/双语字幕暂时传不了"
+            return
+        for mode in ("zh", "bilingual"):
+            if not getattr(selection, mode):
+                continue
+            if self.translation_fulfiller is None or loop is None or not job_id:
+                result.translated_subtitle_state = SUBTITLE_FAILED
+                result.translated_subtitle_message = "这条中文字幕还没做好，且当前无法自动制作"
+                return
+            try:
+                path = self.translation_fulfiller(job_id, item_id, mode, loop)
+            except Exception as exc:  # noqa: BLE001 - 制作失败是字幕结论，不是稿件失败
+                result.translated_subtitle_state = SUBTITLE_FAILED
+                result.translated_subtitle_message = f"{mode} 字幕没能制作完成：{exc}"
+                return
+            state, message, _count = attach_translated_subtitle(
+                context,
+                aid=int(result.aid),
+                bvid=str(result.bvid),
+                cid=int(result.cid),
+                path=path,
+                lan="zh",
+            )
+            result.translated_subtitle_state = state
+            result.translated_subtitle_lan = "zh"
+            # zh 与 bilingual 共用一条轨，按顺序覆盖；最后一句说明最终呈现的是哪一种。
+            result.translated_subtitle_message = f"{mode}：{message}"
 
     def _job_of(self, upload_id: str) -> str | None:
         with Session(self.engine) as session:
