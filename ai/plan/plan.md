@@ -1,5 +1,132 @@
 # YouTube 下载器实现计划
 
+## 2026-11-17 22:10 +08:00 - 字幕上传闭环：状态复用、入口转型、勾选补传 计划
+
+> 状态：**待执行**。按 §6 的六步逐项实现，每步独立验收、独立提交。
+
+### Summary
+
+用户提出六项联动需求，合起来是同一件事：**让「翻译 → 上传」成为一条可恢复、可配置的闭环**，
+而不是「翻译一次就丢、上传要点两次、上传页还要手动再点一次翻译」。
+
+| # | 需求 | 判据 |
+| --- | --- | --- |
+| 1 | 翻译完成后「上传到 B站」按钮仍是禁用的 | 翻译成功即可上传，按钮不再依赖事先点过「导出」；需要导出时由上传动作自己做 |
+| 2 | 重启后要重新翻译 | 同一 `(job_id, item_id)` 再次点入口直接打开上次成果，不新建任务、不发模型请求 |
+| 3 | 译完后按钮变「打开中文字幕」 | 有成功译文时入口图标不变、语义改为打开 `.zh.srt`；没有时仍是「译为中文」 |
+| 4 | 上传页勾选上传哪些字幕 | 三个勾选项 `en` / `zh` / `bilingual`，默认全勾；选择随投稿记录持久 |
+| 5 | 等 cid 后按勾选补传，缺的先翻译制作 | `reverify` 拿到 cid 后按序补传；缺译文则先翻译+导出，完成后自动上传；不重投视频 |
+| 6 | 移除上传页底部「译成中文」 | 上传页两处手动翻译入口全删；翻译改由任务中心入口与 §5 的自动补做承担 |
+
+### 1. 现状取证（写代码前已核实）
+
+- 上传按钮：`disabled={!job || active || busy || !job.output_path || modeDirty}`。
+  `output_path` **只有点过「导出」才有值**（`TranslationService.export` 写入），所以翻译成功但没导出时
+  按钮永远禁 —— 这就是需求 1 的全部原因，不是 SSE/轮询漏了状态。
+- 幂等：`TranslationService.create` 只对 `queued/running` 复用；`succeeded` 会新建任务 ⇒ 需求 2。
+- 读模型：`JobItemRead` 有 `subtitle_path`（原字幕），**没有译文路径** ⇒ 需求 3 无法只靠前端判断。
+- 上传页：`BiliUploadDialog.onSubmit` 只带 metadata / makeCover / comment / groupMode / season，
+  没有字幕选择；`onTranslateSubtitle` prop 在单视频与逐条预览各渲染一个入口 ⇒ 需求 4/6。
+- 补传：`BiliManager._reverify_work` 只补 `subtitle_path` 那一条原轨，不认识译文 ⇒ 需求 5。
+- B站 事实：`lan=en` 与 `lan=zh` 是两条可切换轨；「双语」是把两行放进**同一条 zh cue**，
+  因此 `zh` 与 `bilingual` 同时勾选时必然是**同一条轨先后覆盖**，最终是双语。默认三勾必须接受这个语义，
+  界面要写明，不能假装能同时存在两条 zh 轨。
+
+### 2. 需求 1：翻译完成即可上传
+
+- 前端上传按钮的禁用条件去掉 `!job.output_path` 与 `modeDirty`；改为在上传动作里：
+  若 `modeDirty || !job.output_path` 先 `exportTranslation`，再 `uploadBiliTranslation`。
+- 这样「导出」变成可选的本地留存动作，上传不再要求用户先做一遍无用功。
+- 后端不改：`upload-bili` 仍要求 `output_path` 存在，由前端补齐前置步骤。
+- 测试：组件用例钉「翻译成功后上传按钮可点」「未导出时点击会先导出再上传」「切模式后仍能上传且重导」。
+
+### 3. 需求 2+3：状态复用与入口转型
+
+**后端**
+
+- `JobItemRead` 新增 `translated_subtitle_path: str | None`，由 `job_read_model` 查该 `(job_id, item_id)`
+  最新 `succeeded` 翻译任务，取其 `output_path` 且文件在磁盘上才给值（与 `subtitle_path` 同源判据）。
+  为避免 N+1，用一次 `select` 取该任务的所有成功记录再按 `item_id` 索引。
+- `TranslationService` 加 `find(job_id, item_id)`：查最新任务（含 `succeeded`），不存在返回 `None`。
+- 新增 `GET /api/translation/lookup?job_id=&item_id=` → 最新任务或 404。前端入口先查，能查到就打开，
+  查不到才 `POST .../jobs` 新建。**「再次点按钮」不发模型请求**是可测判据。
+- 新增 `POST /api/translation/open?job_id=&item_id=` → 用既有 `job_artifacts.open_local_path`
+  打开最新成功译文；没译文 409。前端「打开中文字幕」走这条，不再自己拼路径。
+- 契约三处同步：`schemas.py` ↔ `frontend/src/contracts/types.ts` ↔ `docs/openapi.yaml`。
+
+**前端**
+
+- `JobQueue` 两处入口按 `item.translated_subtitle_path` 分支：
+  有值 → `aria-label="打开中文字幕 <标题>"`、`title="打开中文字幕"`、点击 `onOpenTranslatedSubtitle`；
+  无值 → 保持现在的 `译为中文`。
+- 图标仍用 `TranslateToChineseIcon`（CC+中），因为两者操作对象都是中文字幕；用 Tooltip 区分动作。
+- `App` 接线：`onOpenTranslatedSubtitle` 调 API；`onTranslateSubtitle` 先 lookup，命中则直接展示抽屉。
+
+### 4. 需求 4+6：上传页勾选与移除手动入口
+
+- `BiliUploadDialog` 删掉 `onTranslateSubtitle` prop 与两处按钮（单视频 field、逐条预览列）。
+- 新增三档复选框（默认全勾）：
+  `英文 CC（en）` / `中文 CC（zh）` / `中英双语（覆盖 zh 轨）`。
+  旁边常驻一句：「中文与双语共用同一条 zh 轨，同时勾选时最终显示双语」。
+- `onSubmit` 的值加 `subtitleSelection: {en: boolean; zh: boolean; bilingual: boolean}`。
+- 后端 `BiliUpload` 新增 `subtitle_selection_json: TEXT DEFAULT ''`，
+  `BiliUploadCreateRequest` / `BiliSeasonCreateRequest` 增 `subtitle_selection` 字段并三处同步。
+  老行空串 ⇒ 读模型退回「沿用当前轨」的旧行为，不凭空改变历史稿件的字幕选择。
+- 投稿时把选择写进记录（既为提交时用，也为 §5 的重传）。
+
+### 5. 需求 5：按勾选补传，缺的先制作
+
+这是唯一涉及跨层编排的一项，单独一步、单独提交。
+
+- 在 `bili_manager` 的 `retry_upload` 里：`reverify` 拿到 `aid/bvid/cid` 后，读 `subtitle_selection_json`。
+- 按 `en` → `zh` → `bilingual` 顺序补传：
+  - `en`：原字幕路径存在就直接 `upload_subtitle(lan=en)`；
+  - `zh`：找该条目最新成功译轨，有 `.zh.srt` 且文件在就传；
+  - `bilingual`：找/制作 `.bilingual.zh.srt`，传 `lan=zh`（覆盖上一步）。
+- **缺译文时**：调用可注入的 `fulfill_translation` 回调（默认实现跑 `TranslationService.create` +
+  等 `succeeded` + `export`，双语模式先 `set_display_mode` 再导出），完成后再上传。
+  这条链路在后台线程跑，通过既有 SSE `bili_upload_finished` / `subtitle_translation_finished` 通知，
+  不阻塞 HTTP 请求；失败只记字幕结论，**不把已发布稿件翻成 failed**。
+- 幂等：`zh` 与 `bilingual` 同 lan，不允许并发两次上传；编排里串行执行，后者覆盖前者。
+- 测试：假 provider + 假 transport 覆盖四种组合（只有 en / 只有 zh / 只有 bilingual / 三个都勾），
+  断言：补传请求数、顺序、lan、oid=cid、**投稿命令只跑一次**、缺译文时自动触发翻译且完成后才上传。
+
+### 6. 实施顺序与独立提交
+
+| 步 | 内容 | 独立验收 |
+| --- | --- | --- |
+| 1 | 需求 1：上传按钮与自动导出 | 前端组件用例 2~3 条 + tsc；CDP 量按钮可点 |
+| 2 | 需求 2+3：lookup / 读模型 / 入口切换 / open-translated | 后端用例 + 前端用例 + 契约闸门 |
+| 3 | 需求 4+6：勾选、持久化、移除手动入口 | 表单用例 + API 用例 + 契约闸门；CDP 量三勾选默认态 |
+| 4 | 需求 5：按勾选补传 + 缺则制作 | 后端编排用例（含变异测试） |
+| 5 | 全量回归：后端/前端/tsc/六道闸门/CDP 真机 | 全绿 |
+| 6 | 文档同步：docs 全册 + 计划状态回写 + 特性册增量 | 逐条按提交清单核对，不只跑闸门 |
+
+### 7. 测试策略（先写测试再改实现）
+
+1. **需求 1**（前端）：翻译成功后上传按钮 enabled；未导出时点击先 export 再 upload；切模式后仍可上传。
+2. **需求 2**（后端 + 前端）：首次点创建任务；再次点 lookup 命中，**provider 调用次数为 0**；
+   重启用新 engine/新 client 打开同一库仍命中。
+3. **需求 3**（后端 + 前端）：`subtitle_path` 有译文时按钮 aria-label 变「打开中文字幕」，
+   点击打到 `open-translated`；无译文时仍是「译为中文」。
+4. **需求 4/6**：三个 checkbox 默认全勾；取消后 `onSubmit` 带 false；上传页不再出现任何
+   「译为中文」按钮；老记录没有 selection 字段时退回旧行为。
+5. **需求 5**：四种勾选组合的请求序列；缺译文自动翻译 + 导出 + 上传；投稿命令只跑一次；
+   上传失败不翻稿件状态。
+6. **变异测试**：去掉 lookup 复用 → 重启重译用例红；去掉缺译文自动制作 → 补传用例红。
+7. **真机 CDP**：量上传按钮可点态、三勾选默认、入口文案切换，截图留证。
+
+### 8. 风险与边界
+
+- **三个勾选 ≠ 三条轨**：`zh` 与 `bilingual` 共用 `lan=zh`，只能先后覆盖，最终由后传的决定；
+  界面必须写明，不能承诺"三条轨并存"。
+- **自动翻译耗时**：本机 8B 约 3.8 token/s，等 cid 后的补传可能要几分钟；
+  必须后台跑 + SSE 通知，不能让用户对着无响应的页面等。
+- **重启不重译的边界**：只有 `succeeded` 且产物文件还在才算成果；源文件 SHA 变化或文件被删时
+  仍要走翻译（与既有 `stale` 判据一致），不能把过期译文当成果。
+- **历史记录**：`subtitle_selection_json` 为空的老投稿维持旧行为（只补原轨），
+  不能因为新功能上线就给历史稿件补三条轨。
+
 ## 2026-11-17 20:25 +08:00 - 中英双语字幕（同屏双行、逐条同步、符合 B 站 BCC）计划
 
 > 状态：**已实现**。用户已确认两个未决项：默认英上中下；保留 `en` + `zh` 单语轨，
