@@ -362,6 +362,32 @@ cookies 体检结果。字段分三层：
 补上了是「已补传字幕」，仍失败是「字幕仍然没传上去：<原因>」（稿件还在审核时补传本来就可能再失败）。
 补传对同一语言轨是**覆盖**，不是新增。
 
+### 字幕翻译（仅本机模型）
+
+| Endpoint | 方法 | 做什么 |
+| --- | --- | --- |
+| `/api/translation/probe` | POST | 用一条最短请求实测本机模型；不可用是 `ok=false` 的正常结论，不是 4xx |
+| `/api/translation/jobs` | POST | 按 `(job_id, item_id)` 找到已下载字幕并开始翻译，202 |
+| `/api/translation/jobs/{id}` | GET | 任务进度与逐条 `cues`（原文、译文、`edited`、`state`、`error`） |
+| `/api/translation/jobs/{id}/cues/{index}` | PATCH | 人工修订一条译文；改过的条目被锁定，重跑不覆盖 |
+| `/api/translation/jobs/{id}/retry` | POST | 只补失败块，已发布/已改的条目不发请求 |
+| `/api/translation/jobs/{id}/cancel` | POST | 在块边界停下，已译条目保留 |
+| `/api/translation/jobs/{id}/export` | POST | 校验对齐后写 `.zh.srt` 与 `.bilingual.srt` |
+| `/api/translation/jobs/{id}/upload-bili` | POST | 把 `zh` 轨挂到已投稿成功的稿件；**不重跑投稿命令** |
+| `/api/translation/jobs/{id}` | DELETE | 删除任务与译文 JSON，**不动原字幕** |
+
+`TranslationRead.state` 是 `queued` / `running` / `succeeded` / `failed` / `cancelled`；
+逐条的 `state` 是 `pending` / `translated` / `failed`。`total` / `translated` / `failed`
+三个进度数字由后端算，前端不自己数。SSE 事件名为
+`subtitle_translation_progress` 与 `subtitle_translation_finished`。
+
+设置里新增 `translation_base_url`（默认 `http://127.0.0.1:8080/v1`）与
+`translation_model`（默认 `local`），均为非敏感项；**没有 API Key 字段**，且外部地址 400 拒绝。
+
+`BiliUploadRead` 的 `translated_subtitle_state` / `_lan` / `_message` 是译轨自己的结论。
+它与原轨的 `subtitle_*` 分开：一条稿件可以同时是 `subtitle_state=posted`（`en`）与
+`translated_subtitle_state=failed`（`zh`），界面必须能同时说清两件事。
+
 ## 错误语义
 
 错误响应对齐 FastAPI 默认结构：`{"detail": ...}`。`detail` 通常是字符串，仅在浏览器 cookies 导入失败时是结构化对象（`code` / `browser` / `message` / `raw_detail`）。

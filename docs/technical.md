@@ -270,7 +270,7 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 投稿走 `biliup-rs 0.2.4`（`biliup.exe`，安装方式 `winget install --id ForgQi.biliup-rs --exact`），命令组装在 [build_upload_argv](../backend/app/bilibili/bili_bin.py#L143)。三个必须知道的事实：
 
 - **登录必须一路做到拿到投稿令牌。** `biliup` 的 `login_by_cookies` 在**发出任何投稿请求之前**会拿 `token_info.access_token` 去 `passport.bilibili.com/x/passport-login/oauth2/info` 校验一次；`access_token` 是空串时 B站 返回 `-400 请求错误`，`biliup` 随即以 `Err` 退出 —— 全程约 1 秒、一个字节都不会上传，而错误码本身读不出「缺令牌」这层意思。所以 [exchange_tv_token](../backend/app/bilibili/bili_auth.py#L142) 会补上 TV 端三步交换（申请二维码 → 用用户自己的 cookies 替他确认 → 轮询换回 `token_info`），「登录」的完成判据是**拿到令牌**而不是「文件里有 SESSDATA」。详见 bug-fix 记录 [011](../ai/bug-fix/011-biliup-refuses-a-token-less-cookie-file.md)。
-- **返回码 0 只说明命令跑完了，不说明平台上多了稿**。所以 [run_single](../backend/app/bilibili/bili_upload.py#L483) 在命令返回后一定进 [_verify](../backend/app/bilibili/bili_upload.py#L300)：用 `GET https://member.bilibili.com/x/web/archives` 回读账号近期稿件，按标题前缀在列表里找（[find_archive](../backend/app/bilibili/bili_api.py#L127)，带退避重试，因为平台侧列表有延迟）。**查不到就停在 `unverified`** —— 这是本功能唯一不肯妥协的一条，宁可让用户去创作中心确认，也不拿「命令没报错」冒充「已发布」。
+- **返回码 0 只说明命令跑完了，不说明平台上多了稿**。所以 [run_single](../backend/app/bilibili/bili_upload.py#L545) 在命令返回后一定进 [_verify](../backend/app/bilibili/bili_upload.py#L309)：用 `GET https://member.bilibili.com/x/web/archives` 回读账号近期稿件，按标题前缀在列表里找（[find_archive](../backend/app/bilibili/bili_api.py#L127)，带退避重试，因为平台侧列表有延迟）。**查不到就停在 `unverified`** —— 这是本功能唯一不肯妥协的一条，宁可让用户去创作中心确认，也不拿「命令没报错」冒充「已发布」。
 - **`--submit` 这个开关照传，但它不起作用。** 上游 0.2.4 的 `match submit` 两个分支都调 `submit_by_app`（web 分支被注释掉了），实际提交永远走 `/x/vu/app/add`。早先文档里「`--submit web` 是必需的」是一条**写错的结论**：真正拦住投稿的是上面那次启动时的令牌校验，不是提交接口。
 
 
@@ -331,8 +331,8 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 ### 归集方式：`season_id` 预置就是全部的「加入已有」（单视频与合集共用）
 
 界面上让用户选**新建合集 / 加入已有合集 / 不归集**，但后端的新逻辑只有一行赋值：
-`submit_collection` / `submit_single` 把用户选中的编号写进 [BiliSeason.season_id](../backend/app/contracts/models.py#L204)，
-而 [_group_work](../backend/app/bilibili/bili_manager.py#L1641) 本来就读它当 `existing_season_id`
+`submit_collection` / `submit_single` 把用户选中的编号写进 [BiliSeason.season_id](../backend/app/contracts/models.py#L209)，
+而 [_group_work](../backend/app/bilibili/bili_manager.py#L1714) 本来就读它当 `existing_season_id`
 并据此跳过 `create_season`。**复用既有的「重试不重复建合集」机制，而不是另开一条归集分支** ——
 另开一条就要把「建集 + 加集 + 失败重试 + 状态收敛」再实现一遍。
 
@@ -354,14 +354,14 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 
 - **`new` 模式下 `season_id` 必须保持为空**。它一旦被预置成任何值（哪怕是对的 `0`），
   `_group_work` 就会跳过建集、对着不存在的编号加视频。所以这个字段不能「顺手填个默认值」。
-- **用户显式选择必须覆盖上一轮遗留的编号**。[_upsert_season](../backend/app/bilibili/bili_manager.py#L989)
+- **用户显式选择必须覆盖上一轮遗留的编号**。[_upsert_season](../backend/app/bilibili/bili_manager.py#L991)
   既有的「`season_id` 不清空」是为了重试不重复建合集；照搬到「用户从加入 A 改成加入 B」上，
   就会静默地继续往 A 里加 —— 用户选了什么完全不起作用。
 - **校验必须看原始输入，不能先归一**。`normalize_group_mode` 把非法值修成 `new` 之后再校验，
   等于把校验废掉了：一个手滑写坏的 `group_mode` 会被静默执行。归一只用于**通过校验之后**
   真正执行的那一步。（这条是被 `test_an_unknown_group_mode_is_400_not_silently_corrected`
   抓出来的，不是推理出来的。）
-- **空合集名拦在投稿之前**。[_require_group_ready](../backend/app/bilibili/bili_manager.py#L1107) 是路由那道
+- **空合集名拦在投稿之前**。[_require_group_ready](../backend/app/bilibili/bili_manager.py#L1109) 是路由那道
   400 之外的第二道闸，因为两个提交方法都是公开的：空标题会被 B站 打回来，而那时
   **视频已经投出去了** —— 那是一次不可回退的半成品状态。
 
@@ -373,7 +373,7 @@ B站 投稿与 YouTube 下载是**两套凭据、两条队列**，互不共用�
 **「不归集」在两条路径上的落库行为相反，这是刻意的**：
 
 - **合集**：落成终态 [skipped](../backend/app/contracts/models.py#L134) 而不是 `pending`。
-  [_maybe_group](../backend/app/bilibili/bili_manager.py#L1546) 只自动归集 `pending`，留 `pending` 会让
+  [_maybe_group](../backend/app/bilibili/bili_manager.py#L1619) 只自动归集 `pending`，留 `pending` 会让
   「不归集」根本不管用，且界面上挂一个永远不会结束的徽标。但记录**照建** —— 不落库的话界面上
   什么都不显示，用户分不清是「没归集」还是「还没开始归」。
 - **单视频**：`_upsert_season(create_if_missing=False)` **一条记录都不建**。单视频的默认恰好
@@ -574,6 +574,29 @@ notepad / VS Code / Sublime 只能是它的子集：用户装了别的我们不�
 `title="打开字幕文件；可选择打开方式"`，点下去就是选择器。它曾经是**组合控件**（主段 + 右侧 20px 箭头）：
 那个箭头正是「看起来什么都没发生」的那一处 —— 把一个动作拆成两颗按钮、其中一颗还看不见效果，
 比「入口藏起来」更糟。一个动作 = 一颗按钮；Shift 点击这类看不见的修饰键同样不行。
+
+## 字幕翻译（本机模型）
+
+模型选 `Qwen3-8B-Q5_K_M`（GGUF，约 5.5 GiB），由本机 `llama-server` 通过 OpenAI 兼容接口提供；
+8GB 显存可全量驻留。当前阶段**只支持 loopback 地址**，不支持外部 API，因此
+运行时不引入任何新依赖：HTTP 走标准库 `urllib.request`。Qwen3 的默认思考模式会输出
+`<think>` 段落，请求里显式带 `chat_template_kwargs={"enable_thinking": false}` 关掉它。
+
+四条判据：
+
+1. **时间轴不属于翻译**。译文只是原文每条的属性，`AlignedCue` 的 `start`/`end`
+   只从源 `Cue` 复制，代码里没有写时间的路径；不拆条、不合条。
+2. **整块拒绝，不做「尽量回填」**。模型回复的序号集合必须与请求完全一致，否则整块重试。
+   本机 8B 实测偶发漏条：若回复的编号是**合法子集**，只补问缺失编号，
+   绝不猜一个序号填进去。
+3. **原子落盘**。逐条译文在 `data/translations/<id>.json`，写临时文件后 `os.replace`；
+   DB 只存索引与进度，避免「一处真相两处写」。人工修订的条目锁定。
+4. **导出前校验**。`validate_alignment` 检查条数、序号、时间逐值相等、译文非空；
+   不过就 409，绝不产出「看起来合法但错位」的字幕。
+
+**B站 双轨**：`lan=en` 的原轨与 `lan=zh` 的译轨是两条独立 CC 字幕（同 `lan` 再传才是覆盖）。
+稿件已投稿时补译轨走「只补字幕」路径，不重跑 `biliup`，`aid`/`bvid` 不变。
+本机模型生成速度实测约 3.8 token/s，因此分块取 8 条 / 1200 字符、单请求超时 300 秒。
 
 ## 文件删除语义
 

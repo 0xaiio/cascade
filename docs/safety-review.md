@@ -284,3 +284,14 @@
 | 完成提醒 | `YTDL_COMPLETION_NOTIFICATION` / `completion_notification`、[notifications.ts](../frontend/src/notifications/notifications.ts) | 纯偏好存储 + 浏览器内呈现：Web Audio 现场合成提示音（无音频文件）、右下角 DOM 浮层。**无新增网络、文件或子进程面**。 | 确认设置值有取值收敛（非法值回 `both`，不是原样透传）；确认前端拿不到也不发送任何凭据类字段。 |
 | 前端请求超时看门狗 | [api.ts](../frontend/src/shared/api.ts#L51) 的 `REQUEST_TIMEOUT_MS`（60 s）、`ANALYZE_TIMEOUT_MS`（180 s） | 纯客户端行为：`AbortController` 取消挂起的 `fetch`，**不新增任何网络目的地、不新增请求头、不发送凭据**。取消的是**本机**对既有 URL 的请求，不影响服务端已在进行的处理。 | ① 确认超时只是**放弃等待**，不会在服务端留下半完成的状态（读接口无副作用；写接口超时的情形需与 [FR-52](requirements.md#功能需求) 一致地提示「结果未知」而不是「失败」）；② 确认错误消息里回显的 URL **不含凭据类查询参数** —— 当前超时消息回显完整 URL（含 query），而全部调用点的 query 只有 `job_id` / `item_id` / `qrcode_key` / `probe_account` 这类标识与布尔标志，**凭据一律走请求体或请求头**；③ 确认 `AbortError` 与用户主动取消已分得开（用 `signal.aborted` 判断而不是看异常类型）。 |
 | 「打开方式」候选来源修复 | [system_open.py](../backend/app/host/system_open.py) 的 `OpenWithList` / `MRUList` / `App Paths` 读取 | 只**读**注册表与 `PATH`，不写注册表、不改系统关联。此前两个来源因过滤条件写反而恒为空，现已修复；第三个来源的显示名不再把 GUID 印给用户。用例以**假 `winreg`**（替换 `sys.modules`）运行，不读也不改本机真实注册表。 | ① 确认只枚举**真实存在**的 exe（`is_file()` 过滤），不执行任何被枚举的程序；② 确认 `%VAR%` 与 `*` 的展开不会把命令注入到执行路径（执行时的 argv 是 list 形式，见第 20 节首行）；③ 确认候选去重按路径与名字各做一次，不因同名不同路径而误删。 |
+
+## 字幕翻译的安全边界
+
+| 项 | 约束 |
+| --- | --- |
+| 网络 | 只允许 loopback 地址（`127.0.0.1` / `localhost` / `::1`）。设置接口对外部 URL 直接 400；provider 构造时也复核一次。字幕文本不会发到第三方 |
+| 凭据 | 契约、设置接口与界面**都没有 API Key 字段**；本机服务如果设了 key，需在服务侧自行配置 |
+| 命令执行 | 应用**不启动** `llama-server`，只读用户已启动的服务；模型下载与启动是人工步骤 |
+| 路径 | 译文 JSON 写在 `data/translations/<uuid>.json`，导出写 `<源字幕名>.zh.srt` / `.bilingual.srt`；源字幕只读，删除翻译任务不删源文件 |
+| 原子写 | 临时文件 + `os.replace`；进程中断只可能留下旧版或新版，不会留下半截 JSON |
+| 契约 | `mode`/路径由服务端推导；`translation_base_url` 与 `model` 三处同步，`check_api_contract.py` 拦漂移 |
