@@ -64,6 +64,8 @@
 | [ytdlp_service.py](../backend/app/download/ytdlp_service.py#L261) | L3 领域 | yt-dlp 边界：元数据、预检测、参数构建、profile 重试链、错误分类、依赖诊断，以及**站点范围判定**（`ensure_youtube_url` 的主机名白名单 + `is_youtube_extractor` 对 `extractor_key` 的复核，见 [A-01](../ai/feature/A-01-youtube-only.md)）。 | 不碰数据库，不决定任务状态。 |
 | [subtitle_plan.py](../backend/app/download/subtitle_plan.py#L200) | L3 领域 | 字幕下载**计划**：主语言判定（`-orig` 原声轨）、同族轨偏好、人工→ASR→跳过的收敛、来源标签与摘要文案。**纯逻辑**：不联网、不读库、不 import yt-dlp。 | 不写库、不发请求；不知道 `JobItem` 的存在（结论由 `job_manager` 取走）。 |
 | [bili_subtitle.py](../backend/app/bilibili/bili_subtitle.py#L277) | L3 领域 | B站 CC 字幕：SRT/VTT → BCC 转换、语言标识映射、一次字幕上传（`posted` / `skipped` / `failed`）。 | **不参与稿件状态判定**、不写库、不重试；不知道端点长什么样（端点在 `bili_api`）。 |
+| [align.py](../backend/app/translation/align.py) | L3 领域 | 字幕翻译的分块、序号回填、**逐条对齐校验**与中文断行；解析复用 `bili_subtitle.parse_subtitle_text`（翻译态不合并重复条）。 | 不写时间轴（时间只从源 cue 复制）、不发请求、不读库、不拼文件路径。 |
+| [provider.py](../backend/app/translation/provider.py) | L3 领域 | 翻译服务的最小契约（`TranslationProvider` / `TranslationItem` / `TranslationReply`）与原始回复的类型化转换。 | 不做 HTTP、不知道本地模型服务地址；具体后端在步骤 2 的 `translation/local` 里。 |
 | [ytdlp_formats.py](../backend/app/download/ytdlp_formats.py#L9) | L3 领域 | 格式选择器、分辨率/大小/codec 提取、降级候选计算。 | 不导入 yt-dlp。 |
 | [disk_budget.py](../backend/app/download/disk_budget.py#L1) | L3 领域 | **磁盘预算判定**：按目标清晰度估单条 / 整批大小、量目标分区可用空间（向上找存在的祖先）、给出 `ok` / `insufficient` / `unknown` 三档结论与带数字的下一步。读不到只提示、绝不阻断；磁盘量取只在这一处。 | 不写库、不改任务状态、不删文件；不猜码率（flat playlist 没给 `filesize` 就如实返回 `unknown`），阻断与否由调用方按 `blocks` 决定。 |
 | [stall_guard.py](../backend/app/download/stall_guard.py#L32) | L3 领域 | 纯函数式停滞判定与 `DownloadStalled`。 | 不写库、不发布事件。 |
