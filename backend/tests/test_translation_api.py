@@ -55,7 +55,10 @@ def setup_job(tmp_path: Path, provider: ScriptedProvider, model_server_ensurer=N
     )
     seed_job(tmp_path, "job-1", "任务", 1)
     saved = client.get("/api/jobs").json()[0]["items"][0]
-    subtitle = Path(saved["output_path"]).with_suffix(".en.srt")
+    # read model 给的 output_path 是相对的（`1.en.mp4`），以它派生字幕路径会让
+    # export 把 `1.en.zh.srt` / `.bcc.json` 写进 cwd，跑一次测试就污染工作区。
+    # 夹具一律用 tmp 下的绝对路径；DB 下面的 subtitle_path 更新仍然照旧。
+    subtitle = tmp_path / "captions" / "source.en.srt"
     subtitle.parent.mkdir(parents=True, exist_ok=True)
     subtitle.write_text(SRT, encoding="utf-8")
     client.post(

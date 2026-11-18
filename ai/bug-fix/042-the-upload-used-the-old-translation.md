@@ -99,6 +99,13 @@ B站 稿件，不适合放进测试套件。替代方案是**真 HTTP + 真 DB +
 全量：后端 **1547 passed**（原 1541 + 6）、前端 **466 passed / 41 文件**（原 464 + 2）、
 `tsc` 0、覆盖率 91% → **92%**（`render.py` 93% → 97%）、六道闸门全绿。
 
+## 顺带修掉的测试污染
+
+`test_translation_api.setup_job` 原来用 read model 的相对 `output_path` 派生字幕路径，
+于是 `export` 会把 `1.en.zh.srt` / `.bilingual.bcc.json` 等五个文件写进 `backend/` ——
+跑一次测试就在工作区留下未跟踪文件。夹具改为 `tmp_path` 下的绝对路径；
+新增用例也自带 `_relocate_subtitle_into_tmp`。修完 `git status` 干净。
+
 ## 遗留
 
 - 双语导出仍写三份文件（上传 SRT / 核对 SRT / BCC），没有去重；重复导出的开销可忽略。
