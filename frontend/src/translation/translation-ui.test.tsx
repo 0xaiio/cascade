@@ -96,6 +96,26 @@ describe("字幕翻译抽屉", () => {
     expect(screen.getByLabelText("第 1 条译文")).toHaveValue("你好世界");
   });
 
+  test("任务还没建好时给醒目的等待状态，而不是一句容易被忽略的小字", async () => {
+    // 首次点开要新建任务并等待本机模型服务，十几秒内界面上只有一句普通提示的话，
+    // 用户会以为按钮没生效而反复点。同文件里已有 translation-booting 状态条应当复用。
+    vi.mocked(startTranslation).mockImplementation(() => new Promise(() => {}));
+    render(
+      <SubtitleTranslateDialog
+        jobId="job-running"
+        itemId={null}
+        title="视频"
+        refreshToken={0}
+        onClose={() => {}}
+      />
+    );
+
+    const status = await screen.findByRole("status");
+    expect(status).toHaveTextContent("正在启动本机模型服务");
+    expect(status).toHaveTextContent("无需任何操作");
+    expect(document.querySelector(".translation-booting")).not.toBeNull();
+  });
+
   test("传 existingId 时打开历史任务，不新建、不发翻译请求", async () => {
     vi.mocked(getTranslation).mockResolvedValue({ ...JOB, id: "tr-existing", state: "succeeded" });
     render(
@@ -264,6 +284,49 @@ describe("字幕翻译抽屉", () => {
     expect(upload).toBeEnabled();
     expect(exportTranslation).not.toHaveBeenCalled();
     await user.click(upload);
+    expect(exportTranslation).toHaveBeenCalledWith("tr-1");
+    expect(uploadBiliTranslation).toHaveBeenCalledWith("tr-1");
+  });
+
+  test("改了译文再上传，必须先按新译文重新导出", async () => {
+    // `edit()` 只改逐条 JSON；磁盘上的 SRT 还是编辑前的。前端若因为「已经导出过」
+    // 就跳过重导，点上传会把旧译文挂到 B站，界面却说「已上传」。
+    const edited = {
+      ...JOB,
+      cues: JOB.cues.map((cue, index) =>
+        index === 0 ? { ...cue, translation: "我自己改的", edited: true } : cue
+      )
+    };
+    vi.mocked(startTranslation).mockResolvedValue(JOB);
+    vi.mocked(editTranslationCue).mockResolvedValue(edited);
+    vi.mocked(exportTranslation).mockResolvedValue({
+      srt_path: "a.zh.srt", bilingual_path: "a.bilingual.srt", cue_count: 2, bcc_path: null
+    });
+    vi.mocked(uploadBiliTranslation).mockResolvedValue({
+      ...(await import("../test/appFixtures")).biliUploadPayload,
+      translated_subtitle_state: "posted",
+      translated_subtitle_message: "CC 字幕已上传"
+    });
+    const user = userEvent.setup();
+    render(
+      <SubtitleTranslateDialog
+        jobId="job-running"
+        itemId={null}
+        title="视频"
+        refreshToken={0}
+        onClose={() => {}}
+      />
+    );
+    await screen.findByText("字幕翻译");
+
+    const textarea = screen.getByLabelText("第 1 条译文");
+    await user.clear(textarea);
+    await user.type(textarea, "我自己改的");
+    await user.tab();
+    expect(editTranslationCue).toHaveBeenCalledWith("tr-1", 0, "我自己改的");
+
+    expect(exportTranslation).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "上传中文字幕到 B站" }));
     expect(exportTranslation).toHaveBeenCalledWith("tr-1");
     expect(uploadBiliTranslation).toHaveBeenCalledWith("tr-1");
   });

@@ -586,7 +586,7 @@ notepad / VS Code / Sublime 只能是它的子集：用户装了别的我们不�
 与本机已有 GGUF 启动（先 Vulkan0，进程退出则回退 CPU），轮询到 `/health` 返回 200 才发请求。
 服务已健康时直接复用，不重复起。失败时**不发任何翻译请求**，把所有条目标成同一个可操作结论
 （缺模型 / 缺可执行文件 / 日志路径），不会把 `WinError 10061` 原文丢给用户。
-进程 detached，不随应用退出；日志 `data/logs/model-server.log`。详见
+进程 detached，不随应用退出；回退前先 `terminate()` + `wait()` 再抢同一端口，两条路都失败时也会停掉回退进程，避免残留占用端口（见 [042](../ai/bug-fix/042-the-upload-used-the-old-translation.md)）。日志 `data/logs/model-server.log`。详见
 [model_server.py](../backend/app/translation/model_server.py)、缺陷 [041](../ai/bug-fix/041-the-model-server-was-never-started.md)。
 
 四条判据：
@@ -617,7 +617,7 @@ B站 播放器一次只显示一条 CC 轨，所以「`en` + `zh` 两条轨」�
 
 BCC 结构只有一处：`bili_subtitle.to_bcc_entries`；`to_bcc` 与普通字幕复用它，
 双语只改变 `content` 的文本。`render.bilingual_content` 默认英上中下，
-两边各自把内部换行规整成空格，确保播放器只显示两行。
+两边各自把内部换行规整成空格，确保播放器只显示两行；上传 SRT、人工核对 SRT 与 BCC **共用这一个函数**，三份产物不会出现「一份两行、一份四行」的分歧。
 导出前仍跑 `validate_alignment`（条数、序号、时间逐值、译文非空）与「恰好两段非空文本」校验。
 
 切模式不重译：改的是 `SubtitleTranslation.display_mode`，译文与时间轴不变。

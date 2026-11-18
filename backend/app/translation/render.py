@@ -78,13 +78,16 @@ def render_bilingual_bcc(cues: Sequence[AlignedCue], *, source_first: bool = Tru
 
 
 def render_bilingual_srt(cues: Sequence[AlignedCue]) -> str:
-    """原上译下，给用户核对用。**不上传 B站**（BCC 只放译文）。"""
+    """原上译下，给用户核对用。**不上传 B站**（BCC 只放译文）。
+
+    与上传 SRT / BCC 共用 `bilingual_content`：源 VTT 可能有内部换行，译文也被
+    `wrap_chinese` 断过行，直接拼会得到一条 cue 四行以上。同一个「双语」在三份产物里
+    必须长得一样，否则「核对用」那份会把人带偏。
+    """
     blocks: list[str] = []
     for index, cue in enumerate(cues, start=1):
-        blocks.append(
-            f"{index}\n{_timestamp(cue.start)} --> {_timestamp(cue.end)}\n"
-            f"{cue.source}\n{cue.translation}\n"
-        )
+        content = bilingual_content(cue.source, cue.translation)
+        blocks.append(f"{index}\n{_timestamp(cue.start)} --> {_timestamp(cue.end)}\n{content}\n")
     return "\n".join(blocks)
 
 
@@ -127,8 +130,8 @@ def export_bilingual_files(
     if errors:
         raise TranslationError("；".join(errors[:5]))
     if any(not cue.translation.strip() for cue in aligned):
-        for cue in aligned:
-            bilingual_content(cue.source, cue.translation, source_first=source_first)
+        # 这里原先还遍历所有 cue 调了一次 `bilingual_content`，返回值没人用，
+        # 却会先抛出另一句「需要原文和译文都不为空」—— 那不是本层的判据。
         raise TranslationError("还有条目没有译文，不能导出")
 
     path = Path(source_path)

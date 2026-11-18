@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import subprocess
@@ -27,6 +28,8 @@ import urllib.request
 from pathlib import Path
 
 from ..contracts.config import AppSettings
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_START_TIMEOUT_SECONDS = 150.0
 
@@ -119,6 +122,17 @@ def _wait_until_healthy(
     return False
 
 
+def _stop(proc: subprocess.Popen) -> None:
+    """停掉一个没就绪的服务进程，并等它真正退出；进程不听话也不能卡住回退。"""
+    if proc.poll() is not None:
+        return
+    proc.terminate()
+    try:
+        proc.wait(timeout=5)
+    except Exception:  # noqa: BLE001 - 超时/权限问题都不该挡住 CPU 回退
+        logger.debug("模型服务进程没能按时退出 pid=%s", proc.pid, exc_info=True)
+
+
 def ensure_model_server(settings: AppSettings, *, timeout: float = DEFAULT_START_TIMEOUT_SECONDS) -> str | None:
     """服务没起就拉起来。返回 `None` 表示本来就在跑，否则返回一句就绪说明。
 
@@ -138,10 +152,13 @@ def ensure_model_server(settings: AppSettings, *, timeout: float = DEFAULT_START
     proc = _launch(binary, model, port, log_path, cpu_only=False)
     if not _wait_until_healthy(base_url, proc, timeout):
         # Vulkan 不可用是本机常见情况；退回 CPU 再试一次，不让用户去猜显卡参数。
-        if proc.poll() is None:
-            proc.terminate()
+        # **terminate 之后必须 wait**：进程退出要时间，不等就抢同一个端口启动回退，
+        # 回退进程会撞上「地址已被占用」而失败，用户却被告知「已试过 CPU 回退」。
+        _stop(proc)
         fallback = _launch(binary, model, port, log_path, cpu_only=True)
         if not _wait_until_healthy(base_url, fallback, timeout):
+            # 两个后端都没起来时也不能留一个占着端口的僵尸 —— 下次点翻译会重复撞它。
+            _stop(fallback)
             raise ModelServerError(
                 f"本机模型服务没能就绪（端口 {port}）。请看 {log_path} 末尾的报错；"
                 "若显卡后端不可用，应用已自动试过 CPU 回退。"

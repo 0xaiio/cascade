@@ -46,8 +46,8 @@ export function SubtitleTranslateDialog({
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState("");
   const [uploadNote, setUploadNote] = useState("");
-  // 切模式后既有导出文件是旧排版，必须重新导出才能上传。
-  const [modeDirty, setModeDirty] = useState(false);
+  // 切模式或人工改译文后，磁盘上的导出文件就是旧内容，上传前必须重导。
+  const [exportStale, setExportStale] = useState(false);
   const jobIdRef = useRef("");
 
   useEffect(() => {
@@ -108,7 +108,12 @@ export function SubtitleTranslateDialog({
 
   async function saveCue(cue: TranslationCue, text: string) {
     if (!job || text === cue.translation) return;
-    await run("保存译文", () => editTranslationCue(job.id, cue.index, text));
+    await run("保存译文", async () => {
+      const result = await editTranslationCue(job.id, cue.index, text);
+      // 改的是逐条 JSON，磁盘上的 SRT 没跟着变 —— 不标脏就会把旧译文传上去。
+      setExportStale(true);
+      return result;
+    });
   }
 
   return (
@@ -131,7 +136,15 @@ export function SubtitleTranslateDialog({
         </header>
 
         <div className="modal-body translation-body">
-          {!job && !error && <p className="translation-hint">正在准备字幕…</p>}
+          {!job && !error && (
+            <div className="translation-booting" role="status" aria-live="polite">
+              <Loader2 size={18} className="translation-spinner" aria-hidden="true" />
+              <div>
+                <strong>正在启动本机模型服务…</strong>
+                <span>首次约需十几秒，随后自动开始翻译，无需任何操作</span>
+              </div>
+            </div>
+          )}
           {error && <p className="translation-error" role="alert">{error}</p>}
           {job && (
             <>
@@ -149,7 +162,7 @@ export function SubtitleTranslateDialog({
                   disabled={Boolean(busy)}
                   onClick={() =>
                     void run("切换呈现", async () => {
-                      setModeDirty(true);
+                      setExportStale(true);
                       setUploadNote("");
                       return setTranslationMode(job.id, "zh");
                     })
@@ -163,7 +176,7 @@ export function SubtitleTranslateDialog({
                   disabled={Boolean(busy)}
                   onClick={() =>
                     void run("切换呈现", async () => {
-                      setModeDirty(true);
+                      setExportStale(true);
                       setUploadNote("");
                       return setTranslationMode(job.id, "bilingual");
                     })
@@ -171,7 +184,7 @@ export function SubtitleTranslateDialog({
                 >
                   中英双语（同屏）
                 </button>
-                {modeDirty && <span className="translation-mode-hint">排版已变更，请重新导出后再上传</span>}
+                {exportStale && <span className="translation-mode-hint">内容已变更，上传前会自动重新导出</span>}
               </div>
               <div className="translation-progress" aria-label="翻译进度">
                 <div className="translation-progress-bar">
@@ -257,7 +270,7 @@ export function SubtitleTranslateDialog({
             onClick={() =>
               void run("导出", async () => {
                 await exportTranslation(job!.id);
-                setModeDirty(false);
+                setExportStale(false);
               })
             }
           >
@@ -266,15 +279,15 @@ export function SubtitleTranslateDialog({
           <button
             type="button"
             className="primary-button"
-            title={modeDirty ? "排版已变更，上传前会自动重新导出" : "把中文字幕作为 CC 轨传到 B站"}
+            title={exportStale ? "内容已变更，上传前会自动重新导出" : "把中文字幕作为 CC 轨传到 B站"}
             disabled={!job || active || busy !== ""}
             onClick={() =>
               void run("上传中文字幕", async () => {
                 // 「导出」是本地留存的 optional 动作，不该成为上传的前置门槛。
-                // 但模式切换后磁盘上还是旧排版，必须在上传前重导一次。
-                if (modeDirty || !job!.output_path) {
+                // 但模式切换 / 人工改译文之后磁盘上还是旧内容，必须在上传前重导一次。
+                if (exportStale || !job!.output_path) {
                   await exportTranslation(job!.id);
-                  setModeDirty(false);
+                  setExportStale(false);
                 }
                 const result = await uploadBiliTranslation(job!.id);
                 setUploadNote(

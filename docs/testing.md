@@ -12,7 +12,7 @@
 python -m compileall backend\app
 ```
 
-后端测试（当前基线：**1541 passed**，63 个 `test_*.py`）：
+后端测试（当前基线：**1547 passed**，64 个 `test_*.py`）：
 
 ```powershell
 python -m pytest backend\tests -q
@@ -22,12 +22,12 @@ python -m pytest backend\tests -q
 > 沙箱的批量删除守卫是**累积计数**的（一轮命令内累计到阈值就整条拒掉），于是 1529 个用例放在一个进程里跑会在中途被拦下。
 > 现象很好认：**大量 `at setup of ...` 的 error，而 `FAILED` 一个都没有** —— 那是环境问题，不是代码问题。
 >
-> 按下面的分块跑，六块相加应恰好等于 1541（各块 140～375 项；若某块仍被拦下，继续拆小即可）：
+> 按下面的分块跑，六块相加应恰好等于 1547（各块 140～381 项；若某块仍被拦下，继续拆小即可）：
 >
 > ```powershell
 > python -m pytest backend\tests\test_bili_policy.py backend\tests\test_bili_meta.py backend\tests\test_bili_auth.py backend\tests\test_bili_bin.py -q -p no:cacheprovider --basetemp=tmp_pytest\a   # 221
 > python -m pytest backend\tests\test_bili_read_model.py backend\tests\test_bili_subtitle.py backend\tests\test_bili_api.py -q -p no:cacheprovider --basetemp=tmp_pytest\b                                            # 201
-> python -m pytest backend\tests\test_bili_upload.py backend\tests\test_bili_manager.py backend\tests\test_bili_auto_retry.py backend\tests\test_bili_auto_retry_integration.py backend\tests\test_api_bilibili.py backend\tests\test_translation_align.py backend\tests\test_translation_local.py backend\tests\test_translation_api.py backend\tests\test_translation_bilingual.py -q -p no:cacheprovider --basetemp=tmp_pytest\c                                                # 375
+> python -m pytest backend\tests\test_bili_upload.py backend\tests\test_bili_manager.py backend\tests\test_bili_auto_retry.py backend\tests\test_bili_auto_retry_integration.py backend\tests\test_api_bilibili.py backend\tests\test_translation_align.py backend\tests\test_translation_local.py backend\tests\test_translation_api.py backend\tests\test_subtitle_regressions.py backend\tests\test_translation_bilingual.py -q -p no:cacheprovider --basetemp=tmp_pytest\c                                                # 381
 > python -m pytest backend\tests\test_ytdlp_service.py backend\tests\test_subtitle_plan.py backend\tests\test_subtitle_recording.py backend\tests\test_api.py backend\tests\test_cookie_import_removed.py backend\tests\test_diagnostics_settings_audit.py backend\tests\test_job_delete_cleans_uploads.py backend\tests\test_analyze_local.py backend\tests\test_analyze_scope.py backend\tests\test_disk_budget.py backend\tests\test_disk_budget_lifecycle.py -q -p no:cacheprovider --basetemp=tmp_pytest\d                # 306
 > python -m pytest backend\tests\test_resolution_decisions.py backend\tests\test_output_paths.py backend\tests\test_safe_delete.py backend\tests\test_system_open.py backend\tests\test_open_with_registry.py backend\tests\test_dev_server.py backend\tests\test_instance_lock.py backend\tests\test_config_paths.py backend\tests\test_proxy.py backend\tests\test_cookie_health.py backend\tests\test_stall_guard.py backend\tests\test_ytdlp_formats.py backend\tests\test_resolution_input.py backend\tests\test_job_routes.py backend\tests\test_clone_job.py backend\tests\test_paused_since.py backend\tests\test_restart_semantics.py -q -p no:cacheprovider --basetemp=tmp_pytest\e   # 298
 > python -m pytest backend\tests\test_error_advice.py backend\tests\test_connectivity.py backend\tests\test_download_progress.py backend\tests\test_runtime_env.py backend\tests\test_job_manager_finally.py backend\tests\test_finally_guards.py backend\tests\test_check_layers.py backend\tests\test_orphan_recovery.py backend\tests\test_completion_notification.py backend\tests\test_db.py backend\tests\test_model_server.py backend\tests\test_logging_setup.py backend\tests\test_paths.py backend\tests\test_transfer_stats.py backend\tests\test_progress_persist.py backend\tests\test_log_safety.py backend\tests\test_events.py backend\tests\test_job_artifacts.py backend\tests\test_bili_http.py -q -p no:cacheprovider --basetemp=tmp_pytest\f   # 140
@@ -39,7 +39,7 @@ python -m pytest backend\tests -q
 >
 > `--basetemp` 指向的目录**必须不存在**，否则 pytest 会先 `rmtree` 它、同样会触发守卫（`tmp_pytest\` 已在 `.gitignore` 里）。
 
-前端测试和构建（当前基线：**452 passed**，40 个文件；`tsc --noEmit` 与 `vite build` 通过）。
+前端测试和构建（当前基线：**466 passed**，41 个文件；`tsc --noEmit` 与 `vite build` 通过）。
 `npm test` **默认串行**（`--no-file-parallelism`），原因见下面的「核数」一段：
 
 ```powershell
@@ -133,7 +133,7 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 
 > **数字必须自己数一遍**，不要只信 `-q` 的汇总行。逐文件规模用
 > `pytest backend/tests/<文件> -q -p no:cacheprovider --co` 取，各文件之和应**恰等于**全集
-> （2026-11-04 实测：51 个文件逐项相加 = 1325 = 全集）。历史上有过把「收集不全的那一次」当成
+> （2026-11-18 实测：64 个文件逐项相加 = 1547 = 全集）。历史上有过把「收集不全的那一次」当成
 > 基线的教训（见过 267 / 286 / 289 三个数，真实基线一直是当时的 913）。
 
 > **夹具里被 worker 认领的状态会让「同步断言写库结果」变成竞态**（2026-10-21 修掉一条）：
@@ -430,3 +430,17 @@ cookies 体检与 `LOGGED_IN` 探针、端到端元数据提取（带与不带 c
 
 真机：`tmp_acceptance/ui_upload_closure.py`（Edge + CDP，8 项全过）量到「已有译文 → 打开中文字幕」、
 「无译文 → 译为中文」、两颗按钮仍是图标样式、**翻译成功后上传按钮 enabled**；截图 `upload_closure.png`。
+
+## 增量测试：三条字幕链的接缝（2026-11-18，bug-fix/042）
+
+| 范围 | 用例数 | 判据 |
+| --- | --- | --- |
+| 编辑后上传（后端 +1 / 前端 +1） | +2 | 改译文后 `upload-bili` 挂的是改后的文件；前端上传前先 `export`。两条在修复前都红 |
+| 双语三份产物一致（后端 +1） | +1 | 人工核对 SRT 与上传 SRT / BCC 一样是「一条 cue、两行」 |
+| 空译文错误（后端 +1） | +1 | 错误信息指向没译完的那一条；修复前就绿（死代码清理，不是行为修复） |
+| 模型服务回退（后端 +1） | +1 | Vulkan 失败先 terminate + wait 再抢端口；CPU 回退失败也清进程 |
+| 首次等待状态（前端 +1） | +1 | `job === null` 时用 `translation-booting`（`role=status`、转圈、无需操作），不是普通 hint |
+| 端到端（后端 +1） | +1 | 真 HTTP → 翻译 → 编辑 → 切双语 → 重导 → 假 B站 端点；平台表单收到「两行，第二行是改后译文」 |
+
+A/B：还原四个实现文件到 HEAD，新增 8 条中 **6 条变红**；另 2 条本来绿（进度事件的 `job_id/item_id`、
+空译文错误信息），保留作回归守护。真机 8B 模型跑满一轮与真实 B站 账号改动未做，替代验证是上表最后一条。

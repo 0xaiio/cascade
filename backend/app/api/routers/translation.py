@@ -138,9 +138,15 @@ def upload_translated_subtitle(translation_id: str, ctx: ContextDep) -> BiliUplo
     **绝不重投视频**：服务端只走「只补字幕」那条路，稿件状态与 `aid` / `bvid` 不变。
     """
     job = ctx.translations.get(translation_id)
-    if job.state != "succeeded" or not job.output_path:
-        raise HTTPException(status_code=409, detail="这条字幕还没翻译导出完成，不能上传")
-    path = Path(job.output_path)
+    if job.state != "succeeded":
+        raise HTTPException(status_code=409, detail="这条字幕还没翻译完成，不能上传")
+
+    # **上传的一定是此刻的译文**。人工修订只改逐条 JSON，磁盘上的导出文件可能还是
+    # 编辑（或切换呈现方式）之前的旧排版；旧实现直接拿 `job.output_path` 去挂轨，
+    # 用户看到「已上传」，B站 上却是旧译文 —— 没有任何异常。三个小文件的重写成本
+    # 可以忽略，所以每次都在服务端按当前 cues 重导一次，而不是信任那个路径。
+    exported = ctx.translations.export(translation_id)
+    path = Path(exported.srt_path)
     if not path.is_file():
         raise HTTPException(status_code=409, detail="译文字幕文件已不在磁盘上")
 

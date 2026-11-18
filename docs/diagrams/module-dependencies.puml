@@ -27,6 +27,7 @@ package "L2 orchestration" {
   [infra/events.py\nEventBroker] as Broker
   [bilibili/bili_manager.py\nbilibili queue, single worker] as BiliManager
   [bilibili/bili_auto_retry.py\nwait-for-review scheduler] as AutoRetry
+  [translation/service.py\ntranslation orchestration] as TransService
   [bilibili/bili_read_model.py\nbilibili badges and read models] as BiliReadModel
 }
 
@@ -54,6 +55,12 @@ package "L3 domain and policy" {
   [bilibili/bili_auth.py\nqr login, cookie file] as BiliAuth
   [bilibili/bili_meta.py\nmetadata and limits] as BiliMeta
   [bilibili/bili_policy.py\nbilibili messages, badges] as BiliPolicy
+  [translation/align.py\nsubtitle alignment] as Align
+  [translation/provider.py\ntranslation contract] as TransProvider
+  [translation/local.py\nlocal model backend] as LocalModel
+  [translation/model_server.py\nllama-server bootstrap] as ModelServer
+  [translation/store.py\natomic cue json] as TransStore
+  [translation/render.py\nsrt / bcc rendering] as TransRender
   [bilibili/bili_subtitle.py\nCC subtitle upload] as BiliSubtitle
 }
 
@@ -81,6 +88,9 @@ Main --> DB
 Main --> Logging
 Main --> RuntimeEnv
 Main --> BiliManager
+Main --> TransProvider
+Main --> LocalModel
+Main --> TransService
 Main --> Broker
 Main --> Opener
 Entry --> DevServer
@@ -102,6 +112,8 @@ Routers --> BiliManager
 Routers --> BiliMeta
 Routers --> BiliReadModel
 Routers --> BiliUpload
+Routers --> TransProvider
+Routers --> LocalModel
 Routers --> Models
 Routers --> Outputs
 Routers --> Logging
@@ -110,6 +122,7 @@ ApiCtx --> Service
 ApiCtx --> DB
 ApiCtx --> Config
 ApiCtx --> BiliManager
+ApiCtx --> TransService
 ApiSupport --> ReadModel
 ApiSupport --> Models
 ApiSupport --> Schemas
@@ -117,7 +130,9 @@ ApiSupport --> Service
 ApiSupport --> Proxy
 ApiSupport --> Paths
 ApiSupport --> Config
+ApiSupport --> LocalModel
 ApiSupport --> Advice
+ApiSupport --> Outputs
 ApiSupport --> DiskBudget
 ApiSupport --> Manager
 Artifacts --> Models
@@ -154,6 +169,26 @@ BiliManager --> AutoRetry
 AutoRetry --> BiliPolicy
 AutoRetry --> Models
 AutoRetry --> Time
+TransService --> Align
+TransService --> TransProvider
+TransService --> ModelServer
+TransService --> TransRender
+TransService --> TransStore
+TransService --> BiliSubtitle
+TransService --> Models
+TransService --> Config
+TransService --> Schemas
+TransService --> Outputs
+TransService --> Broker
+Align --> BiliSubtitle
+Align --> TransProvider
+LocalModel --> TransProvider
+LocalModel --> Config
+ModelServer --> Config
+TransRender --> BiliSubtitle
+TransRender --> Align
+TransRender --> TransProvider
+TransStore --> Align
 BiliManager --> Outputs
 BiliManager --> BiliUpload
 BiliManager --> BiliApi
